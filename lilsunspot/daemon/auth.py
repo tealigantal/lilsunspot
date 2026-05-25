@@ -24,6 +24,7 @@ def _write_token_file(path: Path, token: str) -> None:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "type": "lilsunspot-runtime-token",
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(path)
@@ -68,5 +69,5 @@ async def require_token(
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="需要有效的 X-Lilsunspot-Token 才能访问此接口。",
+        detail="A valid X-Lilsunspot-Token is required for this API.",
     )

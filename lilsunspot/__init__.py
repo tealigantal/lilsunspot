@@ -1,3 +1,3 @@
-"""Day1 lilsunspot integration package."""
+"""lilsunspot integration package."""
 
-__version__ = "0.1.0-day1"
+__version__ = "0.1.0-day2"

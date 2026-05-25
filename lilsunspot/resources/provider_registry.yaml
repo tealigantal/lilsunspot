@@ -8,7 +8,7 @@ providers:
     env_key: DEEPSEEK_API_KEY
     hermes_provider: deepseek
     base_url: https://api.deepseek.com/v1
-    notes: DeepSeek API key path. Day1 only saves local config; it does not test the provider.
+    notes: DeepSeek API key path. Day2 can validate format, test connectivity, and save local Hermes-compatible config.
   - id: openrouter
     display_name: OpenRouter
     type: cloud
@@ -28,7 +28,7 @@ providers:
     env_key: OPENAI_API_KEY
     hermes_provider: custom
     base_url: https://api.openai.com/v1
-    notes: Stored as Hermes custom OpenAI-compatible provider for Day1.
+    notes: Stored as Hermes custom OpenAI-compatible provider.
   - id: kimi
     display_name: Kimi / Moonshot
     type: cloud

@@ -19,23 +19,28 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
 .appShell {
-  width: min(920px, calc(100vw - 32px));
+  width: min(960px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 40px 0;
 }
 
 .header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
   border-bottom: 1px solid #d9dee4;
   padding-bottom: 20px;
 }
 
 .header h1 {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   font-size: 32px;
   line-height: 1.2;
   font-weight: 700;
@@ -43,30 +48,47 @@ input {
 }
 
 .header p {
-  margin: 6px 0;
+  margin: 0;
   color: #4e5b66;
   line-height: 1.5;
 }
 
-.controls {
-  padding: 24px 0;
+.daemonUrl {
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
-.tokenField {
+.controls,
+.providerPanel {
+  padding: 24px 0;
+  border-bottom: 1px solid #e5e8eb;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 14px;
+}
+
+.field {
   display: grid;
   gap: 8px;
-  max-width: 560px;
   font-size: 14px;
   font-weight: 600;
 }
 
-.tokenField input {
+.field input,
+.field select {
   width: 100%;
   border: 1px solid #cbd3dc;
   border-radius: 6px;
   padding: 10px 12px;
   background: #ffffff;
   color: #172026;
+}
+
+.apiKey {
+  grid-column: 1 / -1;
 }
 
 .hint {
@@ -86,7 +108,7 @@ input {
   min-height: 38px;
   border: 1px solid #1f6feb;
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   background: #1f6feb;
   color: #ffffff;
   cursor: pointer;
@@ -102,6 +124,7 @@ input {
   border-radius: 8px;
   background: #ffffff;
   padding: 16px;
+  margin-top: 24px;
 }
 
 .result h2 {
@@ -130,14 +153,26 @@ input {
   border-color: #2da44e;
 }
 
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .appShell {
-    width: min(100vw - 24px, 920px);
+    width: min(100vw - 24px, 960px);
     padding: 24px 0;
+  }
+
+  .header {
+    display: grid;
+  }
+
+  .daemonUrl {
+    text-align: left;
   }
 
   .header h1 {
     font-size: 26px;
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
   }
 
   .buttonRow button {

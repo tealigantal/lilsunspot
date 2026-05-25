@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .logging_utils import mask_secret
 
 
 class HermesRuntimeError(RuntimeError):
@@ -15,7 +16,7 @@ class HermesRuntimeError(RuntimeError):
 
 def _reject_multiline_secret(value: str) -> None:
     if "\n" in value or "\r" in value:
-        raise HermesRuntimeError("API Key 不能包含换行符。")
+        raise HermesRuntimeError("API key must be a single line.")
 
 
 def _read_env_lines(env_path: Path) -> list[str]:
@@ -24,10 +25,14 @@ def _read_env_lines(env_path: Path) -> list[str]:
     return env_path.read_text(encoding="utf-8").splitlines()
 
 
-def _write_env_value(env_path: Path, key: str, value: str) -> None:
+def _validate_env_key(key: str) -> None:
+    if not key.replace("_", "").isalnum() or key.upper() != key:
+        raise HermesRuntimeError(f"Provider env_key is invalid: {key}")
+
+
+def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     _reject_multiline_secret(value)
-    if not key.replace("_", "").isalnum() or not key.upper() == key:
-        raise HermesRuntimeError(f"Provider env_key 不合法: {key}")
+    _validate_env_key(key)
 
     lines = _read_env_lines(env_path)
     prefix = f"{key}="
@@ -47,6 +52,17 @@ def _write_env_value(env_path: Path, key: str, value: str) -> None:
     tmp = env_path.with_suffix(env_path.suffix + ".tmp")
     tmp.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
     tmp.replace(env_path)
+    return True
+
+
+def _read_env_value(env_path: Path, key: str) -> str | None:
+    _validate_env_key(key)
+    prefix = f"{key}="
+    for line in _read_env_lines(env_path):
+        if line.startswith(prefix):
+            value = line[len(prefix) :].strip()
+            return value or None
+    return None
 
 
 def _read_config(config_path: Path) -> dict[str, Any]:
@@ -56,7 +72,7 @@ def _read_config(config_path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _write_config(config_path: Path, config: dict[str, Any]) -> None:
+def _write_config(config_path: Path, config: dict[str, Any]) -> bool:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = config_path.with_suffix(config_path.suffix + ".tmp")
     tmp.write_text(
@@ -64,6 +80,7 @@ def _write_config(config_path: Path, config: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp.replace(config_path)
+    return True
 
 
 def save_provider_credentials(
@@ -71,7 +88,7 @@ def save_provider_credentials(
     model: str,
     api_key: str,
     paths: RuntimePaths | None = None,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     paths = paths or ensure_runtime_dirs()
     provider_id = str(provider_config.get("id") or "").strip()
     hermes_provider = str(provider_config.get("hermes_provider") or provider_id).strip()
@@ -81,20 +98,20 @@ def save_provider_credentials(
     api_key = api_key.strip()
 
     if not provider_id:
-        raise HermesRuntimeError("Provider 缺少 id。")
+        raise HermesRuntimeError("Provider id is missing.")
     if not hermes_provider:
-        raise HermesRuntimeError("Provider 缺少 Hermes provider 映射。")
+        raise HermesRuntimeError("Hermes provider mapping is missing.")
     if not model:
-        raise HermesRuntimeError("模型名称不能为空。")
+        raise HermesRuntimeError("Model name cannot be empty.")
     if not api_key:
-        raise HermesRuntimeError("API Key 不能为空。")
+        raise HermesRuntimeError("API key cannot be empty.")
     if not env_key:
-        raise HermesRuntimeError("Provider 缺少 env_key，Day1 暂不能保存。")
+        raise HermesRuntimeError("Provider env_key is missing.")
 
     env_path = paths.hermes_home / ".env"
     config_path = paths.hermes_home / "config.yaml"
 
-    _write_env_value(env_path, env_key, api_key)
+    env_written = _write_env_value(env_path, env_key, api_key)
 
     config = _read_config(config_path)
     current_model = config.get("model")
@@ -119,11 +136,57 @@ def save_provider_credentials(
         "model": model,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    _write_config(config_path, config)
+    config_written = _write_config(config_path, config)
 
     return {
         "env_path": str(env_path),
         "config_path": str(config_path),
         "provider": provider_id,
         "model": model,
+        "env_written": env_written,
+        "config_written": config_written,
+        "masked_key": mask_secret(api_key),
     }
+
+
+def read_current_provider(
+    providers: list[dict[str, Any]],
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    paths = paths or ensure_runtime_dirs()
+    config_path = paths.hermes_home / "config.yaml"
+    env_path = paths.hermes_home / ".env"
+    config = _read_config(config_path)
+
+    lilsunspot_config = config.get("lilsunspot")
+    current_provider = None
+    current_model = None
+    if isinstance(lilsunspot_config, dict):
+        current_provider = lilsunspot_config.get("provider")
+        current_model = lilsunspot_config.get("model")
+
+    model_config = config.get("model")
+    if not current_model and isinstance(model_config, dict):
+        current_model = model_config.get("default")
+
+    provider_config = None
+    if current_provider:
+        for provider in providers:
+            if str(provider.get("id") or "") == str(current_provider):
+                provider_config = provider
+                break
+
+    key_value = None
+    if provider_config is not None:
+        env_key = str(provider_config.get("env_key") or "").strip()
+        if env_key:
+            key_value = _read_env_value(env_path, env_key)
+
+    result: dict[str, Any] = {
+        "provider": str(current_provider) if current_provider else None,
+        "model": str(current_model) if current_model else None,
+        "key_configured": bool(key_value),
+    }
+    if key_value:
+        result["masked_key"] = mask_secret(key_value)
+    return result

@@ -1,21 +1,21 @@
-# lilsunspot Day1 开发说明
+# lilsunspot Day2 开发说明
 
 产品名：`lilsunspot`
 中文昵称：`小黑子`
+daemon：`lilsunspotd`
 
-## 当前 Day1 能力
+## Day2 当前能力
 
-- 新增 `lilsunspotd` FastAPI 本地 daemon。
-- 默认本地地址为 `http://127.0.0.1:8765`。
-- 初始化用户数据目录：`%LOCALAPPDATA%/Lilsunspot/data`。
-- 初始化 Hermes 兼容目录：`%LOCALAPPDATA%/Lilsunspot/data/hermes_home`。
-- 初始化日志目录：`%LOCALAPPDATA%/Lilsunspot/data/logs`。
-- 首次启动或首次访问时创建 `runtime-token.json`。
-- `/health` 无需 token，受保护接口需要 `X-Lilsunspot-Token`。
-- `/providers` 从 `resources/provider_registry.yaml` 返回 provider 列表。
-- `/providers/save` 可把 provider/model/API key 写入 lilsunspot 的 `hermes_home`，不读取或写入 `~/.hermes/.env`。
-- `/doctor/run` 返回本地目录、resources、provider registry、token 和 daemon 可达性检查结果。
-- 新增 Tauri 2 + React + TypeScript 桌面空壳。
+- `lilsunspotd` 默认只监听 `127.0.0.1:8765`。
+- `/health` 无需 token，其他业务 API 均要求 `X-Lilsunspot-Token`。
+- token 自动生成到 `%LOCALAPPDATA%/Lilsunspot/data/runtime-token.json`。
+- 用户数据目录为 `%LOCALAPPDATA%/Lilsunspot/data`。
+- Hermes 兼容目录为 `%LOCALAPPDATA%/Lilsunspot/data/hermes_home`。
+- Provider registry 来自 `lilsunspot/resources/provider_registry.yaml`。
+- 支持 provider 列表、详情、key URL、格式初检、mockable 联网测试、保存和 current 状态读取。
+- `/providers/save` 只写入 lilsunspot 的 `hermes_home/.env` 与 `hermes_home/config.yaml`，不读取、不迁移、不污染用户 `~/.hermes/.env`。
+- 日志和 API 响应会脱敏 API key。
+- desktop 是 Day2 开发骨架：Health、Providers、Runtime Info、Doctor、Provider 保存表单。
 
 ## 启动 daemon
 
@@ -25,42 +25,79 @@
 python -m lilsunspot.daemon.app
 ```
 
-或：
+也可以直接用 uvicorn：
 
 ```powershell
 uvicorn lilsunspot.daemon.app:app --host 127.0.0.1 --port 8765
 ```
 
-## 调用 /health
-
-```powershell
-curl http://127.0.0.1:8765/health
-```
-
-期望返回：
-
-```json
-{"ok":true}
-```
-
-## 读取 token
-
-Windows 默认位置：
+## 获取 runtime token
 
 ```powershell
 Get-Content "$env:LOCALAPPDATA\Lilsunspot\data\runtime-token.json"
 ```
 
-不要把 token 写入日志、prompt、测试输出或提交记录。
+只复制 JSON 里的 `token` 值。不要把真实 API Key 或完整 token 写入日志、prompt、截图、测试输出或提交记录。
 
 ## 调用 /providers
-
-PowerShell 示例：
 
 ```powershell
 $token = (Get-Content "$env:LOCALAPPDATA\Lilsunspot\data\runtime-token.json" | ConvertFrom-Json).token
 Invoke-RestMethod "http://127.0.0.1:8765/providers" -Headers @{"X-Lilsunspot-Token"=$token}
 ```
+
+无 token 或错误 token 会返回 403。
+
+## 调用 /providers/test
+
+该接口会用 `httpx` 做最小 provider 连接测试，不保存 key。自动化测试里必须 mock 网络请求。
+
+```powershell
+$body = @{
+  provider = "deepseek"
+  model = "deepseek-chat"
+  api_key = "<your-api-key>"
+} | ConvertTo-Json
+Invoke-RestMethod "http://127.0.0.1:8765/providers/test" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Headers @{"X-Lilsunspot-Token"=$token} `
+  -Body $body
+```
+
+## 调用 /providers/save
+
+```powershell
+$body = @{
+  provider = "deepseek"
+  model = "deepseek-chat"
+  api_key = "<your-api-key>"
+} | ConvertTo-Json
+Invoke-RestMethod "http://127.0.0.1:8765/providers/save" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Headers @{"X-Lilsunspot-Token"=$token} `
+  -Body $body
+```
+
+成功后只返回 provider、model、`env_written` 和 `config_written`，不会返回完整 key。
+
+## 查看 hermes_home/.env
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\Lilsunspot\data\hermes_home\.env"
+Get-Content "$env:LOCALAPPDATA\Lilsunspot\data\hermes_home\config.yaml"
+```
+
+这些文件可能包含真实 API Key。只在本机查看，不要提交。
+
+## 运行 pytest
+
+```powershell
+python -m pytest lilsunspot/tests
+```
+
+测试通过 `LILSUNSPOT_DATA_DIR` 使用临时目录，不依赖真实 API Key，也不会读取 `~/.hermes/.env`。
 
 ## 启动 desktop
 
@@ -70,49 +107,14 @@ npm install
 npm run dev
 ```
 
-另开一个终端启动 daemon，然后在页面点击 `Health 检查`。受保护接口 Day1 需要手动从 `runtime-token.json` 粘贴 token。
-
-## 运行验收
-
-从仓库根目录运行基础验收：
+另开一个终端启动 daemon，然后在页面粘贴 runtime token。构建检查：
 
 ```powershell
-python -c "import yaml, pathlib; [print(p, 'OK') for p in ['lilsunspot/resources/provider_registry.yaml','lilsunspot/resources/default_mode_profiles.yaml','lilsunspot/resources/default_safety_policy.yaml'] if yaml.safe_load(pathlib.Path(p).read_text(encoding='utf-8')) is not None]"
-python -c "from lilsunspot.daemon.app import app; print('daemon app import OK', app)"
-```
-
-验证 `/health`、token 保护和 doctor：
-
-```powershell
-python -c "import importlib,json,os,tempfile; from pathlib import Path; from fastapi.testclient import TestClient; td=tempfile.mkdtemp(prefix='lilsunspot-smoke-'); os.environ['LILSUNSPOT_DATA_DIR']=str(Path(td)/'data'); import lilsunspot.daemon.config_paths as config_paths; import lilsunspot.daemon.auth as auth; import lilsunspot.daemon.app as app_module; importlib.reload(config_paths); importlib.reload(auth); app_module=importlib.reload(app_module); client=TestClient(app_module.app); print('/health', client.get('/health').status_code, client.get('/health').json()); print('/providers no token', client.get('/providers').status_code); token=json.loads(config_paths.get_runtime_paths().token_file.read_text(encoding='utf-8'))['token']; print('/providers token', client.get('/providers', headers={auth.TOKEN_HEADER: token}).status_code); print('/doctor token', client.get('/doctor/run', headers={auth.TOKEN_HEADER: token}).status_code)"
-```
-
-测试优先使用仓库包装脚本：
-
-```powershell
-bash scripts/run_tests.sh lilsunspot/tests -q
-```
-
-如果当前 Windows/本地环境缺少 pytest 插件，或包装脚本因 shell 环境不可用而无法运行，可用本地 fallback：
-
-```powershell
-python -m pytest -o addopts='' --basetemp "$env:TEMP\lilsunspot-pytest-basetemp" lilsunspot/tests -q
-```
-
-桌面端构建：
-
-```powershell
-cd lilsunspot/desktop
-npm install
 npm run build
 ```
 
-## 还没做
+## 不要提交 API Key
 
-- 未做首启向导。
-- 未做聊天页。
-- 未做 provider 真实联网测试。
-- 未做微信扫码登录和私聊接入 UI。
-- 未做安装包。
-- 未做自动读取 runtime token。
-- 未做完整安全审批 UI。
+- 不要把真实 API Key 写入仓库、issue、PR、日志、prompt 或诊断包。
+- provider 联网测试只作为手动可选项。
+- 自动化测试必须使用 fake 值和 mock 网络。

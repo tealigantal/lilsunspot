@@ -1,0 +1,13 @@
+high_risk:
+  requires_approval: true
+  operations:
+    - shell
+    - delete_file
+    - send_weixin_message
+    - read_sensitive_directory
+    - write_sensitive_file
+    - network_post
+    - credential_access
+defaults:
+  unknown_operation_requires_approval: true
+  explain_user_visible_errors: true

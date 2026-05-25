@@ -1,0 +1,61 @@
+providers:
+  - id: deepseek
+    display_name: DeepSeek
+    type: cloud
+    key_url: https://platform.deepseek.com/api_keys
+    detect_url: https://api.deepseek.com/v1
+    default_model: deepseek-chat
+    env_key: DEEPSEEK_API_KEY
+    hermes_provider: deepseek
+    base_url: https://api.deepseek.com/v1
+    notes: DeepSeek API key path. Day1 only saves local config; it does not test the provider.
+  - id: openrouter
+    display_name: OpenRouter
+    type: cloud
+    key_url: https://openrouter.ai/keys
+    detect_url: https://openrouter.ai/api/v1
+    default_model: openai/gpt-4o-mini
+    env_key: OPENROUTER_API_KEY
+    hermes_provider: openrouter
+    base_url: https://openrouter.ai/api/v1
+    notes: Aggregator route used by Hermes when provider is openrouter.
+  - id: openai
+    display_name: OpenAI
+    type: cloud
+    key_url: https://platform.openai.com/api-keys
+    detect_url: https://api.openai.com/v1
+    default_model: gpt-4o-mini
+    env_key: OPENAI_API_KEY
+    hermes_provider: custom
+    base_url: https://api.openai.com/v1
+    notes: Stored as Hermes custom OpenAI-compatible provider for Day1.
+  - id: kimi
+    display_name: Kimi / Moonshot
+    type: cloud
+    key_url: https://platform.moonshot.cn/console/api-keys
+    detect_url: https://api.moonshot.ai/v1
+    default_model: kimi-k2.5
+    env_key: KIMI_API_KEY
+    hermes_provider: kimi-coding
+    base_url: https://api.moonshot.ai/v1
+    notes: Maps to Hermes kimi-coding provider.
+  - id: qwen
+    display_name: Qwen / DashScope
+    type: cloud
+    key_url: https://bailian.console.aliyun.com/?apiKey=1
+    detect_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    default_model: qwen-plus
+    env_key: DASHSCOPE_API_KEY
+    hermes_provider: alibaba
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    notes: Maps to Hermes alibaba provider for DashScope-compatible Qwen access.
+  - id: ollama
+    display_name: Ollama Local
+    type: local
+    key_url: https://ollama.com/download
+    detect_url: http://127.0.0.1:11434/v1
+    default_model: llama3.2
+    env_key: OLLAMA_API_KEY
+    hermes_provider: custom
+    base_url: http://127.0.0.1:11434/v1
+    notes: Local OpenAI-compatible route. Many local Ollama installs do not require a real API key.

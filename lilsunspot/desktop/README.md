@@ -1,6 +1,6 @@
-# Lilsunspot Desktop
+# lilsunspot小黑子 Desktop
 
-Day1 desktop shell for `lilsunspot` / `小黑子`.
+Day1 desktop shell for `lilsunspot小黑子`.
 
 ## Start
 

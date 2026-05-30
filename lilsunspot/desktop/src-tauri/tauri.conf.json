@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lilsunspot",
+  "productName": "lilsunspot小黑子",
   "version": "0.1.0",
   "identifier": "com.lilsunspot.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lilsunspot 小黑子",
+        "title": "lilsunspot小黑子",
         "width": 900,
         "height": 650,
         "resizable": true

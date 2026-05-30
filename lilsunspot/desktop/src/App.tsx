@@ -112,7 +112,7 @@ export default function App() {
     <main className="appShell">
       <section className="header">
         <div>
-          <h1>Lilsunspot 小黑子</h1>
+          <h1>lilsunspot小黑子</h1>
           <p>Day2：Provider 配置骨架</p>
         </div>
         <p className="daemonUrl">daemon：{DAEMON_URL}</p>

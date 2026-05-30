@@ -1,7 +1,6 @@
 # lilsunspot Day2 开发说明
 
-产品名：`lilsunspot`
-中文昵称：`小黑子`
+项目名称：`lilsunspot小黑子`
 daemon：`lilsunspotd`
 
 ## Day2 当前能力

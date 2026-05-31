@@ -24,7 +24,7 @@ http://127.0.0.1:8765
 启动：
 
 ```powershell
-python -m lilsunspot.daemon.app
+python -m lilsunspot.daemon.launcher
 ```
 
 `/health` 不需要 token。其他本地 API 都需要：
@@ -38,6 +38,14 @@ token 文件写入：
 ```powershell
 %LOCALAPPDATA%\Lilsunspot\data\runtime-token.json
 ```
+
+daemon 发现文件写入：
+
+```powershell
+%LOCALAPPDATA%\Lilsunspot\data\daemon-runtime.json
+```
+
+`daemon-runtime.json` 只包含 `127.0.0.1` base URL、端口、进程号和 token 文件路径，不包含 token 明文。
 
 开发和测试可用临时目录覆盖：
 
@@ -73,7 +81,7 @@ npm install
 npm run dev
 ```
 
-桌面端现在只有占位页面：首页、Provider、Chat、Mode、Weixin、Safety、Doctor。Tauri command `read_runtime_token` 只读取本地 runtime token，不打印 token。
+桌面端现在只有占位页面：首页、Provider、Chat、Mode、Weixin、Safety、Doctor。Tauri command `discover_daemon` 会读取本地 daemon 发现文件和 runtime token；`read_runtime_token` 保留给开发模式兼容。两个命令都不打印 token。
 
 ## 验收
 

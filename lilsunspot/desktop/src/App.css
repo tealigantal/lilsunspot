@@ -70,7 +70,8 @@ button:disabled {
 
 .header p,
 .panel p,
-.status {
+.status,
+.connectionStatus {
   margin: 8px 0 0;
   color: #4e5b66;
   line-height: 1.5;
@@ -79,6 +80,10 @@ button:disabled {
 .tokenBar {
   margin: 16px 0;
   align-items: end;
+}
+
+.connectionStatus {
+  flex: 1 1 260px;
 }
 
 label {

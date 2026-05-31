@@ -1,3 +1,11 @@
+export type DaemonDiscovery = {
+  base_url: string;
+  token: string;
+  data_dir: string;
+  token_file: string;
+  runtime_file: string;
+};
+
 export type Provider = {
   id: string;
   display_name: string;
@@ -41,6 +49,10 @@ export type RuntimeInfo = {
   platform: string;
   daemon_version: string;
   bind_host: string;
+  bind_port: number;
+  base_url: string;
+  pid: number;
+  runtime_file: string;
   configured: boolean;
   provider: string;
   model: string;

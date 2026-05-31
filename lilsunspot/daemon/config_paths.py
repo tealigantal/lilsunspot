@@ -11,6 +11,7 @@ DATA_DIR_NAME = "data"
 HERMES_HOME_DIR_NAME = "hermes_home"
 LOGS_DIR_NAME = "logs"
 TOKEN_FILE_NAME = "runtime-token.json"
+RUNTIME_FILE_NAME = "daemon-runtime.json"
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class RuntimePaths:
     hermes_home: Path
     logs_dir: Path
     token_file: Path
+    runtime_file: Path
 
 
 def get_data_dir() -> Path:
@@ -47,6 +49,7 @@ def get_runtime_paths() -> RuntimePaths:
         hermes_home=data_dir / HERMES_HOME_DIR_NAME,
         logs_dir=data_dir / LOGS_DIR_NAME,
         token_file=data_dir / TOKEN_FILE_NAME,
+        runtime_file=data_dir / RUNTIME_FILE_NAME,
     )
 
 

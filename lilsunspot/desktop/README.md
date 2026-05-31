@@ -14,10 +14,10 @@ npm run dev
 In another terminal, start the daemon from the repository root:
 
 ```powershell
-python -m lilsunspot.daemon.app
+python -m lilsunspot.daemon.launcher
 ```
 
-The app expects `lilsunspotd` at `http://127.0.0.1:8765`.
+The app auto-discovers `lilsunspotd` from the local `daemon-runtime.json` file and falls back to `http://127.0.0.1:8765`.
 
 ## Pages
 
@@ -35,7 +35,7 @@ These pages are placeholders. Provider checks and chat do not call real model se
 
 `/health` is public. All other daemon APIs require `X-Lilsunspot-Token`.
 
-Tauri command `read_runtime_token` tries to read `runtime-token.json` from the lilsunspot data directory. Browser dev mode can still use manual token entry.
+Tauri command `discover_daemon` reads `daemon-runtime.json` and `runtime-token.json` from the lilsunspot data directory. Browser dev mode can still use manual token entry.
 
 ## Build
 

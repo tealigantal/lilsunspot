@@ -1,6 +1,7 @@
 import type {
   ChatSendResult,
   CurrentMode,
+  DaemonDiscovery,
   DoctorResult,
   ModeProfile,
   Provider,
@@ -14,10 +15,11 @@ import type {
   WeixinStatus
 } from "./types";
 
-const DAEMON_URL = "http://127.0.0.1:8765";
+const DEFAULT_DAEMON_URL = "http://127.0.0.1:8765";
 const TOKEN_HEADER = "X-Lilsunspot-Token";
 
 let runtimeToken = "";
+let daemonUrl = DEFAULT_DAEMON_URL;
 
 type ApiErrorBody = {
   detail?: string;
@@ -29,8 +31,26 @@ export function setRuntimeToken(token: string) {
   runtimeToken = token.trim();
 }
 
+export function setDaemonConnection(discovery: Pick<DaemonDiscovery, "base_url" | "token">) {
+  daemonUrl = discovery.base_url.replace(/\/+$/, "");
+  setRuntimeToken(discovery.token);
+}
+
 export function getDaemonUrl() {
-  return DAEMON_URL;
+  return daemonUrl;
+}
+
+export async function discoverDaemon(): Promise<DaemonDiscovery | null> {
+  try {
+    const tauriCore = await import("@tauri-apps/api/core");
+    const discovery = await tauriCore.invoke<DaemonDiscovery>("discover_daemon");
+    if (!discovery.base_url.startsWith("http://127.0.0.1:")) {
+      throw new Error("daemon 地址必须是 127.0.0.1。");
+    }
+    return discovery;
+  } catch {
+    return null;
+  }
 }
 
 export async function readRuntimeToken(): Promise<string | null> {
@@ -78,7 +98,7 @@ function errorMessageFromBody(body: unknown): string {
 
 async function requestJson<T>(path: string, options: RequestInit = {}, protectedApi = true): Promise<T> {
   if (protectedApi && !runtimeToken) {
-    throw new Error("请先填写 runtime token。");
+    throw new Error("请先连接 lilsunspotd 或填写 runtime token。");
   }
 
   const headers: HeadersInit = {
@@ -88,7 +108,7 @@ async function requestJson<T>(path: string, options: RequestInit = {}, protected
   };
 
   try {
-    const response = await fetch(`${DAEMON_URL}${path}`, { ...options, headers });
+    const response = await fetch(`${daemonUrl}${path}`, { ...options, headers });
     const body = await parseBody(response);
     if (!response.ok) {
       throw new Error(errorMessageFromBody(body));

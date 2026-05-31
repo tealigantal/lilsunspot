@@ -8,6 +8,8 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     runtime = client.get("/runtime/info", headers=headers)
     assert runtime.status_code == 200
     assert runtime.json()["bind_host"] == "127.0.0.1"
+    assert runtime.json()["bind_port"] == 8765
+    assert runtime.json()["base_url"] == "http://127.0.0.1:8765"
 
     modes = client.get("/modes", headers=headers)
     assert modes.status_code == 200

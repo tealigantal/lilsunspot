@@ -115,8 +115,33 @@ class RepairRequest(BaseModel):
 
 
 @app.get("/health")
-async def health() -> dict[str, bool]:
-    return {"ok": True}
+async def health() -> dict[str, Any]:
+    runtime_model = current_runtime_model(ensure_runtime_dirs())
+    return {
+        "ok": True,
+        "status": "ready",
+        "message_cn": "小黑子本地服务正常",
+        "setup_required": not runtime_model["configured"],
+        "version": __version__,
+    }
+
+
+@app.get("/app/state", dependencies=[Depends(require_token)])
+async def app_state() -> dict[str, str]:
+    runtime_model = current_runtime_model(ensure_runtime_dirs())
+    if runtime_model["configured"]:
+        return {
+            "boot": "chat_ready",
+            "title": "小黑子已准备好",
+            "message": "模型服务已配置，可以开始聊天。",
+            "next_action": "open_chat",
+        }
+    return {
+        "boot": "provider_missing",
+        "title": "还差一步：选择模型服务",
+        "message": "小黑子已经启动，但还没有配置可用的模型。",
+        "next_action": "open_provider_wizard",
+    }
 
 
 @app.get("/runtime/info", dependencies=[Depends(require_token)])
@@ -168,8 +193,15 @@ async def providers_test(payload: ProviderTestRequest) -> dict[str, Any]:
             "provider": payload.provider,
             "model": payload.model or "",
             "error_code": "unknown",
+            "title": "没有找到这个模型服务",
             "message": "没有找到这个模型服务商。",
-            "suggestion": "请重新选择服务商。",
+            "actions": ["重新选择模型服务", "查看技术详情"],
+            "suggestion": "重新选择模型服务",
+            "safe_details": {
+                "provider": payload.provider,
+                "masked_key": "",
+                "http_status": 404,
+            },
         }
     return await test_provider_connection(provider, payload.model, payload.api_key)
 

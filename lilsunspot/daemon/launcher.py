@@ -24,7 +24,7 @@ def wait_for_health(base_url: str, timeout_seconds: float = 10.0) -> bool:
         try:
             with urlopen(health_url(base_url), timeout=0.5) as response:
                 body = json.loads(response.read().decode("utf-8"))
-                if response.status == 200 and body == {"ok": True}:
+                if response.status == 200 and isinstance(body, dict) and body.get("ok") is True:
                     return True
         except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
             time.sleep(0.2)

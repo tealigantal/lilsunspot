@@ -17,7 +17,10 @@ def test_day1_daemon_health_token_protection_and_doctor(tmp_path, monkeypatch):
 
     client = TestClient(app_module.app)
 
-    assert client.get("/health").json() == {"ok": True}
+    health = client.get("/health").json()
+    assert health["ok"] is True
+    assert health["status"] == "ready"
+    assert health["setup_required"] is True
     assert client.get("/providers").status_code == 403
 
     token_file = config_paths.get_runtime_paths().token_file
@@ -29,6 +32,13 @@ def test_day1_daemon_health_token_protection_and_doctor(tmp_path, monkeypatch):
     )
     assert providers_response.status_code == 200
     assert len(providers_response.json()["providers"]) >= 6
+
+    state_response = client.get(
+        "/app/state",
+        headers={auth.TOKEN_HEADER: token},
+    )
+    assert state_response.status_code == 200
+    assert state_response.json()["boot"] == "provider_missing"
 
     doctor_response = client.get(
         "/doctor/run",

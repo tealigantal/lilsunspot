@@ -1,8 +1,12 @@
 import type {
+  AppState,
   ChatSendResult,
   CurrentMode,
+  DaemonConnectStatus,
   DaemonDiscovery,
+  DaemonHttpResponse,
   DoctorResult,
+  HealthStatus,
   ModeProfile,
   Provider,
   ProviderTestResult,
@@ -25,39 +29,59 @@ type ApiErrorBody = {
   detail?: string;
   message?: string;
   suggestion?: string;
+  title?: string;
 };
+
+function isTauriRuntime() {
+  return (
+    typeof window !== "undefined" &&
+    "__TAURI_INTERNALS__" in (window as Window & { __TAURI_INTERNALS__?: unknown })
+  );
+}
+
+async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const tauriCore = await import("@tauri-apps/api/core");
+  return tauriCore.invoke<T>(command, args);
+}
+
+export function isDesktopRuntime() {
+  return isTauriRuntime();
+}
 
 export function setRuntimeToken(token: string) {
   runtimeToken = token.trim();
 }
 
-export function setDaemonConnection(discovery: Pick<DaemonDiscovery, "base_url" | "token">) {
+export function setDaemonConnection(discovery: Pick<DaemonDiscovery, "base_url">) {
   daemonUrl = discovery.base_url.replace(/\/+$/, "");
-  setRuntimeToken(discovery.token);
 }
 
 export function getDaemonUrl() {
   return daemonUrl;
 }
 
-export async function discoverDaemon(): Promise<DaemonDiscovery | null> {
-  try {
-    const tauriCore = await import("@tauri-apps/api/core");
-    const discovery = await tauriCore.invoke<DaemonDiscovery>("discover_daemon");
-    if (!discovery.base_url.startsWith("http://127.0.0.1:")) {
-      throw new Error("daemon 地址必须是 127.0.0.1。");
-    }
-    return discovery;
-  } catch {
+export async function connectDaemon(): Promise<DaemonConnectStatus | null> {
+  if (!isTauriRuntime()) {
     return null;
   }
+  const status = await invokeTauri<DaemonConnectStatus>("connect_daemon");
+  if (status.base_url) {
+    daemonUrl = status.base_url.replace(/\/+$/, "");
+  }
+  return status;
 }
 
-export async function readRuntimeToken(): Promise<string | null> {
+export async function discoverDaemon(): Promise<DaemonDiscovery | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
   try {
-    const tauriCore = await import("@tauri-apps/api/core");
-    const token = await tauriCore.invoke<string>("read_runtime_token");
-    return token.trim() || null;
+    const discovery = await invokeTauri<DaemonDiscovery>("discover_daemon");
+    if (!discovery.base_url.startsWith("http://127.0.0.1:")) {
+      throw new Error("本地服务地址必须是 127.0.0.1。");
+    }
+    setDaemonConnection(discovery);
+    return discovery;
   } catch {
     return null;
   }
@@ -66,15 +90,14 @@ export async function readRuntimeToken(): Promise<string | null> {
 function humanizeError(error: unknown): string {
   if (error instanceof Error) {
     if (error.message === "Failed to fetch") {
-      return "无法连接 lilsunspotd，请先启动 daemon。";
+      return "小黑子本地服务没有响应。请点击“重新检查”。";
     }
     return error.message;
   }
   return "请求失败，请稍后再试。";
 }
 
-async function parseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
+function parseBodyText(text: string): unknown {
   if (!text) {
     return null;
   }
@@ -85,20 +108,47 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
+async function parseBody(response: Response): Promise<unknown> {
+  return parseBodyText(await response.text());
+}
+
 function errorMessageFromBody(body: unknown): string {
   if (typeof body === "string" && body.trim()) {
     return body;
   }
   if (body && typeof body === "object") {
     const value = body as ApiErrorBody;
-    return value.detail || value.message || value.suggestion || "请求失败。";
+    return value.title || value.detail || value.message || value.suggestion || "请求失败。";
   }
   return "请求失败。";
 }
 
+async function requestViaTauri<T>(path: string, options: RequestInit): Promise<T> {
+  const method = (options.method || "GET").toUpperCase();
+  const rawBody = typeof options.body === "string" ? options.body : undefined;
+  const response = await invokeTauri<DaemonHttpResponse>("daemon_request", {
+    path,
+    method,
+    body: rawBody ?? null
+  });
+  const body = parseBodyText(response.body);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(errorMessageFromBody(body));
+  }
+  return body as T;
+}
+
 async function requestJson<T>(path: string, options: RequestInit = {}, protectedApi = true): Promise<T> {
+  if (protectedApi && isTauriRuntime()) {
+    try {
+      return await requestViaTauri<T>(path, options);
+    } catch (error) {
+      throw new Error(humanizeError(error));
+    }
+  }
+
   if (protectedApi && !runtimeToken) {
-    throw new Error("请先连接 lilsunspotd 或填写 runtime token。");
+    throw new Error("开发者模式：请填写调试 Token。正式版会自动连接。");
   }
 
   const headers: HeadersInit = {
@@ -119,8 +169,12 @@ async function requestJson<T>(path: string, options: RequestInit = {}, protected
   }
 }
 
-export async function getHealth(): Promise<{ ok: boolean }> {
-  return requestJson<{ ok: boolean }>("/health", {}, false);
+export async function getHealth(): Promise<HealthStatus> {
+  return requestJson<HealthStatus>("/health", {}, false);
+}
+
+export async function getAppState(): Promise<AppState> {
+  return requestJson<AppState>("/app/state");
 }
 
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
@@ -135,7 +189,7 @@ export async function getProviders(): Promise<Provider[]> {
 export async function openProviderKeyUrl(provider: string): Promise<string> {
   const body = await requestJson<{ key_url: string }>("/providers/open-key-url", {
     method: "POST",
-    body: JSON.stringify({ provider, open_browser: false })
+    body: JSON.stringify({ provider, open_browser: true })
   });
   return body.key_url;
 }

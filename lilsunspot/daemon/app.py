@@ -10,11 +10,17 @@ from pydantic import BaseModel, Field
 
 from lilsunspot import __version__
 
-from .auth import load_or_create_token, require_token, token_file_exists
+from .auth import load_or_create_token, require_token
+from .chat_client import current_runtime_model, send_chat_message
 from .config_paths import ensure_runtime_dirs
+from .doctor import repair_placeholder, run_doctor_checks
+from .gateway import weixin_commands, weixin_status
 from .hermes_runtime import HermesRuntimeError, save_provider_credentials
 from .logging_utils import configure_logging
-from .providers import load_provider_registry, provider_by_id, required_resource_files
+from .modes import get_current_mode, load_mode_profiles, select_mode
+from .provider_client import test_provider_connection
+from .providers import load_provider_registry, provider_by_id
+from .safety import describe_approval_placeholder, list_pending_approvals, load_safety_policy
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -24,7 +30,13 @@ paths = ensure_runtime_dirs()
 logger = configure_logging(paths.logs_dir)
 load_or_create_token()
 
-app = FastAPI(title="lilsunspotd", version=__version__)
+app = FastAPI(
+    title="lilsunspotd",
+    version=__version__,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -46,7 +58,30 @@ class OpenKeyUrlRequest(BaseModel):
 class SaveProviderRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
-    api_key: str = Field(..., min_length=1)
+    api_key: str = ""
+
+
+class ProviderTestRequest(BaseModel):
+    provider: str = Field(..., min_length=1)
+    model: str | None = None
+    api_key: str = ""
+
+
+class ChatSendRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    conversation_id: str | None = None
+
+
+class SelectModeRequest(BaseModel):
+    mode: str = Field(..., min_length=1)
+
+
+class ApprovalPlaceholderRequest(BaseModel):
+    operation: str = Field(..., min_length=1)
+
+
+class RepairRequest(BaseModel):
+    check_name: str | None = None
 
 
 @app.get("/health")
@@ -55,14 +90,19 @@ async def health() -> dict[str, bool]:
 
 
 @app.get("/runtime/info", dependencies=[Depends(require_token)])
-async def runtime_info() -> dict[str, str]:
+async def runtime_info() -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
+    runtime_model = current_runtime_model(runtime_paths)
     return {
         "data_dir": str(runtime_paths.data_dir),
         "hermes_home": str(runtime_paths.hermes_home),
         "logs_dir": str(runtime_paths.logs_dir),
         "platform": platform.platform(),
         "daemon_version": __version__,
+        "bind_host": DEFAULT_HOST,
+        "configured": runtime_model["configured"],
+        "provider": runtime_model["provider"],
+        "model": runtime_model["model"],
     }
 
 
@@ -85,6 +125,21 @@ async def open_key_url(payload: OpenKeyUrlRequest) -> dict[str, str | bool]:
     return {"provider": str(provider["id"]), "key_url": key_url, "opened": opened}
 
 
+@app.post("/providers/test", dependencies=[Depends(require_token)])
+async def providers_test(payload: ProviderTestRequest) -> dict[str, Any]:
+    provider = provider_by_id(payload.provider)
+    if provider is None:
+        return {
+            "ok": False,
+            "provider": payload.provider,
+            "model": payload.model or "",
+            "error_code": "unknown",
+            "message": "没有找到这个模型服务商。",
+            "suggestion": "请重新选择服务商。",
+        }
+    return await test_provider_connection(provider, payload.model, payload.api_key)
+
+
 @app.post("/providers/save", dependencies=[Depends(require_token)])
 async def save_provider(payload: SaveProviderRequest) -> dict[str, str | bool]:
     provider = provider_by_id(payload.provider)
@@ -103,44 +158,62 @@ async def save_provider(payload: SaveProviderRequest) -> dict[str, str | bool]:
     }
 
 
+@app.get("/modes", dependencies=[Depends(require_token)])
+async def modes() -> dict[str, Any]:
+    return {"modes": load_mode_profiles()}
+
+
+@app.get("/modes/current", dependencies=[Depends(require_token)])
+async def modes_current() -> dict[str, Any]:
+    return get_current_mode()
+
+
+@app.post("/modes/select", dependencies=[Depends(require_token)])
+async def modes_select(payload: SelectModeRequest) -> dict[str, Any]:
+    try:
+        return select_mode(payload.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/chat/send", dependencies=[Depends(require_token)])
+async def chat_send(payload: ChatSendRequest) -> dict[str, Any]:
+    return await send_chat_message(payload.message, payload.conversation_id)
+
+
+@app.get("/gateway/weixin/status", dependencies=[Depends(require_token)])
+async def gateway_weixin_status() -> dict[str, Any]:
+    return weixin_status()
+
+
+@app.get("/gateway/weixin/commands", dependencies=[Depends(require_token)])
+async def gateway_weixin_commands() -> dict[str, Any]:
+    return weixin_commands()
+
+
+@app.get("/safety/policy", dependencies=[Depends(require_token)])
+async def safety_policy() -> dict[str, Any]:
+    return {"policy": load_safety_policy()}
+
+
+@app.get("/safety/approvals", dependencies=[Depends(require_token)])
+async def safety_approvals() -> dict[str, Any]:
+    return list_pending_approvals()
+
+
+@app.post("/safety/approvals/placeholder", dependencies=[Depends(require_token)])
+async def safety_approval_placeholder(payload: ApprovalPlaceholderRequest) -> dict[str, Any]:
+    return describe_approval_placeholder(payload.operation)
+
+
 @app.get("/doctor/run", dependencies=[Depends(require_token)])
 async def doctor_run() -> dict[str, Any]:
-    runtime_paths = ensure_runtime_dirs()
-    checks: list[dict[str, Any]] = []
+    return run_doctor_checks()
 
-    def add_check(name: str, ok: bool, detail: str = "") -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail})
 
-    add_check("data_dir_exists", runtime_paths.data_dir.exists(), str(runtime_paths.data_dir))
-    add_check("hermes_home_exists", runtime_paths.hermes_home.exists(), str(runtime_paths.hermes_home))
-    add_check("logs_dir_exists", runtime_paths.logs_dir.exists(), str(runtime_paths.logs_dir))
-
-    for resource_file in required_resource_files():
-        try:
-            exists = resource_file.exists()
-            parsed = False
-            if exists:
-                import yaml
-
-                parsed = yaml.safe_load(resource_file.read_text(encoding="utf-8")) is not None
-            add_check(f"resource:{resource_file.name}", exists and parsed, str(resource_file))
-        except Exception as exc:  # noqa: BLE001 - doctor reports diagnostics instead of crashing
-            add_check(f"resource:{resource_file.name}", False, f"{type(exc).__name__}: {exc}")
-
-    try:
-        provider_count = len(load_provider_registry())
-        add_check("provider_registry_readable", provider_count > 0, f"{provider_count} providers")
-    except Exception as exc:  # noqa: BLE001
-        add_check("provider_registry_readable", False, f"{type(exc).__name__}: {exc}")
-
-    add_check("daemon_responding", True, "current request reached lilsunspotd")
-    add_check("runtime_token_exists", token_file_exists(), str(runtime_paths.token_file))
-
-    return {
-        "ok": all(check["ok"] for check in checks),
-        "daemon_version": __version__,
-        "checks": checks,
-    }
+@app.post("/doctor/repair", dependencies=[Depends(require_token)])
+async def doctor_repair(payload: RepairRequest) -> dict[str, Any]:
+    return repair_placeholder(payload.check_name)
 
 
 def main() -> None:

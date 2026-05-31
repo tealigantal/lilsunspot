@@ -27,6 +27,10 @@ def configure_logging(logs_dir: Path) -> logging.Logger:
     if _CONFIGURED:
         return logger
 
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
     logs_dir.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(logs_dir / "lilsunspotd.log", encoding="utf-8")
     handler.setLevel(logging.INFO)

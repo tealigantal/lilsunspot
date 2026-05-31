@@ -1,6 +1,6 @@
 # Lilsunspot Desktop
 
-Day1 desktop shell for `lilsunspot` / `小黑子`.
+React + Tauri desktop skeleton for `lilsunspot` / `小黑子`.
 
 ## Start
 
@@ -17,12 +17,25 @@ In another terminal, start the daemon from the repository root:
 python -m lilsunspot.daemon.app
 ```
 
-Open the Vite URL and click `Health 检查`.
+The app expects `lilsunspotd` at `http://127.0.0.1:8765`.
+
+## Pages
+
+- 首页
+- Provider
+- Chat
+- Mode
+- Weixin
+- Safety
+- Doctor
+
+These pages are placeholders. Provider checks and chat do not call real model services.
 
 ## Protected APIs
 
-`/providers`, `/runtime/info`, and `/doctor/run` require `X-Lilsunspot-Token`.
-Day1 does not auto-read `runtime-token.json`; paste the token into the field.
+`/health` is public. All other daemon APIs require `X-Lilsunspot-Token`.
+
+Tauri command `read_runtime_token` tries to read `runtime-token.json` from the lilsunspot data directory. Browser dev mode can still use manual token entry.
 
 ## Build
 
@@ -30,10 +43,8 @@ Day1 does not auto-read `runtime-token.json`; paste the token into the field.
 npm run build
 ```
 
-This verifies the React/Vite frontend. Tauri packaging uses:
+Tauri packaging remains a future task:
 
 ```powershell
 npm run tauri:build
 ```
-
-Rust is required for Tauri packaging.

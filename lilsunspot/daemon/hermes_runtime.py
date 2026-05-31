@@ -77,6 +77,7 @@ def save_provider_credentials(
     hermes_provider = str(provider_config.get("hermes_provider") or provider_id).strip()
     env_key = str(provider_config.get("env_key") or "").strip()
     base_url = str(provider_config.get("base_url") or "").strip()
+    provider_type = str(provider_config.get("type") or "cloud").strip().lower()
     model = model.strip()
     api_key = api_key.strip()
 
@@ -86,7 +87,7 @@ def save_provider_credentials(
         raise HermesRuntimeError("Provider 缺少 Hermes provider 映射。")
     if not model:
         raise HermesRuntimeError("模型名称不能为空。")
-    if not api_key:
+    if not api_key and provider_type != "local":
         raise HermesRuntimeError("API Key 不能为空。")
     if not env_key:
         raise HermesRuntimeError("Provider 缺少 env_key，Day1 暂不能保存。")
@@ -94,7 +95,8 @@ def save_provider_credentials(
     env_path = paths.hermes_home / ".env"
     config_path = paths.hermes_home / "config.yaml"
 
-    _write_env_value(env_path, env_key, api_key)
+    if api_key:
+        _write_env_value(env_path, env_key, api_key)
 
     config = _read_config(config_path)
     current_model = config.get("model")

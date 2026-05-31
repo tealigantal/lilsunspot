@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  discoverDaemon,
   getCurrentMode,
   getDaemonUrl,
   getHealth,
@@ -17,6 +18,7 @@ import {
   saveProvider,
   selectMode,
   sendChatMessage,
+  setDaemonConnection,
   setRuntimeToken,
   testProvider
 } from "./api";
@@ -52,6 +54,8 @@ function asText(value: unknown) {
 export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [token, setToken] = useState("");
+  const [daemonUrl, setDaemonUrl] = useState(getDaemonUrl());
+  const [discoveryMessage, setDiscoveryMessage] = useState("正在自动发现 daemon。");
   const [health, setHealth] = useState<"unknown" | "ok" | "bad">("unknown");
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -72,15 +76,31 @@ export default function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void checkHealth();
-    readRuntimeToken().then((detectedToken) => {
-      if (!detectedToken) {
+    async function bootstrapConnection() {
+      await checkHealth();
+      const discovery = await discoverDaemon();
+      if (discovery) {
+        setDaemonConnection(discovery);
+        setToken(discovery.token);
+        setDaemonUrl(getDaemonUrl());
+        setDiscoveryMessage(`已自动发现 daemon：${discovery.base_url}`);
+        void refreshHome();
         return;
       }
-      setToken(detectedToken);
-      setRuntimeToken(detectedToken);
-      void refreshHome();
-    });
+
+      const detectedToken = await readRuntimeToken();
+      if (detectedToken) {
+        setToken(detectedToken);
+        setRuntimeToken(detectedToken);
+        setDiscoveryMessage("已读取 runtime token，daemon 地址使用默认值。");
+        void refreshHome();
+        return;
+      }
+
+      setDiscoveryMessage("未自动发现 daemon。");
+    }
+
+    void bootstrapConnection();
   }, []);
 
   async function withStatus(action: () => Promise<void>) {
@@ -205,7 +225,7 @@ export default function App() {
       <header className="header">
         <div>
           <h1>Lilsunspot 小黑子</h1>
-          <p>daemon: {getDaemonUrl()}</p>
+          <p>daemon: {daemonUrl}</p>
           <p>health: {health}</p>
         </div>
         <button type="button" onClick={checkHealth} disabled={busy}>
@@ -227,6 +247,7 @@ export default function App() {
         <button type="button" onClick={() => applyToken()} disabled={busy}>
           设置 Token
         </button>
+        <p className="connectionStatus">{discoveryMessage}</p>
       </section>
 
       <nav className="tabs" aria-label="pages">

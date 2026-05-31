@@ -22,6 +22,7 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.modes as modes
     import lilsunspot.daemon.provider_client as provider_client
     import lilsunspot.daemon.providers as providers
+    import lilsunspot.daemon.runtime_discovery as runtime_discovery
     import lilsunspot.daemon.safety as safety
     import lilsunspot.daemon.app as app_module
 
@@ -31,6 +32,7 @@ def daemon_client(tmp_path, monkeypatch):
     providers = importlib.reload(providers)
     provider_client = importlib.reload(provider_client)
     hermes_runtime = importlib.reload(hermes_runtime)
+    runtime_discovery = importlib.reload(runtime_discovery)
     chat_client = importlib.reload(chat_client)
     modes = importlib.reload(modes)
     gateway = importlib.reload(gateway)

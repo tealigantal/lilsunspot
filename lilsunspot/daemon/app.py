@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import os
 import webbrowser
 from typing import Any
 
@@ -20,15 +21,44 @@ from .logging_utils import configure_logging
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
 from .providers import load_provider_registry, provider_by_id
+from .runtime_discovery import base_url_for, write_runtime_descriptor
 from .safety import describe_approval_placeholder, list_pending_approvals, load_safety_policy
 
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
+
+def _configured_host() -> str:
+    host = os.environ.get("LILSUNSPOT_BIND_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST
+    if host != DEFAULT_HOST:
+        raise RuntimeError("lilsunspotd 只能绑定到 127.0.0.1。")
+    return host
+
+
+def _configured_port() -> int:
+    raw_port = os.environ.get("LILSUNSPOT_BIND_PORT", str(DEFAULT_PORT)).strip()
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise RuntimeError("lilsunspotd 端口不正确。") from exc
+    if port < 1 or port > 65535:
+        raise RuntimeError("lilsunspotd 端口不正确。")
+    return port
+
+
+BIND_HOST = _configured_host()
+BIND_PORT = _configured_port()
+
 paths = ensure_runtime_dirs()
 logger = configure_logging(paths.logs_dir)
 load_or_create_token()
+runtime_descriptor = write_runtime_descriptor(BIND_HOST, BIND_PORT, paths)
+logger.info(
+    "daemon runtime discovery written base_url=%s pid=%s",
+    runtime_descriptor["base_url"],
+    runtime_descriptor["pid"],
+)
 
 app = FastAPI(
     title="lilsunspotd",
@@ -99,7 +129,11 @@ async def runtime_info() -> dict[str, Any]:
         "logs_dir": str(runtime_paths.logs_dir),
         "platform": platform.platform(),
         "daemon_version": __version__,
-        "bind_host": DEFAULT_HOST,
+        "bind_host": BIND_HOST,
+        "bind_port": BIND_PORT,
+        "base_url": base_url_for(BIND_HOST, BIND_PORT),
+        "pid": os.getpid(),
+        "runtime_file": str(runtime_paths.runtime_file),
         "configured": runtime_model["configured"],
         "provider": runtime_model["provider"],
         "model": runtime_model["model"],
@@ -219,7 +253,7 @@ async def doctor_repair(payload: RepairRequest) -> dict[str, Any]:
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("lilsunspot.daemon.app:app", host=DEFAULT_HOST, port=DEFAULT_PORT, reload=False)
+    uvicorn.run("lilsunspot.daemon.app:app", host=BIND_HOST, port=BIND_PORT, reload=False)
 
 
 if __name__ == "__main__":

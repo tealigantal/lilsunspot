@@ -1,9 +1,45 @@
 export type DaemonDiscovery = {
   base_url: string;
-  token: string;
   data_dir: string;
-  token_file: string;
   runtime_file: string;
+};
+
+export type DaemonConnectStatus = {
+  ok: boolean;
+  base_url: string;
+  data_dir: string;
+  runtime_file: string;
+  launch_attempted: boolean;
+  message_cn: string;
+};
+
+export type DaemonHttpResponse = {
+  status: number;
+  body: string;
+};
+
+export type HealthStatus = {
+  ok: boolean;
+  status: "ready" | string;
+  message_cn: string;
+  setup_required: boolean;
+  version: string;
+};
+
+export type AppBootState =
+  | "starting_daemon"
+  | "daemon_ready"
+  | "daemon_failed"
+  | "provider_missing"
+  | "provider_testing"
+  | "provider_ready"
+  | "chat_ready";
+
+export type AppState = {
+  boot: AppBootState;
+  title: string;
+  message: string;
+  next_action: string;
 };
 
 export type Provider = {
@@ -24,6 +60,7 @@ export type ProviderTestResult =
       ok: true;
       provider: string;
       model: string;
+      title?: string;
       message: string;
     }
   | {
@@ -31,8 +68,15 @@ export type ProviderTestResult =
       provider: string;
       model: string;
       error_code: string;
+      title: string;
       message: string;
-      suggestion: string;
+      actions: string[];
+      suggestion?: string;
+      safe_details: {
+        provider: string;
+        masked_key: string;
+        http_status: number | null;
+      };
     };
 
 export type SaveProviderResult = {

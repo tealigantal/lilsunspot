@@ -7,7 +7,11 @@ def test_health_is_public_and_providers_require_token(daemon_client):
     client = daemon_client.client
 
     assert client.get("/health").status_code == 200
-    assert client.get("/health").json() == {"ok": True}
+    health = client.get("/health").json()
+    assert health["ok"] is True
+    assert health["status"] == "ready"
+    assert health["message_cn"] == "小黑子本地服务正常"
+    assert health["setup_required"] is True
     assert client.get("/providers").status_code == 403
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
@@ -38,6 +42,24 @@ def test_provider_test_is_placeholder_and_does_not_require_network(daemon_client
     body = response.json()
     assert body["ok"] is True
     assert "未发起真实服务调用" in body["message"]
+
+
+def test_provider_test_error_is_user_facing_and_redacted(daemon_client):
+    secret = "placeholder-provider-api-invalid"
+    response = daemon_client.client.post(
+        "/providers/test",
+        headers=daemon_client.headers,
+        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": ""},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "invalid_key"
+    assert body["title"] == "API Key 可能不正确"
+    assert "actions" in body
+    assert body["safe_details"]["masked_key"] == ""
+    assert secret not in response.text
 
 
 def test_provider_save_does_not_log_token_or_key(daemon_client):

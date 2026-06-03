@@ -178,20 +178,45 @@ $dataDir = "$pwd\.tmp-lilsunspot-data"
 $token = (Get-Content "$dataDir\runtime-token.json" | ConvertFrom-Json).token
 ```
 
-不要把真实 API Key 写进命令行、README、提交信息或截图。用不回显输入读取 Key，再调用 `/providers/test`：
+不要把真实 API Key 写进命令行、README、提交信息或截图。实测时从本机环境变量读取 Key，不手动粘贴、不打印 Key。
+
+常用 provider 对应环境变量：
+
+- `deepseek`: `DEEPSEEK_API_KEY`
+- `kimi`: `KIMI_API_KEY`
+- `qwen`: `DASHSCOPE_API_KEY`
+- `openrouter`: `OPENROUTER_API_KEY`
+- `openai`: `OPENAI_API_KEY`
+
+如果环境变量是刚设置的，重新打开 PowerShell 后再跑下面命令。
+
+选择 provider、模型和对应环境变量：
 
 ```powershell
 $provider = "deepseek"
 $model = "deepseek-chat"
-$secureKey = Read-Host "粘贴 API Key（不会回显）" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+$apiKeyEnv = "DEEPSEEK_API_KEY"
+```
+
+从环境变量读取 Key，并调用 `/providers/test`：
+
+```powershell
+$apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "Process")
+if (-not $apiKey) {
+    $apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "User")
+}
+if (-not $apiKey) {
+    $apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "Machine")
+}
+if (-not $apiKey) {
+    throw "没有读取到环境变量 $apiKeyEnv。请确认已设置，并重新打开 PowerShell。"
+}
 
 try {
-    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
     $body = @{
         provider = $provider
         model = $model
-        api_key = $plainKey
+        api_key = $apiKey
     } | ConvertTo-Json
 
     Invoke-RestMethod `
@@ -202,8 +227,7 @@ try {
         -Body $body
 }
 finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    $plainKey = $null
+    $apiKey = $null
     $body = $null
 }
 ```
@@ -227,15 +251,22 @@ message: 模型服务已响应，API Key 和模型名称验证通过。
 确认测试通过后，用同一个 Key 保存配置：
 
 ```powershell
-$secureKey = Read-Host "再次粘贴 API Key 用于保存（不会回显）" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+$apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "Process")
+if (-not $apiKey) {
+    $apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "User")
+}
+if (-not $apiKey) {
+    $apiKey = [Environment]::GetEnvironmentVariable($apiKeyEnv, "Machine")
+}
+if (-not $apiKey) {
+    throw "没有读取到环境变量 $apiKeyEnv。请确认已设置，并重新打开 PowerShell。"
+}
 
 try {
-    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
     $body = @{
         provider = $provider
         model = $model
-        api_key = $plainKey
+        api_key = $apiKey
     } | ConvertTo-Json
 
     Invoke-RestMethod `
@@ -246,8 +277,7 @@ try {
         -Body $body
 }
 finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    $plainKey = $null
+    $apiKey = $null
     $body = $null
 }
 ```

@@ -106,7 +106,7 @@ export type ChatSendResult =
   | {
       ok: true;
       reply: string;
-      engine: "placeholder" | string;
+      engine: "hermes_runtime" | string;
       provider: string;
       model: string;
     }

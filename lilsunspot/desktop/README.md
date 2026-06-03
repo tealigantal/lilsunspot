@@ -29,7 +29,7 @@ The app auto-discovers `lilsunspotd` from the local `daemon-runtime.json` file a
 - Safety
 - Doctor
 
-These pages are placeholders. Provider checks and chat do not call real model services.
+Provider checks and chat use the local daemon. Weixin, Safety approvals, and Doctor repair are still placeholder flows.
 
 ## Protected APIs
 

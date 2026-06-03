@@ -47,8 +47,10 @@ def daemon_client(tmp_path, monkeypatch):
     return SimpleNamespace(
         app_module=app_module,
         auth=auth,
+        chat_client=chat_client,
         client=client,
         config_paths=config_paths,
         headers=headers,
+        hermes_runtime=hermes_runtime,
         token=token,
     )

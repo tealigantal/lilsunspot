@@ -34,6 +34,14 @@ Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config 
 - Run `scripts/check.ps1`.
 - Final response must include files changed, tests run, result, known risks, intentionally not done.
 
+## Codex Local Environment
+
+- Codex local Python work should prefer `ignored/codex-venv`.
+- Before running daemon-backed desktop commands, prepend `ignored/codex-venv/Scripts` and `%USERPROFILE%/.cargo/bin` to `PATH`.
+- When launching Tauri dev from this repo, set `PYTHONPATH` to the repository root so `python -m lilsunspot.daemon.launcher` resolves product-layer modules.
+- Use an ignored temporary data dir such as `ignored/tauri-dev-data` for Tauri smoke tests and local daemon runs.
+- Do not place real API keys or runtime tokens in `ignored/` logs, prompts, screenshots, fixtures, or committed files.
+
 ## Done Means
 
 - Acceptance criteria pass.

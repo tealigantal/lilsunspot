@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+import json
+
+import httpx
+
+
+def _mock_chat_http_client(daemon_client, monkeypatch, handler):
+    transport = httpx.MockTransport(handler)
+
+    def make_client(base_url: str):
+        return httpx.AsyncClient(base_url=base_url, transport=transport)
+
+    monkeypatch.setattr(daemon_client.chat_client, "_make_chat_http_client", make_client)
+
 
 def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     client = daemon_client.client
@@ -46,7 +59,7 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     assert "占位" in repair.json()["message"]
 
 
-def test_chat_placeholder_requires_provider_config(daemon_client):
+def test_chat_runtime_requires_provider_config(daemon_client):
     response = daemon_client.client.post(
         "/chat/send",
         headers=daemon_client.headers,
@@ -60,9 +73,18 @@ def test_chat_placeholder_requires_provider_config(daemon_client):
     assert "首启向导" in body["message"]
 
 
-def test_chat_placeholder_after_provider_save(daemon_client):
+def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     client = daemon_client.client
     headers = daemon_client.headers
+    seen_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        assert request.headers.get("authorization") is None
+        assert str(request.url) == "http://127.0.0.1:11434/v1/chat/completions"
+        return httpx.Response(200, json={"choices": [{"message": {"content": "这是模型回复。"}}]})
+
+    _mock_chat_http_client(daemon_client, monkeypatch, handler)
 
     save = client.post(
         "/providers/save",
@@ -80,5 +102,7 @@ def test_chat_placeholder_after_provider_save(daemon_client):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "placeholder"
-    assert "不会调用真实模型服务" in body["reply"]
+    assert body["engine"] == "hermes_runtime"
+    assert body["reply"] == "这是模型回复。"
+    assert seen_payload["model"] == "llama3.2"
+    assert seen_payload["messages"][0]["content"] == "你好"

@@ -14,12 +14,12 @@
 - Tauri 2 + React + TypeScript 桌面端。
 - 桌面端自动连接 daemon；开发浏览器模式支持手动 token。
 - Provider 列表、打开 Key 页面、真实 `/chat/completions` 最小连接测试、保存 Hermes 兼容配置。
+- 桌面 Chat 页通过 `/chat/send` 使用已保存 Hermes 兼容配置调用真实 OpenAI-compatible `chat/completions`。
 - 模式配置、微信状态、安全策略、诊断页的本地 API 骨架。
 - secret guard、daemon pytest、desktop TypeScript/Vite build 检查入口。
 
 仍是占位：
 
-- `/chat/send` 不调用真实模型，只检查 Provider 配置是否完整并返回占位回复。
 - 微信扫码、联系人、消息发送尚未实现。
 - 安全审批队列只有策略和占位接口。
 - 诊断修复与诊断包导出仍是占位。
@@ -161,6 +161,12 @@ lilsunspot/resources/provider_registry.yaml
 - `safe_details.masked_key` 只允许出现脱敏后的 Key。
 
 `POST /providers/save` 会把配置写到 `hermes_home/.env` 和 `hermes_home/config.yaml`。保存前应先完成连接测试；当前接口本身不重新探测。
+
+## 聊天桥接
+
+`POST /chat/send` 会读取 `hermes_home/config.yaml` 中的 `lilsunspot.provider` / `lilsunspot.model`，再从 `hermes_home/.env` 读取 provider registry 中声明的 `env_key`。随后它使用 registry 中的 `base_url` 或 `detect_url` 发起非流式 OpenAI-compatible `chat/completions` 请求。
+
+cloud provider 必须已经保存 API Key；local provider 可以没有 API Key。聊天失败会返回普通中文错误，常见 `error_code` 包括 `invalid_key`、`quota_exceeded`、`rate_limited`、`network_error`、`model_not_found`。响应不会包含 API Key 或 runtime token。
 
 ## 本机 API Key 实测
 

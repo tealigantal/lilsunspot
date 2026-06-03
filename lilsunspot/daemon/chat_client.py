@@ -3,16 +3,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 
+from . import provider_client as provider_http
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .providers import provider_by_id
 
 
+CHAT_TIMEOUT_SECONDS = 45.0
+
 CHAT_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
+    "empty_message": ("请先输入要发送的内容。", "输入一句话后再发送。"),
     "setup_required": ("请先完成首启向导。", "打开 Provider 页，保存一个模型服务商配置。"),
     "provider_required": ("请先完成模型配置。", "在 Provider 页选择服务商和模型后保存。"),
     "missing_api_key": ("请先填写 API Key。", "重新配置模型并保存 API Key。本地模型可留空。"),
+    "invalid_key": ("模型服务没有接受当前 API Key。", "请回到模型设置页，重新测试并保存 API Key。"),
+    "quota_exceeded": ("模型服务额度可能不足。", "请打开模型服务官网检查余额或额度。"),
+    "rate_limited": ("请求太频繁。", "请稍等一会儿再发送。"),
+    "network_error": ("暂时连不上模型服务。", "请检查网络、本地模型服务或代理设置。"),
+    "model_not_found": ("当前模型名称不可用。", "请回到模型设置页，选择推荐模型后重新保存。"),
+    "empty_response": ("模型服务没有返回可显示内容。", "请稍后重试，或换一个模型。"),
+    "unknown": ("聊天请求没有成功。", "请稍后重试，或到诊断页检查配置。"),
 }
 
 
@@ -47,6 +59,67 @@ def _read_env(path: Path) -> dict[str, str]:
         if key:
             values[key] = value
     return values
+
+
+def _make_chat_http_client(base_url: str) -> httpx.AsyncClient:
+    timeout = httpx.Timeout(CHAT_TIMEOUT_SECONDS, connect=8.0)
+    return httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False)
+
+
+def _chat_request_headers(api_key: str) -> dict[str, str]:
+    headers = provider_http._request_headers(api_key)
+    headers["User-Agent"] = "lilsunspotd-chat"
+    return headers
+
+
+def _chat_payload(model: str, message: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": message}],
+        "stream": False,
+    }
+
+
+def _content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+
+    parts: list[str] = []
+    for part in content:
+        if isinstance(part, str):
+            parts.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+            continue
+        nested_content = part.get("content")
+        if isinstance(nested_content, str):
+            parts.append(nested_content)
+    return "\n".join(item.strip() for item in parts if item.strip()).strip()
+
+
+def _extract_reply(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return ""
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        reply = _content_to_text(message.get("content"))
+        if reply:
+            return reply
+    return ""
 
 
 def current_runtime_model(paths: RuntimePaths | None = None) -> dict[str, Any]:
@@ -92,6 +165,8 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         "provider": str(provider_config["id"]),
         "model": model,
         "provider_type": provider_type,
+        "provider_config": provider_config,
+        "api_key": api_key,
     }
 
 
@@ -101,17 +176,43 @@ async def send_chat_message(
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any]:
     del conversation_id
-    del message
+    message = message.strip()
+    if not message:
+        return _chat_error("empty_message")
+
     paths = paths or ensure_runtime_dirs()
     error, settings = _load_chat_settings(paths)
     if error is not None:
         return error
     assert settings is not None
 
+    try:
+        base_url = provider_http._provider_base_url(settings["provider_config"])
+    except provider_http.ProviderValidationError:
+        return _chat_error("provider_required")
+
+    try:
+        async with _make_chat_http_client(base_url) as client:
+            response = await client.post(
+                "chat/completions",
+                headers=_chat_request_headers(settings["api_key"]),
+                json=_chat_payload(settings["model"], message),
+            )
+    except (httpx.InvalidURL, httpx.RequestError):
+        return _chat_error("network_error")
+
+    payload = provider_http._safe_json(response)
+    if response.status_code >= 400:
+        return _chat_error(provider_http._classify_http_error(response.status_code, payload))
+
+    reply = _extract_reply(payload)
+    if not reply:
+        return _chat_error("empty_response")
+
     return {
         "ok": True,
-        "reply": "小黑子聊天骨架已收到消息。当前版本不会调用真实模型服务。",
-        "engine": "placeholder",
+        "reply": reply,
+        "engine": "hermes_runtime",
         "provider": settings["provider"],
         "model": settings["model"],
     }

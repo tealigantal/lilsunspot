@@ -325,7 +325,12 @@ export default function App() {
   async function sendMessage() {
     await withStatus(async () => {
       const result = await sendChatMessage(chatInput);
-      setChatReply(result.ok ? result.reply : `${result.message}\n${result.suggestion}`);
+      if (result.ok) {
+        setChatReply(result.reply);
+        setStatus(`来自 ${result.provider} / ${result.model}`);
+        return;
+      }
+      setChatReply(`${result.message}\n${result.suggestion}`);
     });
   }
 
@@ -705,10 +710,10 @@ export default function App() {
       {page === "chat" && (
         <section className="panel">
           <h2>聊天</h2>
-          <p>当前版本仍使用聊天骨架，不会调用真实模型服务。</p>
+          <p>{runtime?.configured ? `当前模型：${runtime.provider} / ${runtime.model}` : "请先完成模型设置。"}</p>
           <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} rows={4} />
           <button type="button" onClick={sendMessage} disabled={busy || !chatInput.trim()}>
-            发送
+            {busy ? "发送中" : "发送"}
           </button>
           <pre>{chatReply || "尚无回复。"}</pre>
         </section>

@@ -31,7 +31,18 @@ def test_token_file_written_under_temp_data_dir(daemon_client, tmp_path):
     assert token_payload["token"] == daemon_client.token
 
 
-def test_provider_test_is_placeholder_and_does_not_require_network(daemon_client):
+def test_provider_test_returns_validator_result(daemon_client, monkeypatch):
+    async def fake_test_provider_connection(provider, model, api_key):
+        return {
+            "ok": True,
+            "provider": provider["id"],
+            "model": model,
+            "title": "模型服务连接通过",
+            "message": "模型服务已响应，API Key 和模型名称验证通过。",
+        }
+
+    monkeypatch.setattr(daemon_client.app_module, "test_provider_connection", fake_test_provider_connection)
+
     response = daemon_client.client.post(
         "/providers/test",
         headers=daemon_client.headers,
@@ -41,7 +52,7 @@ def test_provider_test_is_placeholder_and_does_not_require_network(daemon_client
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert "未发起真实服务调用" in body["message"]
+    assert "验证通过" in body["message"]
 
 
 def test_provider_test_error_is_user_facing_and_redacted(daemon_client):

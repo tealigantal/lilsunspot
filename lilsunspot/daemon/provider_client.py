@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Any
+
+import httpx
+
+
+PROVIDER_TEST_TIMEOUT_SECONDS = 8.0
 
 
 ERROR_MESSAGES: dict[str, tuple[str, str, list[str]]] = {
@@ -42,6 +48,10 @@ ERROR_MESSAGES: dict[str, tuple[str, str, list[str]]] = {
 }
 
 
+class ProviderValidationError(ValueError):
+    pass
+
+
 def mask_secret(value: str) -> str:
     value = value.strip()
     if not value:
@@ -80,12 +90,87 @@ def _error_result(
     }
 
 
+def _provider_base_url(provider_config: dict[str, Any]) -> str:
+    base_url = str(provider_config.get("base_url") or provider_config.get("detect_url") or "").strip()
+    if not base_url:
+        raise ProviderValidationError("Provider 缺少检测地址。")
+    return base_url.rstrip("/") + "/"
+
+
+def _make_http_client(base_url: str) -> httpx.AsyncClient:
+    timeout = httpx.Timeout(PROVIDER_TEST_TIMEOUT_SECONDS, connect=5.0)
+    return httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False)
+
+
+def _request_headers(api_key: str) -> dict[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "lilsunspotd-provider-check",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _safe_json(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+def _error_text(payload: Any) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False).lower()
+    except (TypeError, ValueError):
+        return ""
+
+
+def _classify_http_error(status_code: int, payload: Any) -> str:
+    text = _error_text(payload)
+    if (
+        status_code in {401, 403}
+        or "unauthorized" in text
+        or "invalid api key" in text
+        or "invalid_api_key" in text
+        or "incorrect api key" in text
+    ):
+        return "invalid_key"
+    if status_code == 429 or "rate limit" in text or "rate_limited" in text:
+        return "rate_limited"
+    if status_code == 402 or "quota" in text or "insufficient" in text:
+        return "quota_exceeded"
+    if status_code == 404 or ("model" in text and "not" in text):
+        return "model_not_found"
+    if 500 <= status_code <= 599:
+        return "network_error"
+    return "unknown"
+
+
+def _validation_payload(model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "temperature": 0,
+        "stream": False,
+    }
+
+
+def _response_proves_chat_completion(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    choices = payload.get("choices")
+    return isinstance(choices, list) and len(choices) > 0
+
+
 async def test_provider_connection(
     provider_config: dict[str, Any],
     model: str | None,
     api_key: str,
 ) -> dict[str, Any]:
-    """Validate provider fields without calling a real provider."""
+    """Validate an OpenAI-compatible provider with a minimal chat request."""
     provider_id = str(provider_config.get("id") or "").strip()
     provider_type = str(provider_config.get("type") or "cloud").strip().lower()
     selected_model = (model or provider_config.get("default_model") or "").strip()
@@ -98,10 +183,45 @@ async def test_provider_connection(
     if provider_type != "local" and not api_key:
         return _error_result("invalid_key", provider_id, selected_model, api_key=api_key)
 
+    try:
+        base_url = _provider_base_url(provider_config)
+    except ProviderValidationError:
+        return _error_result("unknown", provider_id, selected_model, api_key=api_key)
+
+    try:
+        async with _make_http_client(base_url) as client:
+            response = await client.post(
+                "chat/completions",
+                headers=_request_headers(api_key),
+                json=_validation_payload(selected_model),
+            )
+    except (httpx.InvalidURL, httpx.RequestError):
+        return _error_result("network_error", provider_id, selected_model, api_key=api_key)
+
+    payload = _safe_json(response)
+    if response.status_code >= 400:
+        error_code = _classify_http_error(response.status_code, payload)
+        return _error_result(
+            error_code,
+            provider_id,
+            selected_model,
+            api_key=api_key,
+            http_status=response.status_code,
+        )
+
+    if not _response_proves_chat_completion(payload):
+        return _error_result(
+            "unknown",
+            provider_id,
+            selected_model,
+            api_key=api_key,
+            http_status=response.status_code,
+        )
+
     return {
         "ok": True,
         "provider": provider_id,
         "model": selected_model,
         "title": "模型服务连接通过",
-        "message": "Provider 配置字段检查通过；当前骨架未发起真实服务调用。",
+        "message": "模型服务已响应，API Key 和模型名称验证通过。",
     }

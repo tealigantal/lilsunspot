@@ -2,6 +2,14 @@
 
 ## Current
 
+待定。
+
+## Next
+
+- 待定
+
+## Done
+
 ### LIL-00-05: 接入 mode profiles 到真实聊天行为。
 
 Goal:
@@ -37,12 +45,6 @@ python -m pytest lilsunspot/tests/test_chat_api.py --timeout-method=thread --bas
 python scripts/guard_no_secrets.py
 pwsh scripts/check.ps1
 ```
-
-## Next
-
-- 待定
-
-## Done
 
 - LIL-00-04: 实现桌面聊天到 Hermes runtime 的真实桥接。本机 `DEEPSEEK_API_KEY` 已通过 `/providers/test` 和 `/chat/send` 真实通讯验证；未记录 API Key、runtime token 或回复正文。
 - LIL-00-01: 创建 lilsunspot 完整开发骨架。

@@ -8,6 +8,7 @@ import yaml
 
 from . import provider_client as provider_http
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .modes import get_current_mode
 from .providers import provider_by_id
 
 
@@ -72,10 +73,14 @@ def _chat_request_headers(api_key: str) -> dict[str, str]:
     return headers
 
 
-def _chat_payload(model: str, message: str) -> dict[str, Any]:
+def _chat_payload(model: str, message: str, system_hint: str) -> dict[str, Any]:
+    messages = []
+    if system_hint:
+        messages.append({"role": "system", "content": system_hint})
+    messages.append({"role": "user", "content": message})
     return {
         "model": model,
-        "messages": [{"role": "user", "content": message}],
+        "messages": messages,
         "stream": False,
     }
 
@@ -161,12 +166,18 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
     if not api_key and provider_type != "local":
         return _chat_error("missing_api_key"), None
 
+    current_mode = get_current_mode(paths)
+    profile = current_mode.get("profile") if isinstance(current_mode.get("profile"), dict) else {}
+    system_hint = str(profile.get("system_hint") or "").strip()
+
     return None, {
         "provider": str(provider_config["id"]),
         "model": model,
         "provider_type": provider_type,
         "provider_config": provider_config,
         "api_key": api_key,
+        "mode": str(current_mode.get("current") or "default"),
+        "system_hint": system_hint,
     }
 
 
@@ -196,7 +207,7 @@ async def send_chat_message(
             response = await client.post(
                 "chat/completions",
                 headers=_chat_request_headers(settings["api_key"]),
-                json=_chat_payload(settings["model"], message),
+                json=_chat_payload(settings["model"], message, settings["system_hint"]),
             )
     except (httpx.InvalidURL, httpx.RequestError):
         return _chat_error("network_error")

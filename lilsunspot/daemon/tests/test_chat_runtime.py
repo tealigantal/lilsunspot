@@ -60,7 +60,13 @@ def test_chat_runtime_cloud_provider_uses_saved_key_without_leaking(daemon_clien
     assert body["reply"] == "收到。"
     assert seen_headers["authorization"] == f"Bearer {secret}"
     assert seen_payload["model"] == "deepseek-chat"
-    assert seen_payload["messages"][0]["content"] == "你好"
+    default_hint = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()["profile"][
+        "system_hint"
+    ]
+    assert seen_payload["messages"] == [
+        {"role": "system", "content": default_hint},
+        {"role": "user", "content": "你好"},
+    ]
     assert secret not in response.text
 
 

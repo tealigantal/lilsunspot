@@ -2,6 +2,12 @@
 
 ## 2026-06-04
 
+- Task: complete `LIL-00-05` by connecting mode profiles to real chat behavior.
+- Files touched: `TASKS.md`, `lilsunspot/daemon/chat_client.py`, daemon/chat tests, and `lilsunspot/README-dev.md`.
+- Decision/result: `/chat/send` now reads the selected mode from the lilsunspot data dir and sends the profile `system_hint` as the OpenAI-compatible system message before user input; missing selection falls back to the default profile.
+- Validation: daemon pytest, chat product tests, secret guard, desktop build, and `scripts/check.ps1` passed.
+- Remaining risk: runtime providers may interpret system prompts differently, so real provider behavior still needs spot-checking after provider configuration.
+
 - Task: close `LIL-00-04` after real local-environment chat validation.
 - Files touched: `TASKS.md`, `lilsunspot/notes/agent-memory.md`.
 - Decision/result: `LIL-00-04` moved to Done and `LIL-00-05` is now Current.

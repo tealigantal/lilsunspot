@@ -41,6 +41,7 @@ import type {
 
 type Page = "home" | "provider" | "chat" | "mode" | "weixin" | "safety" | "doctor";
 type WizardStep = 1 | 2 | 3;
+type ChatState = "idle" | "loading" | "success" | "error";
 
 const PAGES: { id: Page; label: string }[] = [
   { id: "home", label: "首页" },
@@ -139,6 +140,9 @@ export default function App() {
   const [showMoreProviders, setShowMoreProviders] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatReply, setChatReply] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [chatEngine, setChatEngine] = useState("");
+  const [chatState, setChatState] = useState<ChatState>("idle");
   const [modes, setModes] = useState<ModeProfile[]>([]);
   const [currentMode, setCurrentMode] = useState<CurrentMode | null>(null);
   const [weixinStatus, setWeixinStatus] = useState<WeixinStatus | null>(null);
@@ -156,6 +160,8 @@ export default function App() {
   const visibleRecommendedProviders = providers.filter((provider) => RECOMMENDED_PROVIDER_IDS.includes(provider.id));
   const moreProviders = providers.filter((provider) => !RECOMMENDED_PROVIDER_IDS.includes(provider.id));
   const homeStatus = userFacingStatus(bootState, appState, connection);
+  const chatConfigured = bootState === "chat_ready";
+  const chatCanSend = chatConfigured && Boolean(chatInput.trim()) && !busy;
 
   useEffect(() => {
     void bootstrapConnection();
@@ -323,10 +329,40 @@ export default function App() {
   }
 
   async function sendMessage() {
-    await withStatus(async () => {
-      const result = await sendChatMessage(chatInput);
-      setChatReply(result.ok ? result.reply : `${result.message}\n${result.suggestion}`);
-    });
+    const message = chatInput.trim();
+    if (!message) {
+      setChatState("error");
+      setChatError("请先输入消息。");
+      return;
+    }
+    if (!chatConfigured) {
+      setChatState("error");
+      setChatError("请先完成模型配置。");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("");
+    setChatState("loading");
+    setChatReply("");
+    setChatError("");
+    setChatEngine("");
+    try {
+      const result = await sendChatMessage(message);
+      if (!result.ok) {
+        setChatState("error");
+        setChatError(`${result.message}\n${result.suggestion}`);
+        return;
+      }
+      setChatState("success");
+      setChatReply(result.reply);
+      setChatEngine(`${result.provider} / ${result.model} / ${result.engine}`);
+    } catch (error) {
+      setChatState("error");
+      setChatError(error instanceof Error ? error.message : "发送失败，请稍后再试。");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadModes() {
@@ -705,12 +741,52 @@ export default function App() {
       {page === "chat" && (
         <section className="panel">
           <h2>聊天</h2>
-          <p>当前版本仍使用聊天骨架，不会调用真实模型服务。</p>
-          <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} rows={4} />
-          <button type="button" onClick={sendMessage} disabled={busy || !chatInput.trim()}>
-            发送
-          </button>
-          <pre>{chatReply || "尚无回复。"}</pre>
+          <p>{chatConfigured ? `当前模型：${runtime?.provider || "已配置"} / ${runtime?.model || "默认模型"}` : "请先设置模型服务。"}</p>
+          {!chatConfigured && (
+            <div className="inlineError" role="alert">
+              请先到模型页保存一个可用模型。
+            </div>
+          )}
+          <textarea
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            rows={4}
+            disabled={!chatConfigured || busy}
+            aria-label="聊天消息"
+          />
+          <div className="formRow">
+            <button type="button" onClick={sendMessage} disabled={!chatCanSend}>
+              {chatState === "loading" ? "发送中" : "发送"}
+            </button>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={() => {
+                setChatInput("");
+                setChatReply("");
+                setChatError("");
+                setChatEngine("");
+                setChatState("idle");
+              }}
+              disabled={busy || (!chatInput && !chatReply && !chatError)}
+            >
+              清空
+            </button>
+          </div>
+          {chatState === "loading" && <div className="inlineState">正在请求模型服务……</div>}
+          {chatState === "error" && (
+            <div className="errorBox" role="alert">
+              <h3>发送失败</h3>
+              <p>{chatError}</p>
+            </div>
+          )}
+          {chatState === "success" && (
+            <div className="chatReply" aria-live="polite">
+              <span>{chatEngine}</span>
+              <p>{chatReply}</p>
+            </div>
+          )}
+          {chatState === "idle" && <div className="inlineState">尚无回复。</div>}
         </section>
       )}
 

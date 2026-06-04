@@ -7,7 +7,8 @@
 
 ## 当前开发任务
 
-- 当前：`LIL-00-04`，实现桌面聊天到 Hermes runtime 的真实桥接。
+- 当前：`LIL-00-05`，接入 mode profiles 到真实聊天行为。
+- 已完成：`LIL-00-04`，`/chat/send` 已使用独立 `hermes_home` 中保存的 provider/model/API Key 配置调用 OpenAI-compatible 最小 runtime 适配层。
 - 已完成：`LIL-00-03`，`/providers/test` 已接入真实 OpenAI-compatible `/chat/completions` 最小探测，用来验证 API Key 和模型组合。
 
 ## 当前状态
@@ -19,12 +20,13 @@
 - Tauri 2 + React + TypeScript 桌面端。
 - 桌面端自动连接 daemon；开发浏览器模式支持手动 token。
 - Provider 列表、打开 Key 页面、真实 `/chat/completions` 最小连接测试、保存 Hermes 兼容配置。
+- `/chat/send` 真实聊天桥接：读取 lilsunspot 独立 `hermes_home/config.yaml` 和 `.env`，调用 OpenAI-compatible `/chat/completions`，成功时返回 `hermes_runtime_adapter` engine。
 - 模式配置、微信状态、安全策略、诊断页的本地 API 骨架。
 - secret guard、daemon pytest、desktop TypeScript/Vite build 检查入口。
 
 仍是占位：
 
-- `/chat/send` 不调用真实模型，只检查 Provider 配置是否完整并返回占位回复；这是当前 `LIL-00-04` 要替换的部分。
+- mode profiles 还没有进入真实聊天 prompt；这是当前 `LIL-00-05` 要替换的部分。
 - 微信扫码、联系人、消息发送尚未实现。
 - 安全审批队列只有策略和占位接口。
 - 诊断修复与诊断包导出仍是占位。
@@ -167,6 +169,18 @@ lilsunspot/resources/provider_registry.yaml
 - `safe_details.masked_key` 只允许出现脱敏后的 Key。
 
 `POST /providers/save` 会把配置写到 `hermes_home/.env` 和 `hermes_home/config.yaml`。保存前应先完成连接测试；当前接口本身不重新探测。
+
+## 聊天桥接
+
+`POST /chat/send` 会：
+
+- 从 `LILSUNSPOT_DATA_DIR` 下的独立 `hermes_home/config.yaml` 读取 `lilsunspot.provider` 和 `lilsunspot.model`。
+- 从 `hermes_home/.env` 读取 provider registry 里声明的 `env_key`。
+- cloud provider 缺少 API Key 时直接返回普通中文错误，不调用模型服务。
+- local provider 允许空 API Key，并在请求中不发送 `Authorization` header。
+- 对 provider 的 OpenAI-compatible `chat/completions` 发起真实请求。
+- 成功时返回真实回复和 `engine: hermes_runtime_adapter`，不再返回 `placeholder` engine。
+- 失败时只返回普通中文错误，不返回原始异常、API Key 或 runtime token。
 
 ## 本机 API Key 实测
 

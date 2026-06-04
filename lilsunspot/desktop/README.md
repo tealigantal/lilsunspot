@@ -4,19 +4,19 @@ Tauri 2 + React + TypeScript desktop app for `lilsunspot` / `小黑子`.
 
 ## 当前范围
 
-当前任务是 `LIL-00-04`：把 Chat 页和 `/chat/send` 从占位回复桥接到真实 Hermes runtime。
+当前任务是 `LIL-00-05`：把 mode profiles 接入真实聊天行为。
 
 已具备：
 
 - 自动连接本机 `lilsunspotd`。
 - 通过 Tauri 命令代理读取 runtime token，并访问受保护 daemon API。
 - Provider 首启向导：读取 registry、打开 Key 页面、调用真实 `/providers/test`、保存 Hermes 兼容配置。
-- Chat 页面可调用 `/chat/send`，但 daemon 仍返回占位回复。
+- Chat 页面可调用 `/chat/send`，展示 loading、成功回复、普通中文错误和未配置模型时的禁用状态。
 - Mode、Weixin、Safety、Doctor 页面展示当前本地 API 骨架状态。
 
 仍是占位：
 
-- `/chat/send` 尚未桥接真实 Hermes runtime；这是当前开发任务。
+- mode profiles 尚未影响真实聊天 prompt；这是当前开发任务。
 - Weixin 扫码、联系人和发送消息尚未接入。
 - Safety 审批队列和 Doctor 修复/导出仍是本地骨架。
 - Windows 安装包和最终 `Lilsunspot.exe -> lilsunspotd` 分发链路尚未完成。
@@ -58,7 +58,7 @@ npm run tauri:dev
 
 - 首页：显示启动状态、daemon 状态和下一步操作。
 - Provider：真实测试 OpenAI-compatible provider 并保存配置。
-- Chat：当前只验证 Provider 配置完整性并返回占位回复。
+- Chat：调用真实聊天桥接，未配置模型时禁用输入，发送中显示 loading，成功后展示模型回复。
 - Mode：展示和切换本地模式配置。
 - Weixin：展示微信 gateway 占位状态和计划命令。
 - Safety：展示默认安全策略和占位审批队列。

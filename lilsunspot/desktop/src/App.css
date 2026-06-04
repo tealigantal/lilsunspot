@@ -417,6 +417,29 @@ textarea {
   background: #fff8f7;
 }
 
+.chatReply {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #b9d8c6;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f7fcf9;
+}
+
+.chatReply span {
+  color: #147a3d;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.chatReply p {
+  margin: 0;
+  color: #172026;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .actionChip {
   display: inline-flex;
   min-height: 34px;

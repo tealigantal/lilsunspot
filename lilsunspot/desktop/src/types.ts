@@ -106,7 +106,7 @@ export type ChatSendResult =
   | {
       ok: true;
       reply: string;
-      engine: "placeholder" | string;
+      engine: string;
       provider: string;
       model: string;
     }

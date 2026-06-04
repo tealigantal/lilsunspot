@@ -5,6 +5,11 @@
 
 `lilsunspot/` 是 Hermes Agent fork 里的产品层代码。当前目标是把 Windows 桌面个人助手的本地启动、Provider 配置、桌面首启流程和安全边界先跑通；不要改 Hermes 核心业务代码。
 
+## 当前开发任务
+
+- 当前：`LIL-00-04`，实现桌面聊天到 Hermes runtime 的真实桥接。
+- 已完成：`LIL-00-03`，`/providers/test` 已接入真实 OpenAI-compatible `/chat/completions` 最小探测，用来验证 API Key 和模型组合。
+
 ## 当前状态
 
 已具备：
@@ -19,7 +24,7 @@
 
 仍是占位：
 
-- `/chat/send` 不调用真实模型，只检查 Provider 配置是否完整并返回占位回复。
+- `/chat/send` 不调用真实模型，只检查 Provider 配置是否完整并返回占位回复；这是当前 `LIL-00-04` 要替换的部分。
 - 微信扫码、联系人、消息发送尚未实现。
 - 安全审批队列只有策略和占位接口。
 - 诊断修复与诊断包导出仍是占位。
@@ -154,6 +159,7 @@ lilsunspot/resources/provider_registry.yaml
 
 - 从 registry 读取 `base_url`，没有时退回 `detect_url`。
 - 对 OpenAI-compatible `chat/completions` 发起最小请求。
+- 这是一次真实网络探测；cloud provider 会使用传入的 API Key 调用服务商。
 - cloud provider 必须提供 API Key。
 - local provider 可以不提供 API Key。
 - 成功必须证明 API Key 和模型组合被服务商接受。
@@ -303,12 +309,18 @@ Remove-Item -Recurse -Force -LiteralPath $dataDir
 
 ## 验证
 
-从仓库根目录运行：
+从仓库根目录运行最小检查：
 
 ```powershell
 python -m pytest lilsunspot/daemon/tests
 python scripts/guard_no_secrets.py
 pwsh scripts/check.ps1
+```
+
+Provider 和聊天产品层补充测试：
+
+```powershell
+python -m pytest lilsunspot/tests/test_provider_api.py lilsunspot/tests/test_provider_client.py lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
 ```
 
 `scripts/check.ps1` 当前会：
@@ -317,7 +329,7 @@ pwsh scripts/check.ps1
 2. 跑 `python scripts/guard_no_secrets.py`。
 3. 如果存在 `npm` 且 `lilsunspot/desktop/node_modules` 已安装，跑 `npm run build --prefix lilsunspot/desktop`。
 
-Provider client 还有产品层补充测试。Windows 下从仓库根配置读取 `pytest-timeout` 时使用 `thread` timeout：
+单独跑 Provider client 测试时，Windows 下从仓库根配置读取 `pytest-timeout` 要使用 `thread` timeout：
 
 ```powershell
 python -m pytest lilsunspot/tests/test_provider_client.py --timeout-method=thread

@@ -32,7 +32,22 @@ Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config 
 - Implement the smallest working version.
 - Add or update tests.
 - Run `scripts/check.ps1`.
+- Update a relevant Markdown memory file for every agent task before finalizing.
 - Final response must include files changed, tests run, result, known risks, intentionally not done.
+
+## Markdown Memory
+
+- Every agent task must leave a small Markdown trace, even when the code change is tiny.
+- Prefer updating the most relevant existing file:
+  - `TASKS.md` for task status, Current/Next/Done movement, acceptance criteria, or checks.
+  - `lilsunspot/README-dev.md` for developer workflow, API behavior, validation, or project status.
+  - `lilsunspot/desktop/README.md` for desktop workflow or UI behavior.
+  - `lilsunspot/notes/*.md` for investigation notes, decisions, risks, and historical context.
+- If no existing document clearly fits, append a short entry to `lilsunspot/notes/agent-memory.md`.
+- Keep entries concise: date, task, files touched, decision/result, validation, and remaining risk.
+- Do not record API keys, runtime tokens, secrets, raw stack traces containing secrets, screenshots, or private user data.
+- Do not update unrelated Hermes upstream docs just to satisfy the memory rule.
+- If the user explicitly requests no repository changes, do not modify files; instead state that the memory update was intentionally skipped.
 
 ## Done Means
 

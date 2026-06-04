@@ -2,10 +2,10 @@
 
 ## Current
 
-### LIL-00-03: 实现真实 Provider 配置验证。
+### LIL-00-04: 实现桌面聊天到 Hermes runtime 的真实桥接。
 
 Goal:
-让 `/providers/test` 对已登记的 OpenAI-compatible provider 发起真实连接验证，确认 API Key 可用并检查选择的模型名称，同时继续避免泄露 API Key 或 runtime token。
+让 `/chat/send` 不再返回占位回复，而是使用 lilsunspot 独立 `hermes_home` 中已保存的 Provider、模型和 API Key 配置调用 Hermes runtime，桌面 Chat 页展示真实模型回复，同时继续避免泄露 API Key 或 runtime token。
 
 Allowed files:
 - TASKS.md
@@ -17,35 +17,38 @@ Do not touch:
 - SOUL.md
 
 Acceptance:
-1. `/providers/test` 对 cloud provider 要求 API Key。
-2. `/providers/test` 使用 provider registry 中的 `base_url` 或 `detect_url` 发起最小 `/chat/completions` 探测。
-3. 成功响应必须证明所选 API Key 和模型组合被服务商接受。
-4. local provider 可以在没有 API Key 时验证。
-5. 401/403 映射为 `invalid_key`。
-6. 402 或额度错误映射为 `quota_exceeded`。
-7. 429 映射为 `rate_limited`。
-8. 网络错误映射为 `network_error`。
-9. 模型不存在映射为 `model_not_found`。
-10. API Key 和 token 不进入响应明文、日志、测试 fixture、截图或诊断文本。
-11. pytest 最小测试通过。
-12. desktop TypeScript build 通过。
-13. `scripts/check.ps1` 可以运行。
-14. 不修改 Hermes 核心。
-15. 不修改 SOUL.md。
-16. 没有真实 API Key 或 token 泄露。
+1. `/chat/send` 除 `/health` 规则外必须继续要求 `X-Lilsunspot-Token`。
+2. 未保存 provider/model 时返回普通中文设置提示，不调用 Hermes runtime。
+3. cloud provider 缺少 API Key 时返回普通中文错误，不调用 Hermes runtime。
+4. local provider 可以在没有 API Key 时进入聊天桥接。
+5. 桥接必须使用 `LILSUNSPOT_DATA_DIR` 下的独立 `hermes_home`，不能读取或污染用户真实 `~/.hermes`。
+6. 桥接必须读取 `hermes_home/config.yaml` 中的 lilsunspot provider/model 配置。
+7. 桥接必须从 `hermes_home/.env` 读取对应 provider env key，但 API Key 不得进入日志、响应、prompt fixture、截图或诊断文本。
+8. 成功响应必须来自真实 Hermes runtime 或最小 runtime 适配层，不能再返回 `placeholder` engine。
+9. 桌面 Chat 页显示 loading、成功回复、普通中文错误和禁用状态。
+10. 桌面 Chat 页不得显示 API Key、runtime token 或原始异常。
+11. daemon pytest 最小测试通过。
+12. chat/provider 产品层补充测试通过。
+13. desktop TypeScript build 通过。
+14. `scripts/check.ps1` 可以运行。
+15. 不修改 Hermes 核心。
+16. 不修改 SOUL.md。
+17. 没有真实 API Key 或 token 泄露。
 
 Check:
 ```powershell
 python -m pytest lilsunspot/daemon/tests
+python -m pytest lilsunspot/tests/test_provider_api.py lilsunspot/tests/test_provider_client.py lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
 python scripts/guard_no_secrets.py
 pwsh scripts/check.ps1
 ```
 
 ## Next
 
-- LIL-00-04: 实现桌面聊天到 Hermes runtime 的真实桥接。
+- LIL-00-05: 接入 mode profiles 到真实聊天行为。
 
 ## Done
 
 - LIL-00-01: 创建 lilsunspot 完整开发骨架。
 - LIL-00-02: 打通 lilsunspotd 启动器和桌面端自动发现。
+- LIL-00-03: 实现真实 Provider 配置验证。

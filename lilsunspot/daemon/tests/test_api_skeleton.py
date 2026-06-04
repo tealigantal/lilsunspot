@@ -105,4 +105,8 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     assert body["engine"] == "hermes_runtime"
     assert body["reply"] == "这是模型回复。"
     assert seen_payload["model"] == "llama3.2"
-    assert seen_payload["messages"][0]["content"] == "你好"
+    default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
+    assert seen_payload["messages"] == [
+        {"role": "system", "content": default_hint},
+        {"role": "user", "content": "你好"},
+    ]

@@ -89,3 +89,44 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     assert body["engine"] == "hermes_runtime"
     assert body["reply"] == "本地模型回复。"
     assert seen_payload["model"] == "llama3.2"
+    default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
+    assert seen_payload["messages"] == [
+        {"role": "system", "content": default_hint},
+        {"role": "user", "content": "你好"},
+    ]
+
+
+def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_path, monkeypatch):
+    chat_client, config_paths, hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+    provider = {
+        "id": "ollama",
+        "type": "local",
+        "env_key": "OLLAMA_API_KEY",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "hermes_provider": "custom",
+    }
+    paths = config_paths.get_runtime_paths()
+    hermes_runtime.save_provider_credentials(provider, "llama3.2", "", paths=paths)
+    selected = client.post("/modes/select", headers=headers, json={"mode": "pragmatic"})
+    assert selected.status_code == 200
+    selected_hint = selected.json()["profile"]["system_hint"]
+    seen_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        assert request.headers.get("authorization") is None
+        return httpx.Response(200, json={"choices": [{"message": {"content": "已按务实模式回复。"}}]})
+
+    _mock_chat_http_client(chat_client, monkeypatch, handler)
+
+    response = client.post("/chat/send", headers=headers, json={"message": "帮我整理下一步"})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert paths.data_dir == (tmp_path / "data").resolve()
+    assert (paths.data_dir / "mode-profile.json").exists()
+    assert not (paths.hermes_home / "mode-profile.json").exists()
+    assert seen_payload["messages"] == [
+        {"role": "system", "content": selected_hint},
+        {"role": "user", "content": "帮我整理下一步"},
+    ]

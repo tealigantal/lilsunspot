@@ -1,5 +1,13 @@
 # Agent Memory
 
+## 2026-06-06
+
+- Task: verify the merged `LIL-00-05` mode-profile chat behavior with a real local provider key.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: `origin/develop` already contained PR #7 for `LIL-00-05`; no code changes were needed. A live temporary daemon selected `pragmatic` mode, saved `deepseek/deepseek-chat`, and completed `/chat/send` through the real provider.
+- Validation: `python -m pytest lilsunspot/daemon/tests`, `python -m pytest lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot`, `python scripts/guard_no_secrets.py`, `pwsh scripts/check.ps1`, and a live `DEEPSEEK_API_KEY` provider/chat run passed.
+- Remaining risk: the provider reply body, API Key, and runtime token were intentionally not recorded; live validation only spot-checked one selected profile and one provider.
+
 ## 2026-06-04
 
 - Task: complete `LIL-00-05` by connecting mode profiles to real chat behavior.

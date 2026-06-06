@@ -80,7 +80,7 @@ npm run tauri:dev
 
 ## 运行检查
 
-以下是当前仓库已有检查入口；本任务未运行 pytest 或 npm build。
+以下是当前仓库已有检查入口：
 
 ```powershell
 python scripts/guard_no_secrets.py
@@ -88,9 +88,20 @@ python -m pytest lilsunspot/daemon/tests
 npm run build --prefix lilsunspot/desktop
 ```
 
+LIL-P0-01 于 2026-06-06 额外运行并通过：
+
+```powershell
+python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
+pwsh scripts/check.ps1
+pwsh scripts/build_lilsunspotd_sidecar.ps1
+npm run tauri:build --prefix lilsunspot/desktop
+```
+
+同次验证还用 ignored 临时数据目录启动 release sidecar，确认 `/health`、token-protected `/providers`、`127.0.0.1` 绑定、runtime file 创建和 daemon 日志 token 泄漏检查通过；未记录 runtime token。
+
 ## 构建 sidecar
 
-当前 `scripts/` 下存在 sidecar 构建脚本；本任务未运行。
+当前 `scripts/` 下存在 sidecar 构建脚本；LIL-P0-01 已验证可生成 `lilsunspotd-x86_64-pc-windows-msvc.exe`。
 
 ```powershell
 pwsh scripts/build_lilsunspotd_sidecar.ps1
@@ -98,10 +109,10 @@ pwsh scripts/build_lilsunspotd_sidecar.ps1
 
 ## 构建 NSIS
 
-当前 desktop 文档记录的 NSIS 构建命令；本任务未运行。
+当前 desktop 文档记录的 NSIS 构建命令；LIL-P0-01 已验证可生成 `Lilsunspot_0.1.0_x64-setup.exe`。
 
 ```powershell
-npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
+npm run tauri:build --prefix lilsunspot/desktop
 ```
 
 ## 当前未完成项

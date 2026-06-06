@@ -2,6 +2,12 @@
 
 ## 2026-06-06
 
+- Task: start `LIL-P0-01` and converge the local `release/mvp-p0` candidate branch.
+- Files touched: `.gitignore`, removed tracked `.tmp-lilsunspot-data/*` runtime artifacts, `TASKS.md`, `README.lilsunspot.md`, `lilsunspot/README-dev.md`, `lilsunspot/notes/mvp-p0-status.md`, `lilsunspot/notes/qa-checklist.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: no product code changes were needed; the branch records the automated MVP P0 evidence separately from clean-install and real-provider manual risks, and removes tracked temporary runtime files from the release candidate.
+- Validation: daemon pytest 23 passed, product pytest 20 passed, secret guard passed, desktop build passed, `scripts/check.ps1` passed, sidecar build passed, NSIS build produced `Lilsunspot_0.1.0_x64-setup.exe`, and release sidecar smoke passed for `/health`, token-protected `/providers`, `127.0.0.1` binding, runtime file creation, and token log leak check.
+- Remaining risk: clean Windows install, repository-external installed-app launch, real API Key provider save/test/chat, and desktop UI chat were not verified in this task.
+
 - Task: complete `LIL-DOC-01` Markdown documentation entry cleanup.
 - Files touched: `README.lilsunspot.md`, `README.md`, `TASKS.md`, `lilsunspot/README-dev.md`, and lilsunspot notes for doc index, inventory, P0 status, architecture, QA, and decisions.
 - Decision/result: created an executable lilsunspot documentation entry path and marked historical Day1/Weixin/status notes as reference material instead of current truth.

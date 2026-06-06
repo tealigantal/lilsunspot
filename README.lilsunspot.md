@@ -25,14 +25,14 @@ P0 主路径：
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| Windows 安装包 | 部分实现 | 文档和脚本显示已有 NSIS 构建链路，干净 Windows 未验证。 |
-| Lilsunspot.exe 启动 | 部分实现 | 桌面文档显示 Tauri 启动和 sidecar 接入，仓库外安装启动未验证。 |
-| lilsunspotd | 部分实现 | `lilsunspot/daemon/` 存在本地 daemon 和测试，当前任务未运行。 |
-| runtime token | 部分实现 | `runtime-token.json` 相关代码和文档存在，当前任务未运行。 |
-| provider 列表 | 部分实现 | `lilsunspot/resources/provider_registry.yaml` 和 `/providers` 入口存在，当前任务未运行。 |
-| provider 测试 | 部分实现 | `/providers/test` 入口和历史记录存在，当前任务未运行真实 provider。 |
-| provider 保存 | 部分实现 | `/providers/save` 入口和 Hermes home 写入说明存在，当前任务未运行。 |
-| 桌面聊天 | 部分实现 | `/chat/send` 和桌面 Chat 入口存在；是否等同完整 Hermes agent loop 未验证。 |
+| Windows 安装包 | 自动构建通过 | LIL-P0-01 已构建 NSIS 安装包；干净 Windows 未验证。 |
+| Lilsunspot.exe 启动 | 自动构建通过 | Tauri release exe 已构建；仓库外安装启动未验证。 |
+| lilsunspotd | 自动验证通过 | PyInstaller sidecar 可在临时数据目录启动并通过 `/health`。 |
+| runtime token | 自动验证通过 | sidecar smoke 创建 runtime token 和 discovery file，token 未写入 daemon 日志；未记录 token。 |
+| provider 列表 | 自动验证通过 | sidecar smoke 通过 token-protected `/providers` 返回 6 个 provider。 |
+| provider 测试 | 测试通过 | mock provider 测试通过；本次未运行真实 API Key。 |
+| provider 保存 | 测试通过 | 写入 lilsunspot 独立 Hermes home 的测试通过；本次未保存真实 API Key。 |
+| 桌面聊天 | 测试/构建通过 | chat API 测试和桌面 build 通过；真实桌面 UI 聊天未验证。 |
 | 输出模式 | 部分实现 | mode profile 已有资源和 API，三滑杆完整效果未验证。 |
 | 微信 | 部分实现 | Weixin 命令和状态骨架存在，真实扫码私聊未验证。 |
 | 安全审批 | 部分实现 | 审批队列相关 API 存在，真实高危动作拦截未验证。 |
@@ -63,4 +63,4 @@ P0 主路径：
 
 ## 下一步
 
-执行 LIL-P0-01，收敛可安装、可首启、可配置 provider、可桌面聊天的 MVP 候选分支。
+执行 LIL-P0-02 和 LIL-P0-03：新增发布级强检查，并在干净 Windows 上验证仓库外安装首启。

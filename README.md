@@ -2,6 +2,8 @@
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
+> lilsunspot 小黑子项目文档入口：README.lilsunspot.md。本文档其余部分主要保留上游 Hermes Agent 说明。
+
 # Hermes Agent ☤
 
 <p align="center">

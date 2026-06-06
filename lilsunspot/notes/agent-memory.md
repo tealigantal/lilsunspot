@@ -2,6 +2,12 @@
 
 ## 2026-06-06
 
+- Task: complete `LIL-DOC-01` Markdown documentation entry cleanup.
+- Files touched: `README.lilsunspot.md`, `README.md`, `TASKS.md`, `lilsunspot/README-dev.md`, and lilsunspot notes for doc index, inventory, P0 status, architecture, QA, and decisions.
+- Decision/result: created an executable lilsunspot documentation entry path and marked historical Day1/Weixin/status notes as reference material instead of current truth.
+- Validation: repository location, branch, recent log, remotes, Markdown scans, `git diff --check`, and `python scripts/guard_no_secrets.py`.
+- Remaining risk: this task did not run pytest, npm build, Tauri build, provider calls, daemon startup, or clean Windows installation checks.
+
 - Task: complete `LIL-00-07` Windows installer and daemon sidecar minimum loop.
 - Files touched: `TASKS.md`, `scripts/build_lilsunspotd_sidecar.ps1`, `scripts/build_lilsunspot_desktop_nsis.ps1`, `lilsunspot/daemon/sidecar_main.py`, Tauri desktop config/Rust/package scripts, and lilsunspot desktop/dev docs.
 - Decision/result: added a PyInstaller sidecar build through `uv run --extra web --with pyinstaller==6.16.0`, fixed Tauri to bundle NSIS with `externalBin`, and made desktop startup prefer packaged sidecar paths before PATH/debug Python fallback.

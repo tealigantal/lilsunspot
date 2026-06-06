@@ -1,0 +1,8 @@
+model:
+  provider: deepseek
+  default: deepseek-chat
+  base_url: https://api.deepseek.com/v1
+lilsunspot:
+  provider: deepseek
+  model: deepseek-chat
+  updated_at: '2026-06-03T08:56:15.967384+00:00'

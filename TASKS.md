@@ -2,13 +2,31 @@
 
 ## Current
 
-待定。
+- LIL-DOC-01：按仓库现有 MD 架构整理 lilsunspot 项目文档。
 
 ## Next
 
-- 待定
+1. LIL-P0-01：收敛 release/mvp-p0 分支，验证安装、首启、provider、桌面聊天。
+2. LIL-P0-02：新增发布级 check_release.ps1，不允许静默跳过 desktop build。
+3. LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 Lilsunspot.exe 启动 lilsunspotd。
+4. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
+5. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
+6. LIL-P3-01：真实高危动作审批拦截和 audit.db。
+7. LIL-P4-01：诊断包导出和脱敏。
+
+## Blocked / Unknown
+
+- Windows clean install 未验证。
+- NSIS installer 是否可在仓库外启动未验证。
+- 桌面聊天是否等同完整 Hermes agent loop 未验证。
+- Mode 三滑杆未完成或未验证。
+- Weixin 私聊真实闭环未验证。
+- Safety 是否拦截真实高危动作未验证。
+- Diagnostics export 未完成或未验证。
 
 ## Done
+
+以下为历史任务记录，是否完全代表当前主线状态需以 lilsunspot/notes/mvp-p0-status.md 为准。
 
 ### LIL-00-07: Windows 安装包与 daemon sidecar 最小闭环。
 

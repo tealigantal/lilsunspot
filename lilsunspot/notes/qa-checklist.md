@@ -1,5 +1,18 @@
 # QA Checklist
 
+## LIL-P0-01 自动验证记录
+
+- [x] daemon tests：23 passed。
+- [x] product tests：20 passed。
+- [x] secret guard：未发现 lilsunspot task scope 内 secret-like values。
+- [x] desktop TypeScript/Vite build 通过。
+- [x] `scripts/check.ps1` 通过。
+- [x] sidecar build 生成 `lilsunspotd-x86_64-pc-windows-msvc.exe`。
+- [x] NSIS build 生成 `Lilsunspot_0.1.0_x64-setup.exe`。
+- [x] sidecar smoke：`/health` ok，`/providers` 返回 6 个 provider，绑定 `127.0.0.1`，runtime file 创建成功，token 未写入 daemon 日志。
+
+以下清单仍按人工/发布验收口径维护；没有在干净安装环境中验证的项目不勾选。
+
 ## P0 MVP
 
 - [ ] 干净 Windows 可安装

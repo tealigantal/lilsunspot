@@ -3,10 +3,10 @@
 ## 记录信息
 
 - Git root：`<repo-root>`
-- 当前分支：`develop`
-- 当前 commit：`52839794e`
+- 当前分支：`release/mvp-p0`
+- 当前 commit：以 PR 分支提交为准
 - 更新时间：`2026-06-06`
-- 记录方式：基于本地仓库 Markdown、git 状态和文件扫描；未运行的功能标记为未验证。
+- 记录方式：基于 LIL-P0-01 本地自动验证；未运行或仍需真实用户环境的功能标记为未验证。
 
 ## P0 完成定义
 
@@ -24,15 +24,15 @@
 
 | 项目 | 状态 | 证据 | 备注 |
 | --- | --- | --- | --- |
-| Windows 安装包 | 部分实现 | scripts/build_lilsunspotd_sidecar.ps1, lilsunspot/desktop/ | NSIS 构建链路存在；干净 Windows 未验证。 |
-| Lilsunspot.exe | 部分实现 | lilsunspot/desktop/ | Tauri 桌面和 sidecar 文档存在；仓库外启动未验证。 |
-| lilsunspotd | 部分实现 | lilsunspot/daemon/app.py, lilsunspot/daemon/launcher.py | daemon 入口存在；本任务未启动。 |
-| runtime token | 部分实现 | lilsunspot/daemon/auth.py, lilsunspot/daemon/config_paths.py | token 文件逻辑存在；本任务未读取真实 token。 |
-| provider registry | 部分实现 | lilsunspot/resources/provider_registry.yaml, lilsunspot/daemon/providers.py | registry 和读取代码存在。 |
-| provider test | 部分实现 | lilsunspot/daemon/app.py, lilsunspot/daemon/tests/ | `/providers/test` 入口和测试存在；本任务未运行真实 provider。 |
-| provider save | 部分实现 | lilsunspot/daemon/hermes_runtime.py, lilsunspot/daemon/app.py | 写入 Hermes home 的代码路径存在；本任务未运行。 |
-| desktop provider wizard | 部分实现 | lilsunspot/desktop/ | 桌面 Provider 页面/API 调用存在；未做视觉或端到端验证。 |
-| desktop chat | 部分实现 | lilsunspot/desktop/, lilsunspot/daemon/chat_client.py | 桌面和 daemon chat 路径存在；是否稳定未验证。 |
+| Windows 安装包 | 自动构建通过 | `npm run tauri:build --prefix lilsunspot/desktop` | 生成 `Lilsunspot_0.1.0_x64-setup.exe`；干净 Windows 安装未验证。 |
+| Lilsunspot.exe | 自动构建通过 | Tauri release build | 构建出 release exe；仓库外已安装启动未验证。 |
+| lilsunspotd | 自动验证通过 | sidecar smoke `/health` | PyInstaller sidecar 可在临时数据目录启动。 |
+| runtime token | 自动验证通过 | sidecar smoke token-protected `/providers` | 创建 token/runtime file；日志 token 泄漏检查通过；未记录 token。 |
+| provider registry | 自动验证通过 | sidecar smoke `/providers` | 返回 6 个 provider。 |
+| provider test | 测试通过 | `lilsunspot/daemon/tests`, `lilsunspot/tests` | 覆盖 mock 成功和错误；本次未使用真实 API Key。 |
+| provider save | 测试通过 | `lilsunspot/tests/test_provider_api.py` | 覆盖写入 lilsunspot 独立 Hermes home；本次未保存真实 API Key。 |
+| desktop provider wizard | 构建通过 | `npm run build --prefix lilsunspot/desktop` | TypeScript/Vite 通过；未做视觉或端到端验证。 |
+| desktop chat | 测试/构建通过 | chat API tests, desktop build | daemon chat 路径和桌面 build 通过；本次未跑真实桌面 UI 聊天。 |
 | mode profiles | 部分实现 | lilsunspot/resources/, lilsunspot/daemon/app.py | mode profile API 存在；三滑杆未验证。 |
 | Weixin gateway | 部分实现 | lilsunspot/daemon/app.py, lilsunspot/notes/weixin-feasibility.md | 产品层命令/状态骨架存在；真实私聊未验证。 |
 | safety approvals | 部分实现 | lilsunspot/daemon/app.py, lilsunspot/daemon/tests/ | 审批队列 API 存在；真实高危动作拦截未验证。 |
@@ -42,15 +42,15 @@
 
 ## 当前 P0 阻断项
 
-- 安装包是否能在干净 Windows 上运行
-- 桌面是否自动连接 daemon
-- provider 测试保存是否稳定
-- 桌面聊天是否稳定
-- secret 是否脱敏
+- 安装包是否能在干净 Windows 上运行。
+- 仓库外已安装 `Lilsunspot.exe` 是否能自动启动或发现 `lilsunspotd`。
+- 真实 API Key 的 provider test/save/chat 是否稳定；本次只跑 mock 和历史记录级验证。
+- 桌面 UI 首启向导和聊天闭环未做人工/浏览器视觉验证。
+- 当前 `scripts/check.ps1` 仍会在缺少 desktop 依赖时跳过 desktop build，发布级强校验留给 LIL-P0-02。
 
-## 最近应运行的检查
+## LIL-P0-01 自动验证记录
 
-以下命令是建议检查项；本次 LIL-DOC-01 未运行 pytest、npm build 或 Tauri build。
+2026-06-06 在 `release/mvp-p0` 本地分支运行：
 
 ```powershell
 git diff --check
@@ -58,10 +58,24 @@ python scripts/guard_no_secrets.py
 python -m pytest lilsunspot/daemon/tests
 python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
 npm run build --prefix lilsunspot/desktop
+pwsh scripts/check.ps1
 pwsh scripts/build_lilsunspotd_sidecar.ps1
-npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
+npm run tauri:build --prefix lilsunspot/desktop
 ```
+
+结果：
+
+- daemon tests：23 passed。
+- product tests：20 passed。
+- secret guard：未发现 lilsunspot task scope 内 secret-like values。
+- desktop build：TypeScript/Vite build passed。
+- `scripts/check.ps1`：passed。
+- sidecar build：生成 `lilsunspotd-x86_64-pc-windows-msvc.exe`。
+- NSIS build：生成 `Lilsunspot_0.1.0_x64-setup.exe`。
+- sidecar smoke：`/health` ok，`/providers` 返回 6 个 provider，`runtime_bind_host=127.0.0.1`，runtime file 创建成功，token 未写入 daemon 日志。
+- 发布候选清理：删除已追踪的 `.tmp-lilsunspot-data/*` 临时 runtime artifacts，并加入 `.gitignore`。
 
 ## 下一步建议
 
-LIL-P0-01：收敛 release/mvp-p0 分支并验证安装、首启、provider、桌面聊天。
+1. LIL-P0-02：新增发布级 `check_release.ps1`，不允许静默跳过 desktop build。
+2. LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 `Lilsunspot.exe` 启动 `lilsunspotd`。

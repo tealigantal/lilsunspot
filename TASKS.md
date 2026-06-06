@@ -10,6 +10,41 @@
 
 ## Done
 
+### LIL-00-06: 微信命令意图与安全审批队列最小闭环。
+
+Goal:
+在不触碰 Hermes 微信 adapter 的前提下，先完成 lilsunspot 产品层的微信命令解析/处理入口和本地安全审批队列，让高风险微信发送动作只能进入审批流程，不能直接发送。
+
+Allowed files:
+- TASKS.md
+- lilsunspot/**
+- scripts/**
+
+Do not touch:
+- Hermes core business code
+- SOUL.md
+
+Acceptance:
+1. `/gateway/weixin/*` 和 `/safety/*` 除 `/health` 外继续要求 `X-Lilsunspot-Token`。
+2. 微信状态必须明确说明当前不会扫码登录或真实发送消息。
+3. `/gateway/weixin/commands` 暴露 `/help`、`/mode`、`/approve`、`/reject` 的产品层命令。
+4. 微信命令处理接口能解析 `/help`、`/mode <id>`、`/approve <id>`、`/reject <id>`，用户可见错误保持普通中文。
+5. `send_weixin_message` 必须按安全策略创建 pending approval，不得直接发送。
+6. 审批队列必须保存在 lilsunspot 独立数据目录，不写入 Hermes home。
+7. 审批支持 approve/reject 后从 pending 列表移除，并保留状态记录。
+8. API Key、runtime token 不得进入日志、响应、prompt fixture、截图或诊断文本。
+9. daemon pytest 最小测试通过。
+10. `scripts/check.ps1` 可以运行。
+11. 不修改 Hermes 核心。
+12. 不修改 SOUL.md。
+
+Check:
+```powershell
+python -m pytest lilsunspot/daemon/tests
+python scripts/guard_no_secrets.py
+pwsh scripts/check.ps1
+```
+
 ### LIL-00-05: 接入 mode profiles 到真实聊天行为。
 
 Goal:

@@ -35,11 +35,12 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     weixin = client.get("/gateway/weixin/status", headers=headers)
     assert weixin.status_code == 200
     assert weixin.json()["connected"] is False
-    assert "占位" in weixin.json()["message"]
+    assert "不会扫码登录" in weixin.json()["message"]
 
     commands = client.get("/gateway/weixin/commands", headers=headers)
     assert commands.status_code == 200
     assert commands.json()["commands"]
+    assert any(item["name"] == "/approve" for item in commands.json()["commands"])
 
     policy = client.get("/safety/policy", headers=headers)
     assert policy.status_code == 200

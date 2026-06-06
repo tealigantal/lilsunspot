@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "build:tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/build_lilsunspotd_sidecar.ps1 && npm run build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/build_lilsunspot_desktop_nsis.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

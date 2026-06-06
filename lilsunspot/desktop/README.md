@@ -29,7 +29,7 @@ The app auto-discovers `lilsunspotd` from the local `daemon-runtime.json` file a
 - Safety
 - Doctor
 
-Provider checks and chat use the local daemon. Weixin, Safety approvals, and Doctor repair are still placeholder flows.
+Provider checks and chat use the local daemon. Weixin real login/send and Doctor repair are still placeholder flows; Safety approvals have the minimum pending/history API but the desktop page still shows JSON.
 
 ## Protected APIs
 
@@ -43,8 +43,11 @@ Tauri command `discover_daemon` reads `daemon-runtime.json` and `runtime-token.j
 npm run build
 ```
 
-Tauri packaging remains a future task:
+Tauri packaging uses a bundled `lilsunspotd` sidecar for Windows. From the repository root:
 
 ```powershell
-npm run tauri:build
+pwsh scripts/build_lilsunspotd_sidecar.ps1
+npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
 ```
+
+The NSIS installer is written under `src-tauri/target/release/bundle/nsis/`. Do not use `targets: all` for the Windows build path; MSI/WiX is not part of the current minimum installer loop.

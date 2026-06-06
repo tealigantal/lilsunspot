@@ -2,6 +2,12 @@
 
 ## 2026-06-06
 
+- Task: complete `LIL-00-07` Windows installer and daemon sidecar minimum loop.
+- Files touched: `TASKS.md`, `scripts/build_lilsunspotd_sidecar.ps1`, `scripts/build_lilsunspot_desktop_nsis.ps1`, `lilsunspot/daemon/sidecar_main.py`, Tauri desktop config/Rust/package scripts, and lilsunspot desktop/dev docs.
+- Decision/result: added a PyInstaller sidecar build through `uv run --extra web --with pyinstaller==6.16.0`, fixed Tauri to bundle NSIS with `externalBin`, and made desktop startup prefer packaged sidecar paths before PATH/debug Python fallback.
+- Validation: daemon pytest, product pytest, secret guard, `scripts/check.ps1`, Windows PowerShell sidecar build, NSIS Tauri build, and release sidecar `/health` plus token-protected `/providers` smoke passed.
+- Remaining risk: the NSIS installer was built but not installed on a clean Windows account; signing, auto-update, and real installed-app startup remain manual/release validation items.
+
 - Task: sync local `develop` with latest `origin/develop` and finish an in-progress merge.
 - Files touched: `AGENTS.md`, `TASKS.md`, `lilsunspot/README-dev.md`, `lilsunspot/daemon/chat_client.py`, related chat tests, desktop README/UI/types, and `lilsunspot/notes/agent-memory.md`.
 - Decision/result: fetched `origin/develop`, resolved conflicts by keeping the latest remote LIL-00-05/LIL-00-06 code and tests, while preserving local Markdown Memory and Codex environment instructions in `AGENTS.md`.

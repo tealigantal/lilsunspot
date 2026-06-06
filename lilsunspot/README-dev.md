@@ -16,14 +16,15 @@
 - Provider 列表、打开 Key 页面、真实 `/chat/completions` 最小连接测试、保存 Hermes 兼容配置。
 - 桌面 Chat 页通过 `/chat/send` 使用已保存 Hermes 兼容配置调用真实 OpenAI-compatible `chat/completions`，并把当前 mode profile 的 `system_hint` 注入 system message。
 - 模式配置已接入真实聊天 prompt；微信状态、安全策略、诊断页仍是本地 API 骨架。
+- Windows NSIS 安装包构建链路已接入 daemon sidecar；`Lilsunspot.exe` 可优先启动打包内的 `lilsunspotd`。
 - secret guard、daemon pytest、desktop TypeScript/Vite build 检查入口。
 
 仍是占位：
 
 - 微信扫码、联系人、消息发送尚未实现。
-- 安全审批队列只有策略和占位接口。
+- 安全审批队列已有最小 pending/history API，桌面安全页仍是 JSON 展示。
 - 诊断修复与诊断包导出仍是占位。
-- Windows 安装包和最终 `Lilsunspot.exe -> lilsunspotd` 分发链路尚未完成。
+- 安装包签名、自动更新和真实干净机器验收尚未完成。
 
 ## 目录
 
@@ -99,6 +100,34 @@ npm run tauri:dev
 4. 之后读取 `runtime-token.json`，通过 `daemon_request` 访问受保护 API。
 
 浏览器开发模式没有 Tauri token 代理，需要在页面的开发者模式区域手动填入 `runtime-token.json` 里的 token。
+
+## Windows 打包
+
+daemon sidecar 由 PyInstaller 在构建机上生成，最终用户不需要安装 Python：
+
+```powershell
+pwsh scripts/build_lilsunspotd_sidecar.ps1
+```
+
+脚本会通过 `uv run --extra web --with pyinstaller==6.16.0` 构建：
+
+```text
+lilsunspot/desktop/src-tauri/binaries/lilsunspotd-x86_64-pc-windows-msvc.exe
+```
+
+Tauri 配置使用 `bundle.externalBin` 引入该 sidecar，并把 Windows bundle target 固定为 `nsis`。构建安装包：
+
+```powershell
+npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
+```
+
+预期产物：
+
+```text
+lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe
+```
+
+不要改回 `targets: all`；当前 Windows 环境下 MSI/WiX 下载不稳定，NSIS 已能生成安装器。
 
 ## API 规则
 

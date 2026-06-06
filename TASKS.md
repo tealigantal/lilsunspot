@@ -10,6 +10,44 @@
 
 ## Done
 
+### LIL-00-07: Windows 安装包与 daemon sidecar 最小闭环。
+
+Goal:
+让普通 Windows 用户安装后打开 `Lilsunspot.exe`，不需要 Python、Node、Git 或 Docker，也能自动启动并连接 `lilsunspotd`。
+
+Allowed files:
+- TASKS.md
+- lilsunspot/**
+- scripts/**
+
+Do not touch:
+- Hermes core business code
+- SOUL.md
+
+Acceptance:
+1. Windows daemon sidecar 构建脚本能生成 `lilsunspotd-x86_64-pc-windows-msvc.exe`。
+2. sidecar 入口等价于 `python -m lilsunspot.daemon.launcher`。
+3. sidecar 打包必须包含 `lilsunspot/resources/*.yaml`，不能依赖仓库源码路径。
+4. Tauri bundle 使用 `externalBin` 接入 daemon sidecar。
+5. Windows bundle target 固定为 `nsis`，避免 `targets: all` 触发 MSI/WiX 下载失败。
+6. 桌面端启动 daemon 时优先查找打包 sidecar；debug 构建下仍保留 Python fallback。
+7. 安装包构建命令能生成可安装 `.exe`。
+8. sidecar 首次启动能创建 lilsunspot 独立数据目录、runtime token、discovery file 和 logs。
+9. 桌面端能通过 Tauri token 代理访问 `/app/state` 和 `/providers`。
+10. API Key、runtime token 不得进入日志、响应、prompt fixture、截图或诊断文本。
+11. `scripts/check.ps1` 可以运行。
+12. 不修改 Hermes 核心。
+
+Check:
+```powershell
+python -m pytest lilsunspot/daemon/tests
+python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
+python scripts/guard_no_secrets.py
+pwsh scripts/check.ps1
+pwsh scripts/build_lilsunspotd_sidecar.ps1
+npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
+```
+
 ### LIL-00-06: 微信命令意图与安全审批队列最小闭环。
 
 Goal:

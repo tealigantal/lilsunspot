@@ -13,6 +13,7 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8765;
 const TOKEN_FILE_NAME: &str = "runtime-token.json";
 const RUNTIME_FILE_NAME: &str = "daemon-runtime.json";
+const WINDOWS_SIDECAR_NAME: &str = "lilsunspotd-x86_64-pc-windows-msvc.exe";
 
 #[derive(Clone)]
 struct DaemonEndpoint {
@@ -226,6 +227,42 @@ fn spawn_candidate(program: PathBuf, args: &[&str]) -> Result<(), String> {
         .map_err(|error| format!("启动本地服务失败：{error}"))
 }
 
+fn sidecar_file_names() -> &'static [&'static str] {
+    #[cfg(target_os = "windows")]
+    {
+        &["lilsunspotd.exe", WINDOWS_SIDECAR_NAME]
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        &["lilsunspotd"]
+    }
+}
+
+fn add_sidecar_candidates_from_dir(candidates: &mut Vec<PathBuf>, dir: &Path) {
+    for name in sidecar_file_names() {
+        candidates.push(dir.join(name));
+        candidates.push(dir.join("binaries").join(name));
+        candidates.push(dir.join("resources").join(name));
+        candidates.push(dir.join("resources").join("binaries").join(name));
+    }
+}
+
+fn bundled_sidecar_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            add_sidecar_candidates_from_dir(&mut candidates, dir);
+        }
+    }
+
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        add_sidecar_candidates_from_dir(&mut candidates, Path::new(manifest_dir));
+    }
+
+    candidates
+}
+
 fn launch_daemon_process() -> Result<(), String> {
     if let Ok(value) = env::var("LILSUNSPOTD_PATH") {
         let path = PathBuf::from(value);
@@ -234,18 +271,13 @@ fn launch_daemon_process() -> Result<(), String> {
         }
     }
 
-    if let Ok(current_exe) = env::current_exe() {
-        if let Some(dir) = current_exe.parent() {
-            for name in ["lilsunspotd.exe", "lilsunspotd"] {
-                let path = dir.join(name);
-                if path.exists() {
-                    return spawn_candidate(path, &[]);
-                }
-            }
+    for path in bundled_sidecar_candidates() {
+        if path.exists() {
+            return spawn_candidate(path, &[]);
         }
     }
 
-    for name in ["lilsunspotd.exe", "lilsunspotd"] {
+    for name in sidecar_file_names() {
         if spawn_candidate(PathBuf::from(name), &[]).is_ok() {
             return Ok(());
         }

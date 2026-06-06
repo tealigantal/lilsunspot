@@ -2,6 +2,49 @@
 
 ## Current
 
+待定。
+
+## Next
+
+- 待定
+
+## Done
+
+### LIL-00-06: 微信命令意图与安全审批队列最小闭环。
+
+Goal:
+在不触碰 Hermes 微信 adapter 的前提下，先完成 lilsunspot 产品层的微信命令解析/处理入口和本地安全审批队列，让高风险微信发送动作只能进入审批流程，不能直接发送。
+
+Allowed files:
+- TASKS.md
+- lilsunspot/**
+- scripts/**
+
+Do not touch:
+- Hermes core business code
+- SOUL.md
+
+Acceptance:
+1. `/gateway/weixin/*` 和 `/safety/*` 除 `/health` 外继续要求 `X-Lilsunspot-Token`。
+2. 微信状态必须明确说明当前不会扫码登录或真实发送消息。
+3. `/gateway/weixin/commands` 暴露 `/help`、`/mode`、`/approve`、`/reject` 的产品层命令。
+4. 微信命令处理接口能解析 `/help`、`/mode <id>`、`/approve <id>`、`/reject <id>`，用户可见错误保持普通中文。
+5. `send_weixin_message` 必须按安全策略创建 pending approval，不得直接发送。
+6. 审批队列必须保存在 lilsunspot 独立数据目录，不写入 Hermes home。
+7. 审批支持 approve/reject 后从 pending 列表移除，并保留状态记录。
+8. API Key、runtime token 不得进入日志、响应、prompt fixture、截图或诊断文本。
+9. daemon pytest 最小测试通过。
+10. `scripts/check.ps1` 可以运行。
+11. 不修改 Hermes 核心。
+12. 不修改 SOUL.md。
+
+Check:
+```powershell
+python -m pytest lilsunspot/daemon/tests
+python scripts/guard_no_secrets.py
+pwsh scripts/check.ps1
+```
+
 ### LIL-00-05: 接入 mode profiles 到真实聊天行为。
 
 Goal:
@@ -38,53 +81,7 @@ python scripts/guard_no_secrets.py
 pwsh scripts/check.ps1
 ```
 
-## Next
-
-- 待定。
-
-## Done
-
-### LIL-00-04: 实现桌面聊天到 Hermes runtime 的真实桥接。
-
-Goal:
-让 `/chat/send` 不再返回占位回复，而是使用 lilsunspot 独立 `hermes_home` 中已保存的 Provider、模型和 API Key 配置调用 Hermes runtime，桌面 Chat 页展示真实模型回复，同时继续避免泄露 API Key 或 runtime token。
-
-Allowed files:
-- TASKS.md
-- lilsunspot/**
-- scripts/**
-
-Do not touch:
-- Hermes core business code
-- SOUL.md
-
-Acceptance:
-1. `/chat/send` 除 `/health` 规则外必须继续要求 `X-Lilsunspot-Token`。
-2. 未保存 provider/model 时返回普通中文设置提示，不调用 Hermes runtime。
-3. cloud provider 缺少 API Key 时返回普通中文错误，不调用 Hermes runtime。
-4. local provider 可以在没有 API Key 时进入聊天桥接。
-5. 桥接必须使用 `LILSUNSPOT_DATA_DIR` 下的独立 `hermes_home`，不能读取或污染用户真实 `~/.hermes`。
-6. 桥接必须读取 `hermes_home/config.yaml` 中的 lilsunspot provider/model 配置。
-7. 桥接必须从 `hermes_home/.env` 读取对应 provider env key，但 API Key 不得进入日志、响应、prompt fixture、截图或诊断文本。
-8. 成功响应必须来自真实 Hermes runtime 或最小 runtime 适配层，不能再返回 `placeholder` engine。
-9. 桌面 Chat 页显示 loading、成功回复、普通中文错误和禁用状态。
-10. 桌面 Chat 页不得显示 API Key、runtime token 或原始异常。
-11. daemon pytest 最小测试通过。
-12. chat/provider 产品层补充测试通过。
-13. desktop TypeScript build 通过。
-14. `scripts/check.ps1` 可以运行。
-15. 不修改 Hermes 核心。
-16. 不修改 SOUL.md。
-17. 没有真实 API Key 或 token 泄露。
-
-Check:
-```powershell
-python -m pytest lilsunspot/daemon/tests
-python -m pytest lilsunspot/tests/test_provider_api.py lilsunspot/tests/test_provider_client.py lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
-python scripts/guard_no_secrets.py
-pwsh scripts/check.ps1
-```
-
+- LIL-00-04: 实现桌面聊天到 Hermes runtime 的真实桥接。本机 `DEEPSEEK_API_KEY` 已通过 `/providers/test` 和 `/chat/send` 真实通讯验证；未记录 API Key、runtime token 或回复正文。
 - LIL-00-01: 创建 lilsunspot 完整开发骨架。
 - LIL-00-02: 打通 lilsunspotd 启动器和桌面端自动发现。
 - LIL-00-03: 实现真实 Provider 配置验证。

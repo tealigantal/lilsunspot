@@ -5,12 +5,6 @@
 
 `lilsunspot/` 是 Hermes Agent fork 里的产品层代码。当前目标是把 Windows 桌面个人助手的本地启动、Provider 配置、桌面首启流程和安全边界先跑通；不要改 Hermes 核心业务代码。
 
-## 当前开发任务
-
-- 当前：`LIL-00-05`，接入 mode profiles 到真实聊天行为。
-- 已完成：`LIL-00-04`，`/chat/send` 已使用独立 `hermes_home` 中保存的 provider/model/API Key 配置调用 OpenAI-compatible 最小 runtime 适配层。
-- 已完成：`LIL-00-03`，`/providers/test` 已接入真实 OpenAI-compatible `/chat/completions` 最小探测，用来验证 API Key 和模型组合。
-
 ## 当前状态
 
 已具备：
@@ -20,13 +14,12 @@
 - Tauri 2 + React + TypeScript 桌面端。
 - 桌面端自动连接 daemon；开发浏览器模式支持手动 token。
 - Provider 列表、打开 Key 页面、真实 `/chat/completions` 最小连接测试、保存 Hermes 兼容配置。
-- `/chat/send` 真实聊天桥接：读取 lilsunspot 独立 `hermes_home/config.yaml` 和 `.env`，调用 OpenAI-compatible `/chat/completions`，成功时返回 `hermes_runtime_adapter` engine。
-- 模式配置、微信状态、安全策略、诊断页的本地 API 骨架。
+- 桌面 Chat 页通过 `/chat/send` 使用已保存 Hermes 兼容配置调用真实 OpenAI-compatible `chat/completions`，并把当前 mode profile 的 `system_hint` 注入 system message。
+- 模式配置已接入真实聊天 prompt；微信状态、安全策略、诊断页仍是本地 API 骨架。
 - secret guard、daemon pytest、desktop TypeScript/Vite build 检查入口。
 
 仍是占位：
 
-- mode profiles 还没有进入真实聊天 prompt；这是当前 `LIL-00-05` 要替换的部分。
 - 微信扫码、联系人、消息发送尚未实现。
 - 安全审批队列只有策略和占位接口。
 - 诊断修复与诊断包导出仍是占位。
@@ -62,6 +55,7 @@ $env:LILSUNSPOT_DATA_DIR = "$pwd\.tmp-lilsunspot-data"
 - `daemon-runtime.json`: daemon discovery 文件，包含 `127.0.0.1` base URL、端口、进程号、数据目录和 token 文件路径，不包含 token 明文。
 - `hermes_home/.env`: Provider API Key 存储位置。
 - `hermes_home/config.yaml`: Hermes 兼容模型配置，同时写入 `lilsunspot.provider` 和 `lilsunspot.model`。
+- `mode-profile.json`: 当前输出模式选择。未选择时使用默认 profile。
 - `logs/`: daemon 日志目录。
 
 ## 启动 daemon
@@ -161,7 +155,6 @@ lilsunspot/resources/provider_registry.yaml
 
 - 从 registry 读取 `base_url`，没有时退回 `detect_url`。
 - 对 OpenAI-compatible `chat/completions` 发起最小请求。
-- 这是一次真实网络探测；cloud provider 会使用传入的 API Key 调用服务商。
 - cloud provider 必须提供 API Key。
 - local provider 可以不提供 API Key。
 - 成功必须证明 API Key 和模型组合被服务商接受。
@@ -172,15 +165,9 @@ lilsunspot/resources/provider_registry.yaml
 
 ## 聊天桥接
 
-`POST /chat/send` 会：
+`POST /chat/send` 会读取 `hermes_home/config.yaml` 中的 `lilsunspot.provider` / `lilsunspot.model`，再从 `hermes_home/.env` 读取 provider registry 中声明的 `env_key`。它还会从 `LILSUNSPOT_DATA_DIR` 下的 `mode-profile.json` 读取当前 mode；未选择或状态文件异常时使用默认 profile，并把当前 profile 的 `system_hint` 作为 OpenAI-compatible `messages` 的 system message。随后它使用 registry 中的 `base_url` 或 `detect_url` 发起非流式 OpenAI-compatible `chat/completions` 请求。
 
-- 从 `LILSUNSPOT_DATA_DIR` 下的独立 `hermes_home/config.yaml` 读取 `lilsunspot.provider` 和 `lilsunspot.model`。
-- 从 `hermes_home/.env` 读取 provider registry 里声明的 `env_key`。
-- cloud provider 缺少 API Key 时直接返回普通中文错误，不调用模型服务。
-- local provider 允许空 API Key，并在请求中不发送 `Authorization` header。
-- 对 provider 的 OpenAI-compatible `chat/completions` 发起真实请求。
-- 成功时返回真实回复和 `engine: hermes_runtime_adapter`，不再返回 `placeholder` engine。
-- 失败时只返回普通中文错误，不返回原始异常、API Key 或 runtime token。
+cloud provider 必须已经保存 API Key；local provider 可以没有 API Key。聊天失败会返回普通中文错误，常见 `error_code` 包括 `invalid_key`、`quota_exceeded`、`rate_limited`、`network_error`、`model_not_found`。响应不会包含 API Key 或 runtime token。
 
 ## 本机 API Key 实测
 
@@ -323,18 +310,12 @@ Remove-Item -Recurse -Force -LiteralPath $dataDir
 
 ## 验证
 
-从仓库根目录运行最小检查：
+从仓库根目录运行：
 
 ```powershell
 python -m pytest lilsunspot/daemon/tests
 python scripts/guard_no_secrets.py
 pwsh scripts/check.ps1
-```
-
-Provider 和聊天产品层补充测试：
-
-```powershell
-python -m pytest lilsunspot/tests/test_provider_api.py lilsunspot/tests/test_provider_client.py lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
 ```
 
 `scripts/check.ps1` 当前会：
@@ -343,7 +324,7 @@ python -m pytest lilsunspot/tests/test_provider_api.py lilsunspot/tests/test_pro
 2. 跑 `python scripts/guard_no_secrets.py`。
 3. 如果存在 `npm` 且 `lilsunspot/desktop/node_modules` 已安装，跑 `npm run build --prefix lilsunspot/desktop`。
 
-单独跑 Provider client 测试时，Windows 下从仓库根配置读取 `pytest-timeout` 要使用 `thread` timeout：
+Provider client 还有产品层补充测试。Windows 下从仓库根配置读取 `pytest-timeout` 时使用 `thread` timeout：
 
 ```powershell
 python -m pytest lilsunspot/tests/test_provider_client.py --timeout-method=thread

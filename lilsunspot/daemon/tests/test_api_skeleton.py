@@ -1,31 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+
+import httpx
 
 
-class FakeChatResponse:
-    def __init__(self, status_code: int, payload: dict[str, Any]):
-        self.status_code = status_code
-        self._payload = payload
+def _mock_chat_http_client(daemon_client, monkeypatch, handler):
+    transport = httpx.MockTransport(handler)
 
-    def json(self) -> dict[str, Any]:
-        return self._payload
+    def make_client(base_url: str):
+        return httpx.AsyncClient(base_url=base_url, transport=transport)
 
-
-class FakeChatClient:
-    def __init__(self, response: FakeChatResponse):
-        self.response = response
-        self.requests: list[dict[str, Any]] = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, _exc_type, _exc, _traceback):
-        return None
-
-    async def post(self, path: str, headers: dict[str, str], json: dict[str, Any]):
-        self.requests.append({"path": path, "headers": headers, "json": json})
-        return self.response
+    monkeypatch.setattr(daemon_client.chat_client, "_make_chat_http_client", make_client)
 
 
 def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
@@ -49,11 +35,12 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     weixin = client.get("/gateway/weixin/status", headers=headers)
     assert weixin.status_code == 200
     assert weixin.json()["connected"] is False
-    assert "占位" in weixin.json()["message"]
+    assert "不会扫码登录" in weixin.json()["message"]
 
     commands = client.get("/gateway/weixin/commands", headers=headers)
     assert commands.status_code == 200
     assert commands.json()["commands"]
+    assert any(item["name"] == "/approve" for item in commands.json()["commands"])
 
     policy = client.get("/safety/policy", headers=headers)
     assert policy.status_code == 200
@@ -73,7 +60,7 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     assert "占位" in repair.json()["message"]
 
 
-def test_chat_send_requires_provider_config(daemon_client):
+def test_chat_runtime_requires_provider_config(daemon_client):
     response = daemon_client.client.post(
         "/chat/send",
         headers=daemon_client.headers,
@@ -87,18 +74,18 @@ def test_chat_send_requires_provider_config(daemon_client):
     assert "首启向导" in body["message"]
 
 
-def test_chat_send_uses_runtime_adapter_after_provider_save(daemon_client, monkeypatch):
-    import lilsunspot.daemon.chat_client as chat_client
-
+def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     client = daemon_client.client
     headers = daemon_client.headers
-    fake_client = FakeChatClient(
-        FakeChatResponse(
-            200,
-            {"choices": [{"message": {"content": "小黑子已连接真实适配层。"}}]},
-        )
-    )
-    monkeypatch.setattr(chat_client, "_make_http_client", lambda _base_url: fake_client)
+    seen_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        assert request.headers.get("authorization") is None
+        assert str(request.url) == "http://127.0.0.1:11434/v1/chat/completions"
+        return httpx.Response(200, json={"choices": [{"message": {"content": "这是模型回复。"}}]})
+
+    _mock_chat_http_client(daemon_client, monkeypatch, handler)
 
     save = client.post(
         "/providers/save",
@@ -116,7 +103,11 @@ def test_chat_send_uses_runtime_adapter_after_provider_save(daemon_client, monke
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "hermes_runtime_adapter"
-    assert body["reply"] == "小黑子已连接真实适配层。"
-    assert fake_client.requests[0]["path"] == "chat/completions"
-    assert "Authorization" not in fake_client.requests[0]["headers"]
+    assert body["engine"] == "hermes_runtime"
+    assert body["reply"] == "这是模型回复。"
+    assert seen_payload["model"] == "llama3.2"
+    default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
+    assert seen_payload["messages"] == [
+        {"role": "system", "content": default_hint},
+        {"role": "user", "content": "你好"},
+    ]

@@ -15,14 +15,21 @@ from .auth import load_or_create_token, require_token
 from .chat_client import current_runtime_model, send_chat_message
 from .config_paths import ensure_runtime_dirs
 from .doctor import repair_placeholder, run_doctor_checks
-from .gateway import weixin_commands, weixin_status
+from .gateway import parse_weixin_command, request_weixin_send_approval, weixin_commands, weixin_status
 from .hermes_runtime import HermesRuntimeError, save_provider_credentials
 from .logging_utils import configure_logging
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
 from .providers import load_provider_registry, provider_by_id
 from .runtime_discovery import base_url_for, write_runtime_descriptor
-from .safety import describe_approval_placeholder, list_pending_approvals, load_safety_policy
+from .safety import (
+    ApprovalNotFoundError,
+    decide_approval,
+    describe_approval_placeholder,
+    list_pending_approvals,
+    load_safety_policy,
+    request_safety_approval,
+)
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -108,6 +115,26 @@ class SelectModeRequest(BaseModel):
 
 class ApprovalPlaceholderRequest(BaseModel):
     operation: str = Field(..., min_length=1)
+
+
+class ApprovalRequest(BaseModel):
+    operation: str = Field(..., min_length=1)
+    summary: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    source: str = "local_api"
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: str = Field(..., min_length=1)
+
+
+class WeixinCommandRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+
+
+class WeixinSendRequest(BaseModel):
+    recipient: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1)
 
 
 class RepairRequest(BaseModel):
@@ -257,6 +284,43 @@ async def gateway_weixin_commands() -> dict[str, Any]:
     return weixin_commands()
 
 
+@app.post("/gateway/weixin/commands/handle", dependencies=[Depends(require_token)])
+async def gateway_weixin_command_handle(payload: WeixinCommandRequest) -> dict[str, Any]:
+    intent = parse_weixin_command(payload.text)
+    if not intent.get("ok"):
+        return {"ok": False, "intent": intent, "message": intent["message"]}
+
+    kind = intent.get("kind")
+    if kind == "help":
+        return {"ok": True, "intent": intent, "message": intent["message"], "commands": weixin_commands()["commands"]}
+    if kind == "list_modes":
+        return {"ok": True, "intent": intent, "message": intent["message"], "modes": load_mode_profiles()}
+    if kind == "select_mode":
+        try:
+            result = select_mode(str(intent["mode"]))
+        except ValueError as exc:
+            return {"ok": False, "intent": intent, "message": str(exc)}
+        return {"ok": True, "intent": intent, "message": "输出风格已切换。", "mode": result}
+    if kind == "approval_decision":
+        try:
+            result = decide_approval(str(intent["approval_id"]), str(intent["decision"]))
+        except ApprovalNotFoundError as exc:
+            return {"ok": False, "intent": intent, "message": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "intent": intent, "message": str(exc)}
+        return {"ok": True, "intent": intent, "message": result["message"], "approval": result["approval"]}
+
+    return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}
+
+
+@app.post("/gateway/weixin/send", dependencies=[Depends(require_token)])
+async def gateway_weixin_send(payload: WeixinSendRequest) -> dict[str, Any]:
+    try:
+        return request_weixin_send_approval(payload.recipient, payload.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/safety/policy", dependencies=[Depends(require_token)])
 async def safety_policy() -> dict[str, Any]:
     return {"policy": load_safety_policy()}
@@ -265,6 +329,29 @@ async def safety_policy() -> dict[str, Any]:
 @app.get("/safety/approvals", dependencies=[Depends(require_token)])
 async def safety_approvals() -> dict[str, Any]:
     return list_pending_approvals()
+
+
+@app.post("/safety/approvals/request", dependencies=[Depends(require_token)])
+async def safety_approval_request(payload: ApprovalRequest) -> dict[str, Any]:
+    try:
+        return request_safety_approval(
+            payload.operation,
+            payload.summary or f"请求执行 {payload.operation}",
+            payload.details,
+            payload.source,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/safety/approvals/{approval_id}/decide", dependencies=[Depends(require_token)])
+async def safety_approval_decide(approval_id: str, payload: ApprovalDecisionRequest) -> dict[str, Any]:
+    try:
+        return decide_approval(approval_id, payload.decision)
+    except ApprovalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/safety/approvals/placeholder", dependencies=[Depends(require_token)])

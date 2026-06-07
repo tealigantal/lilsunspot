@@ -24,6 +24,7 @@ try {
         "pyinstaller",
         "--onefile",
         "--clean",
+        "--noconsole",
         "--noconfirm",
         "--name", "lilsunspotd",
         "--distpath", $DistDir,

@@ -22,6 +22,7 @@ import {
   setRuntimeToken,
   testProvider
 } from "./api";
+import lilsunspotIcon from "./assets/lilsunspot-icon.png";
 import type {
   AppBootState,
   AppState,
@@ -41,6 +42,13 @@ import type {
 
 type Page = "home" | "provider" | "chat" | "mode" | "weixin" | "safety" | "doctor";
 type WizardStep = 1 | 2 | 3;
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  meta?: string;
+  error?: boolean;
+};
 
 const PAGES: { id: Page; label: string }[] = [
   { id: "home", label: "首页" },
@@ -61,6 +69,13 @@ const PROVIDER_COPY: Record<string, { description: string; keyRequirement: strin
   ollama: { description: "模型运行在本机，适合离线尝试。", keyRequirement: "通常不用 API Key" },
   openrouter: { description: "海外聚合服务，适合已有账号用户。", keyRequirement: "需要 API Key" },
   openai: { description: "OpenAI 官方服务，适合海外网络环境。", keyRequirement: "需要 API Key" }
+};
+
+const QUICK_PROVIDER_LABELS: Record<string, string> = {
+  deepseek: "DeepSeek",
+  kimi: "Kimi",
+  qwen: "通义千问",
+  ollama: "本地 Ollama"
 };
 
 function asText(value: unknown) {
@@ -121,6 +136,23 @@ function providerDescription(provider: Provider) {
   return PROVIDER_COPY[provider.id] || { description: provider.notes || "OpenAI 兼容模型服务。", keyRequirement: "需要配置" };
 }
 
+function displayProvider(providerId?: string) {
+  if (!providerId) {
+    return "未设置";
+  }
+  return QUICK_PROVIDER_LABELS[providerId] || providerId;
+}
+
+function modeName(modeId: string) {
+  const names: Record<string, string> = {
+    default: "默认",
+    pragmatic: "务实",
+    balanced: "平衡",
+    emotional: "陪伴"
+  };
+  return names[modeId] || modeId;
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [devMode] = useState(!isDesktopRuntime());
@@ -138,7 +170,7 @@ export default function App() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [showMoreProviders, setShowMoreProviders] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [chatReply, setChatReply] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [modes, setModes] = useState<ModeProfile[]>([]);
   const [currentMode, setCurrentMode] = useState<CurrentMode | null>(null);
   const [weixinStatus, setWeixinStatus] = useState<WeixinStatus | null>(null);
@@ -156,6 +188,7 @@ export default function App() {
   const visibleRecommendedProviders = providers.filter((provider) => RECOMMENDED_PROVIDER_IDS.includes(provider.id));
   const moreProviders = providers.filter((provider) => !RECOMMENDED_PROVIDER_IDS.includes(provider.id));
   const homeStatus = userFacingStatus(bootState, appState, connection);
+  const providerTesting = busy && bootState === "provider_testing";
 
   useEffect(() => {
     void bootstrapConnection();
@@ -166,6 +199,12 @@ export default function App() {
       void loadProviders();
     }
   }, [page, providers.length]);
+
+  useEffect(() => {
+    if (page === "mode" && modes.length === 0) {
+      void loadModes();
+    }
+  }, [page, modes.length]);
 
   async function withStatus(action: () => Promise<void>) {
     setBusy(true);
@@ -229,6 +268,10 @@ export default function App() {
       const state = await getAppState();
       setAppState(state);
       setBootState(state.boot);
+      if (state.boot === "provider_missing" && !devMode) {
+        setWizardStep(1);
+        setPage((current) => (current === "home" ? "provider" : current));
+      }
     } catch (error) {
       setAppState({
         boot: "daemon_ready",
@@ -267,11 +310,14 @@ export default function App() {
       setProviders(list);
       const nextProvider =
         list.find((provider) => provider.id === preselect) ||
+        list.find((provider) => provider.id === runtime?.provider) ||
         list.find((provider) => provider.id === selectedProvider) ||
         list[0];
       if (nextProvider) {
         setSelectedProvider(nextProvider.id);
-        setModel(nextProvider.default_model);
+        const savedModel =
+          !preselect && runtime?.configured && runtime.provider === nextProvider.id ? runtime.model : "";
+        setModel(savedModel || nextProvider.default_model);
       }
     });
   }
@@ -279,6 +325,7 @@ export default function App() {
   function chooseProvider(provider: Provider) {
     setSelectedProvider(provider.id);
     setModel(provider.default_model);
+    setApiKey("");
     setProviderTest(null);
   }
 
@@ -308,6 +355,8 @@ export default function App() {
     }
     await withStatus(async () => {
       setBootState("provider_testing");
+      setProviderTest(null);
+      setStatus("正在测试模型服务连接……");
       const result = await testProvider(selectedProvider, model, apiKey);
       setProviderTest(result);
       if (!result.ok) {
@@ -315,8 +364,11 @@ export default function App() {
         setStatus(result.title);
         return;
       }
+      setProviderTest({ ...result, message: "测试通过，正在保存到本机……" });
       const saved = await saveProvider(selectedProvider, result.model, apiKey);
-      setStatus(`已保存 ${saved.provider} / ${saved.model}。`);
+      setApiKey("");
+      setModel(saved.model);
+      setStatus(`已保存到本机：${displayProvider(saved.provider)} / ${saved.model}。关闭重开后会自动读取。`);
       setWizardStep(3);
       await refreshHomeState();
     });
@@ -324,13 +376,41 @@ export default function App() {
 
   async function sendMessage() {
     await withStatus(async () => {
-      const result = await sendChatMessage(chatInput);
+      const message = chatInput.trim();
+      if (!message) {
+        setStatus("请先输入要发送的内容。");
+        return;
+      }
+      const userMessage: ChatMessage = {
+        id: `${Date.now()}-user`,
+        role: "user",
+        text: message
+      };
+      setChatMessages((current) => [...current, userMessage]);
+      setChatInput("");
+      const result = await sendChatMessage(message);
       if (result.ok) {
-        setChatReply(result.reply);
+        setChatMessages((current) => [
+          ...current,
+          {
+            id: `${Date.now()}-assistant`,
+            role: "assistant",
+            text: result.reply,
+            meta: `${displayProvider(result.provider)} / ${result.model}`
+          }
+        ]);
         setStatus(`来自 ${result.provider} / ${result.model}`);
         return;
       }
-      setChatReply(`${result.message}\n${result.suggestion}`);
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-assistant-error`,
+          role: "assistant",
+          text: `${result.message}\n${result.suggestion}`,
+          error: true
+        }
+      ]);
     });
   }
 
@@ -343,7 +423,9 @@ export default function App() {
 
   async function chooseMode(mode: string) {
     await withStatus(async () => {
-      setCurrentMode(await selectMode(mode));
+      const selected = await selectMode(mode);
+      setCurrentMode(selected);
+      setStatus(`已切换到${modeName(selected.current)}输出风格。`);
     });
   }
 
@@ -385,9 +467,12 @@ export default function App() {
   return (
     <main className="appShell">
       <header className="appHeader">
-        <div>
-          <h1>Lilsunspot 小黑子</h1>
-          <p>个人 AI 助手，运行在你的电脑本地</p>
+        <div className="brandBlock">
+          <img src={lilsunspotIcon} alt="" className="brandIcon" />
+          <div>
+            <h1>Lilsunspot 小黑子</h1>
+            <p>个人 AI 助手，运行在你的电脑本地</p>
+          </div>
         </div>
         <button type="button" className="secondaryButton" onClick={bootstrapConnection} disabled={busy}>
           重新检查
@@ -505,7 +590,7 @@ export default function App() {
                   <div className="chipRow">
                     {RECOMMENDED_PROVIDER_IDS.map((id) => (
                       <button key={id} type="button" className="chipButton" onClick={() => void startProviderSetup(id)}>
-                        {id === "qwen" ? "通义千问" : id === "ollama" ? "本地 Ollama" : id === "deepseek" ? "DeepSeek" : "Kimi"}
+                        {QUICK_PROVIDER_LABELS[id]}
                       </button>
                     ))}
                   </div>
@@ -521,7 +606,7 @@ export default function App() {
               <div className="stateGrid">
                 <article>
                   <h3>模型服务</h3>
-                  <p>{bootState === "chat_ready" ? `已设置：${runtime?.provider || "已配置"}` : "还没有设置"}</p>
+                  <p>{bootState === "chat_ready" ? `已设置：${displayProvider(runtime?.provider)} / ${runtime?.model || "默认模型"}` : "还没有设置"}</p>
                   <button type="button" className="secondaryButton" onClick={() => void startProviderSetup()} disabled={busy}>
                     {bootState === "chat_ready" ? "调整模型" : "开始设置"}
                   </button>
@@ -572,10 +657,18 @@ export default function App() {
               <div className="panelHeader">
                 <div>
                   <h2 id="provider-title">设置模型服务</h2>
-                  <p>选择你要使用的模型服务</p>
+                  <p>先选一个服务商，小黑子会用它来完成聊天。</p>
                 </div>
                 <span>第 1/3 步</span>
               </div>
+              {runtime?.configured && (
+                <div className="savedConfigBanner">
+                  <strong>已保存模型服务</strong>
+                  <span>
+                    {displayProvider(runtime.provider)} / {runtime.model}，配置在本机数据目录中，关闭重开后会自动读取。
+                  </span>
+                </div>
+              )}
               <h3>推荐给中国大陆用户</h3>
               <div className="providerGrid">
                 {visibleRecommendedProviders.map((provider) => {
@@ -622,13 +715,28 @@ export default function App() {
               <div className="panelHeader">
                 <div>
                   <h2 id="provider-title">填写 API Key</h2>
-                  <p>API Key 是模型服务给你的访问钥匙，只会保存在你的电脑本地。</p>
+                  <p>API Key 是模型服务给你的访问钥匙，只保存在你的电脑本机。</p>
                 </div>
                 <span>第 2/3 步</span>
               </div>
               <div className="selectedProviderLine">
                 当前模型服务：<strong>{selectedProviderConfig?.display_name || "未选择"}</strong>
+                <span>默认模型：{model || selectedProviderConfig?.default_model}</span>
               </div>
+              <ol className="setupGuide">
+                <li>
+                  <strong>打开官网</strong>
+                  <span>登录服务商账号，在 API Keys 或密钥管理页面新建一个 Key。</span>
+                </li>
+                <li>
+                  <strong>复制 Key</strong>
+                  <span>只复制完整 Key 文本，不要截图，也不要发给别人。</span>
+                </li>
+                <li>
+                  <strong>粘贴并测试</strong>
+                  <span>测试通过后会自动保存到本机，后续重启不需要重新填写。</span>
+                </li>
+              </ol>
               <button type="button" className="secondaryButton" onClick={openKeyUrl} disabled={busy || !selectedProvider}>
                 打开官网获取 Key
               </button>
@@ -646,12 +754,12 @@ export default function App() {
                   从剪贴板粘贴
                 </button>
                 <button type="button" onClick={runProviderTest} disabled={busy || !selectedProvider}>
-                  测试连接
+                  {providerTesting ? "正在测试" : "测试并保存"}
                 </button>
               </div>
-              <div className={providerTest?.ok === false ? "inlineError" : "inlineState"}>
+              <div className={providerTest?.ok ? "inlineSuccess" : providerTest?.ok === false ? "inlineError" : "inlineState"}>
                 连接状态：
-                {providerTest ? (providerTest.ok ? providerTest.message : providerTest.title) : "尚未测试"}
+                {providerTesting ? "正在连接模型服务，请稍等。" : providerTest ? (providerTest.ok ? providerTest.message : providerTest.title) : "尚未测试"}
               </div>
               {providerTest?.ok === false && (
                 <div className="errorBox" role="alert">
@@ -688,12 +796,16 @@ export default function App() {
               <div className="panelHeader">
                 <div>
                   <h2 id="provider-title">模型服务已连接</h2>
-                  <p>已成功连接 {selectedProviderConfig?.display_name || selectedProvider}</p>
+                  <p>已成功连接 {selectedProviderConfig?.display_name || selectedProvider}，并保存到本机。</p>
                 </div>
                 <span>第 3/3 步</span>
               </div>
-              <p className="successText">默认模型：{model}</p>
-              <p>你现在可以开始聊天。</p>
+              <div className="successPanel">
+                <strong>保存完成</strong>
+                <span>
+                  默认模型：{model}。关闭并重新打开小黑子后，会自动读取这份本机配置，不会要求重复填写 API Key。
+                </span>
+              </div>
               <div className="primaryActions">
                 <button type="button" onClick={() => setPage("chat")}>
                   开始聊天
@@ -708,32 +820,101 @@ export default function App() {
       )}
 
       {page === "chat" && (
-        <section className="panel">
-          <h2>聊天</h2>
-          <p>{runtime?.configured ? `当前模型：${runtime.provider} / ${runtime.model}` : "请先完成模型设置。"}</p>
-          <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} rows={4} />
-          <button type="button" onClick={sendMessage} disabled={busy || !chatInput.trim()}>
-            {busy ? "发送中" : "发送"}
-          </button>
-          <pre>{chatReply || "尚无回复。"}</pre>
+        <section className="panel chatPanel">
+          <div className="panelHeader">
+            <div>
+              <h2>聊天</h2>
+              <p>{runtime?.configured ? `当前模型：${displayProvider(runtime.provider)} / ${runtime.model}` : "请先完成模型设置。"}</p>
+            </div>
+            {!runtime?.configured && (
+              <button type="button" onClick={() => void startProviderSetup()} disabled={busy}>
+                设置模型
+              </button>
+            )}
+          </div>
+          <div className="chatTranscript" aria-live="polite">
+            {chatMessages.length === 0 ? (
+              <div className="emptyChat">
+                <strong>还没有消息</strong>
+                <span>输入一句话，小黑子会通过已保存的模型服务回复。</span>
+              </div>
+            ) : (
+              chatMessages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`chatBubble ${message.role === "user" ? "userBubble" : "assistantBubble"} ${message.error ? "errorBubble" : ""}`}
+                >
+                  <span>{message.role === "user" ? "你" : "小黑子"}</span>
+                  <p>{message.text}</p>
+                  {message.meta && <em>{message.meta}</em>}
+                </article>
+              ))
+            )}
+          </div>
+          <div className="chatComposer">
+            <textarea
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              rows={3}
+              disabled={busy || !runtime?.configured}
+              placeholder={runtime?.configured ? "输入你想问的内容" : "完成模型设置后即可聊天"}
+            />
+            <button type="button" onClick={sendMessage} disabled={busy || !chatInput.trim() || !runtime?.configured}>
+              {busy ? "发送中" : "发送"}
+            </button>
+          </div>
         </section>
       )}
 
       {page === "mode" && (
-        <section className="panel">
-          <h2>输出风格</h2>
-          <p>选择小黑子回答时的默认风格。</p>
-          <button type="button" onClick={loadModes} disabled={busy}>
-            加载输出风格
-          </button>
-          <div className="list">
-            {modes.map((mode) => (
-              <button key={mode.id} type="button" onClick={() => chooseMode(mode.id)}>
-                {mode.id}: {mode.description}
-              </button>
-            ))}
+        <section className="panel modePanel">
+          <div className="panelHeader">
+            <div>
+              <h2>输出风格</h2>
+              <p>选择小黑子回答时的默认风格。</p>
+            </div>
+            <button type="button" className="secondaryButton" onClick={loadModes} disabled={busy}>
+              重新加载
+            </button>
           </div>
-          <pre>{currentMode ? asText(currentMode) : "尚未选择输出风格。"}</pre>
+          <div className="modeScroller" aria-label="输出风格选择">
+            {modes.map((mode) => {
+              const selected = currentMode?.current === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={selected ? "modeCard selectedMode" : "modeCard"}
+                  onClick={() => chooseMode(mode.id)}
+                >
+                  <strong>{modeName(mode.id)}</strong>
+                  <span>{mode.description}</span>
+                  <dl>
+                    <div>
+                      <dt>风格</dt>
+                      <dd>{mode.style_axis}</dd>
+                    </div>
+                    <div>
+                      <dt>细节</dt>
+                      <dd>{mode.detail_level}</dd>
+                    </div>
+                    <div>
+                      <dt>自主</dt>
+                      <dd>{mode.autonomy_level}</dd>
+                    </div>
+                  </dl>
+                </button>
+              );
+            })}
+          </div>
+          {currentMode ? (
+            <div className="selectedModeSummary">
+              <strong>当前风格：{modeName(currentMode.current)}</strong>
+              <span>{currentMode.profile.description}</span>
+            </div>
+          ) : (
+            <p className="inlineState">{busy ? "正在加载输出风格。" : "尚未选择输出风格。"}</p>
+          )}
         </section>
       )}
 

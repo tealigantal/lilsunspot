@@ -32,7 +32,8 @@ def test_token_file_written_under_temp_data_dir(daemon_client, tmp_path):
 
 
 def test_provider_test_returns_validator_result(daemon_client, monkeypatch):
-    async def fake_test_provider_connection(provider, model, api_key):
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
+        assert base_url_override == "https://api.deepseek.com/v1"
         return {
             "ok": True,
             "provider": provider["id"],
@@ -46,7 +47,12 @@ def test_provider_test_returns_validator_result(daemon_client, monkeypatch):
     response = daemon_client.client.post(
         "/providers/test",
         headers=daemon_client.headers,
-        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": "placeholder-value"},
+        json={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "api_key": "placeholder-value",
+            "base_url_override": "https://api.deepseek.com/v1",
+        },
     )
 
     assert response.status_code == 200
@@ -91,3 +97,35 @@ def test_provider_save_does_not_log_token_or_key(daemon_client):
     log_text = "\n".join(path.read_text(encoding="utf-8") for path in paths.logs_dir.glob("*.log"))
     assert daemon_client.token not in log_text
     assert local_secret_value not in log_text
+
+
+def test_app_bootstrap_needs_model_and_is_redacted(daemon_client):
+    response = daemon_client.client.get("/app/bootstrap", headers=daemon_client.headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "needs_model"
+    assert body["checks"]["model_config"] == "missing"
+    assert body["runtime"]["configured"] is False
+    text = response.text
+    assert daemon_client.token not in text
+    assert "api_key" not in text.lower()
+
+
+def test_app_bootstrap_chat_ready_after_provider_save(daemon_client):
+    secret = "placeholder-bootstrap-save-key"
+    response = daemon_client.client.post(
+        "/providers/save",
+        headers=daemon_client.headers,
+        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": secret},
+    )
+    assert response.status_code == 200
+
+    bootstrap = daemon_client.client.get("/app/bootstrap", headers=daemon_client.headers)
+
+    assert bootstrap.status_code == 200
+    body = bootstrap.json()
+    assert body["stage"] == "chat_ready"
+    assert body["runtime"] == {"configured": True, "provider": "deepseek", "model": "deepseek-chat"}
+    assert secret not in bootstrap.text
+    assert daemon_client.token not in bootstrap.text

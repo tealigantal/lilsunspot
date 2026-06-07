@@ -56,7 +56,8 @@ def test_chat_runtime_cloud_provider_uses_saved_key_without_leaking(daemon_clien
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "hermes_runtime"
+    assert body["engine"] == "lilsunspot_provider_adapter"
+    assert body["conversation_id_supported"] is False
     assert body["reply"] == "收到。"
     assert seen_headers["authorization"] == f"Bearer {secret}"
     assert seen_payload["model"] == "deepseek-chat"

@@ -1,5 +1,38 @@
 # Agent Memory
 
+## 2026-06-07
+
+- Task: check Figma before publishing `LIL-P0-FLOW-UI-01`.
+- Files touched: `lilsunspot/desktop/design/p0-flow-ui-spec.md` and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: Figma authenticated and created `https://www.figma.com/design/k47dWzEZutMAKpoI2mCbvk`, but Starter plan MCP rate limits blocked continued design-system lookup and canvas work; per user instruction, proceeded toward PR submission instead of attempting more Figma writes.
+- Validation: Figma `whoami`, `create_new_file`, metadata, library lookup, and first design-system search ran; subsequent Figma searches returned the plan-limit error.
+- Remaining risk: the Figma file exists but does not contain the redesigned editable frontend screens; the repository spec remains the design source until Figma MCP quota/access is available.
+
+- Task: complete `LIL-P0-FLOW-UI-01` product flow refactor, UI rearrangement, design fallback, and P0 main-path repair.
+- Files touched: `TASKS.md`, `lilsunspot/daemon/app.py`, `chat_client.py`, `hermes_runtime.py`, `modes.py`, `provider_client.py`, daemon/product tests, `lilsunspot/desktop/design/p0-flow-ui-spec.md`, `lilsunspot/desktop/src/App.tsx`, `App.css`, `api.ts`, `types.ts`, new `app/`, `features/`, and `shared/` frontend modules, `lilsunspot/desktop/README.md`, `lilsunspot/notes/architecture.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: Figma MCP was unavailable, so the design was delivered as an in-repo spec; desktop flow now uses BootGate and `/app/bootstrap` instead of a flat developer tab homepage; unconfigured users enter onboarding, configured users enter ChatHome, repair states show reasons/actions, and Weixin/Safety/Doctor moved into a clearly marked settings drawer.
+- Decision/result: provider setup now supports editable model and validated `base_url_override`; local provider empty API Key remains allowed; mode sliders are saved in lilsunspot data and appended to the next chat system hint; chat engine is truthfully reported as `lilsunspot_provider_adapter`.
+- Validation: `git diff --check` passed, secret guard passed, daemon pytest 25 passed, product pytest 24 passed, desktop TypeScript/Vite build passed, `scripts/check.ps1` passed, sidecar build passed, Tauri NSIS build produced the Windows installer, and a local Vite HTTP smoke returned 200.
+- Remaining risk: Browser IAB was unavailable and local Playwright/puppeteer were not installed, so visual QA was not automated; clean Windows install, repository-external installed-app close/reopen into ChatHome, real API Key provider test/save/chat, and manual visual QA still need to be performed; current chat is still not a full Hermes agent loop.
+
+- Task: complete `LIL-P0-02A` installation first-run feedback fix from `feed_back07-06-2026`.
+- Files touched: `TASKS.md`, `scripts/build_lilsunspotd_sidecar.ps1`, `lilsunspot/desktop/src/App.tsx`, `lilsunspot/desktop/src/App.css`, desktop Tauri config/Rust entry, desktop icon assets, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: fixed Windows release console-window risk with the Tauri Windows subsystem attribute and PyInstaller `--noconsole`; replaced the package icon from the feedback image; routed unconfigured first launch to the provider wizard; made API Key save status explicit and cleared the in-memory key after save; replaced chat output with a message transcript that clears the composer after send; and changed Mode into auto-loaded horizontal selection cards.
+- Validation: daemon pytest 23 passed, product pytest 20 passed, secret guard passed, desktop TypeScript/Vite build passed, `scripts/check.ps1` passed, sidecar build passed with the windowed PyInstaller bootloader, NSIS build produced `Lilsunspot_0.1.0_x64-setup.exe`, and Chrome headless screenshots checked Provider step 1/2, Chat, Mode desktop, and Mode mobile render states.
+- Remaining risk: clean Windows install, repository-external installed-app launch, real API Key provider save/test/chat, and actual post-install no-black-window behavior still require manual installed-app verification.
+
+- Task: continue `LIL-P0-02A` validation after handoff.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: kept the product code unchanged after review; reused the locally running installed daemon only for read-only desktop dev smoke checks.
+- Validation: reran daemon pytest 23 passed, product pytest 20 passed, secret guard passed, desktop build passed, `scripts/check.ps1` passed, sidecar build passed, NSIS build produced `Lilsunspot_0.1.0_x64-setup.exe`, and Browser extension smoke verified Provider, Mode, and Chat DOM states with no console errors.
+- Remaining risk: in-app browser `iab` was unavailable and the Chrome extension screenshot API timed out, so this continuation did not add new screenshot evidence; clean install, real API Key save/test/chat, and post-install no-black-window behavior remain manual checks.
+
+- Task: fix the setup.exe product issue instead of only validating the UI patch.
+- Files touched: `lilsunspot/desktop/src-tauri/Cargo.toml`, `lilsunspot/desktop/src-tauri/nsis/installer-hooks.nsh`, `TASKS.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: made the packaged Windows main binary install as `Lilsunspot.exe`; added NSIS upgrade hooks to close and remove stale `lilsunspot_desktop.exe`; kept shortcut recreation pointed at the installed app exe icon.
+- Validation: rebuilt NSIS setup.exe, confirmed generated `installer.nsi` uses `MAINBINARYNAME "Lilsunspot"`, ran `Lilsunspot_0.1.0_x64-setup.exe /S`, verified install dir contains `Lilsunspot.exe`, `lilsunspotd.exe`, and `uninstall.exe` without old `lilsunspot_desktop.exe`, verified desktop/start menu shortcuts and uninstall registry target `Lilsunspot.exe`, confirmed setup/app/sidecar PE subsystem is Windows GUI, and launched installed `Lilsunspot.exe` to `/health` ok.
+- Remaining risk: this was an in-place current-user install smoke on the development Windows machine, not a clean Windows VM test with a real user provider/chat loop.
+
 ## 2026-06-06
 
 - Task: start `LIL-P0-01` and converge the local `release/mvp-p0` candidate branch.

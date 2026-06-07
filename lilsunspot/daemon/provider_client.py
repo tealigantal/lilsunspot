@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlparse
 from typing import Any
 
 import httpx
@@ -34,6 +35,11 @@ ERROR_MESSAGES: dict[str, tuple[str, str, list[str]]] = {
         "账户额度可能不足",
         "请打开模型服务官网查看余额或充值状态。",
         ["打开官网查看余额", "换一个模型服务", "查看技术详情"],
+    ),
+    "provider_error": (
+        "服务商暂时错误",
+        "模型服务刚才没有正常响应，请稍后重试，或换一个服务。",
+        ["稍后重试", "换一个模型服务", "查看技术详情"],
     ),
     "config_write_failed": (
         "保存设置失败",
@@ -90,6 +96,36 @@ def _error_result(
     }
 
 
+def validate_base_url_override(provider_config: dict[str, Any], base_url_override: str | None) -> str:
+    override = (base_url_override or "").strip()
+    if not override:
+        return ""
+    if any(char in override for char in "\r\n\t "):
+        raise ProviderValidationError("Base URL 不能包含空格或换行。")
+
+    parsed = urlparse(override)
+    try:
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ProviderValidationError("Base URL 端口不正确。") from exc
+    provider_type = str(provider_config.get("type") or "cloud").strip().lower()
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ProviderValidationError("Base URL 不能包含账号、查询参数或片段。")
+    if provider_type == "local":
+        if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed_port is None:
+            raise ProviderValidationError("本地模型服务地址必须是 http://127.0.0.1:端口/v1。")
+        if parsed.path.rstrip("/") != "/v1":
+            raise ProviderValidationError("本地模型服务地址必须以 /v1 结尾。")
+        return override.rstrip("/")
+
+    allow_insecure = bool(provider_config.get("allow_insecure_base_url"))
+    if parsed.scheme != "https" and not allow_insecure:
+        raise ProviderValidationError("云端模型服务地址必须使用 https。")
+    if not parsed.netloc:
+        raise ProviderValidationError("Base URL 不正确。")
+    return override.rstrip("/")
+
+
 def _provider_base_url(provider_config: dict[str, Any]) -> str:
     base_url = str(provider_config.get("base_url") or provider_config.get("detect_url") or "").strip()
     if not base_url:
@@ -144,7 +180,7 @@ def _classify_http_error(status_code: int, payload: Any) -> str:
     if status_code == 404 or ("model" in text and "not" in text):
         return "model_not_found"
     if 500 <= status_code <= 599:
-        return "network_error"
+        return "provider_error"
     return "unknown"
 
 
@@ -169,8 +205,10 @@ async def test_provider_connection(
     provider_config: dict[str, Any],
     model: str | None,
     api_key: str,
+    base_url_override: str | None = None,
 ) -> dict[str, Any]:
     """Validate an OpenAI-compatible provider with a minimal chat request."""
+    provider_config = dict(provider_config)
     provider_id = str(provider_config.get("id") or "").strip()
     provider_type = str(provider_config.get("type") or "cloud").strip().lower()
     selected_model = (model or provider_config.get("default_model") or "").strip()
@@ -184,6 +222,9 @@ async def test_provider_connection(
         return _error_result("invalid_key", provider_id, selected_model, api_key=api_key)
 
     try:
+        override = validate_base_url_override(provider_config, base_url_override)
+        if override:
+            provider_config["base_url"] = override
         base_url = _provider_base_url(provider_config)
     except ProviderValidationError:
         return _error_result("unknown", provider_id, selected_model, api_key=api_key)

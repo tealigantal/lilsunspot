@@ -42,7 +42,8 @@ def test_providers_test_requires_token(tmp_path, monkeypatch):
 def test_providers_test_mock_success(tmp_path, monkeypatch):
     app_module, _config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
 
-    async def fake_test_provider_connection(provider, model, api_key):
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
+        assert base_url_override == ""
         return {
             "ok": True,
             "provider": provider["id"],
@@ -66,7 +67,7 @@ def test_providers_test_mock_401_is_redacted(tmp_path, monkeypatch):
     app_module, _config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
     secret = "placeholder-provider-api-invalid"
 
-    async def fake_test_provider_connection(provider, model, api_key):
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
         return {
             "ok": False,
             "provider": provider["id"],
@@ -92,7 +93,7 @@ def test_providers_test_mock_401_is_redacted(tmp_path, monkeypatch):
 def test_providers_test_mock_network_error(tmp_path, monkeypatch):
     app_module, _config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
 
-    async def fake_test_provider_connection(provider, model, api_key):
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
         return {
             "ok": False,
             "provider": provider["id"],
@@ -132,6 +133,26 @@ def test_save_provider_writes_only_lilsunspot_data_dir(tmp_path, monkeypatch):
     assert Path(response.json()["hermes_home"]) == paths.hermes_home
 
 
+def test_save_provider_supports_model_and_base_url_override(tmp_path, monkeypatch):
+    _app_module, config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/providers/save",
+        headers=headers,
+        json={
+            "provider": "deepseek",
+            "model": "deepseek-reasoner",
+            "api_key": "placeholder-save-provider-override",
+            "base_url_override": "https://api.deepseek.com/v1",
+        },
+    )
+
+    assert response.status_code == 200
+    config_text = (config_paths.get_runtime_paths().hermes_home / "config.yaml").read_text(encoding="utf-8")
+    assert "deepseek-reasoner" in config_text
+    assert "https://api.deepseek.com/v1" in config_text
+
+
 def test_save_local_provider_allows_empty_key(tmp_path, monkeypatch):
     _app_module, config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
 
@@ -144,3 +165,23 @@ def test_save_local_provider_allows_empty_key(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["provider"] == "ollama"
     assert (config_paths.get_runtime_paths().hermes_home / "config.yaml").exists()
+
+
+def test_providers_test_local_provider_allows_empty_key(tmp_path, monkeypatch):
+    app_module, _config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
+
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
+        assert provider["id"] == "ollama"
+        assert api_key == ""
+        return {"ok": True, "provider": "ollama", "model": model, "message": "本地服务可用。"}
+
+    monkeypatch.setattr(app_module, "test_provider_connection", fake_test_provider_connection)
+
+    response = client.post(
+        "/providers/test",
+        headers=headers,
+        json={"provider": "ollama", "model": "llama3.2", "api_key": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True

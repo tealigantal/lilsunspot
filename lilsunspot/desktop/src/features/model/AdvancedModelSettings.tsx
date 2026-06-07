@@ -8,6 +8,7 @@ type AdvancedModelSettingsProps = {
   onModelChange?: (value: string) => void;
   onBaseUrlChange?: (value: string) => void;
   editable?: boolean;
+  showModelField?: boolean;
 };
 
 export function AdvancedModelSettings({
@@ -16,21 +17,24 @@ export function AdvancedModelSettings({
   baseUrlOverride,
   onModelChange,
   onBaseUrlChange,
-  editable = true
+  editable = true,
+  showModelField = true
 }: AdvancedModelSettingsProps) {
   return (
     <details className="advancedSettings">
       <summary>高级设置</summary>
       <div className="formStack">
-        <label>
-          模型名称
-          <input
-            value={model}
-            onChange={(event) => onModelChange?.(event.target.value)}
-            disabled={!editable}
-            placeholder={provider?.default_model || "推荐模型"}
-          />
-        </label>
+        {showModelField && (
+          <label>
+            模型名称
+            <input
+              value={model}
+              onChange={(event) => onModelChange?.(event.target.value)}
+              disabled={!editable}
+              placeholder={provider?.default_model || "推荐模型"}
+            />
+          </label>
+        )}
         <label>
           Base URL
           <input

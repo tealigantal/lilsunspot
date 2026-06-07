@@ -47,6 +47,7 @@ textarea {
 
 button {
   min-height: 44px;
+  min-width: 0;
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-control);
   padding: 0 16px;
@@ -56,6 +57,9 @@ button {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 button:hover:not(:disabled) {
@@ -368,7 +372,8 @@ label {
 .stepLayout {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
-  min-height: 520px;
+  height: min(620px, calc(100vh - 132px));
+  min-height: 500px;
   overflow: hidden;
 }
 
@@ -376,6 +381,8 @@ label {
   display: grid;
   align-content: start;
   gap: var(--space-3);
+  min-width: 0;
+  overflow: auto;
   border-right: 1px solid var(--color-border);
   padding: var(--space-5);
   background: #eef4fb;
@@ -426,6 +433,9 @@ label {
   display: grid;
   align-content: start;
   gap: var(--space-5);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
   padding: var(--space-6);
 }
 
@@ -438,6 +448,7 @@ label {
 .formStack {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
 }
 
 .welcomePanel,
@@ -523,6 +534,7 @@ label {
 .setupGuide article {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   padding: var(--space-3);
@@ -545,10 +557,16 @@ label {
 
 .chatHome {
   display: grid;
-  grid-template-rows: auto auto minmax(300px, 1fr) auto;
+  grid-template-rows: auto auto minmax(240px, 1fr) auto;
   gap: var(--space-4);
-  min-height: 570px;
+  min-height: min(570px, calc(100vh - 132px));
   padding: var(--space-5);
+}
+
+.firstChatStep {
+  display: grid;
+  gap: var(--space-4);
+  min-height: 0;
 }
 
 .chatTopBar {
@@ -565,8 +583,8 @@ label {
   display: grid;
   align-content: start;
   gap: var(--space-3);
-  min-height: 300px;
-  max-height: min(52vh, 480px);
+  min-height: 240px;
+  max-height: min(46vh, 420px);
   overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
@@ -580,7 +598,7 @@ label {
   align-self: center;
   justify-self: center;
   width: min(100%, 380px);
-  padding: var(--space-6);
+  padding: var(--space-5);
   text-align: center;
 }
 
@@ -690,11 +708,12 @@ label {
   z-index: 10;
   display: grid;
   justify-content: end;
+  overflow: hidden;
   background: rgba(23, 32, 42, 0.28);
 }
 
 .settingsDrawer {
-  width: min(390px, 100vw);
+  width: min(440px, 100vw);
   height: 100vh;
   overflow: auto;
   border-left: 1px solid var(--color-border);
@@ -721,11 +740,13 @@ label {
 
 .settingsNav button {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
   border-color: transparent;
   background: transparent;
   color: var(--color-text);
+  text-align: left;
 }
 
 .settingsNav button.active {
@@ -735,9 +756,17 @@ label {
 }
 
 .settingsNav em {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid #ecd4a9;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #fff8ed;
   color: var(--color-muted);
   font-size: 12px;
   font-style: normal;
+  white-space: nowrap;
 }
 
 .drawerBody {
@@ -802,13 +831,66 @@ label {
     width: 100%;
   }
 
+  .appHeader {
+    gap: var(--space-4);
+  }
+
+  .brandBlock {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .headerActions,
+  .topBarActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .topBarActions .statusBadge {
+    grid-column: 1 / -1;
+    justify-content: center;
+    width: 100%;
+  }
+
   .stepLayout {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
   }
 
   .stepRail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-height: none;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
+    padding: var(--space-3);
+  }
+
+  .stepRail strong {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+
+  .stepRail div {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: var(--space-1);
+    text-align: center;
+  }
+
+  .stepRail span {
+    width: 26px;
+    height: 26px;
+  }
+
+  .stepRail p {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .stepCard {
+    overflow: visible;
+    padding: var(--space-4);
   }
 
   .providerGrid,

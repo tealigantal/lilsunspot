@@ -6,9 +6,10 @@ import { displayProvider } from "../model/ProviderCard";
 
 type FirstChatStepProps = {
   onDone: (messages: ChatMessage[]) => void;
+  onSkip: (messages: ChatMessage[]) => void;
 };
 
-export function FirstChatStep({ onDone }: FirstChatStepProps) {
+export function FirstChatStep({ onDone, onSkip }: FirstChatStepProps) {
   const [input, setInput] = useState("你好，帮我介绍一下你能做什么");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
@@ -67,6 +68,11 @@ export function FirstChatStep({ onDone }: FirstChatStepProps) {
     <div className="firstChatStep">
       <ChatTranscript messages={messages} />
       <ChatComposer value={input} onChange={setInput} onSend={send} busy={busy} />
+      <div className="actionRow">
+        <button type="button" className="secondaryButton" onClick={() => onSkip(messages)} disabled={busy}>
+          稍后再聊，进入主界面
+        </button>
+      </div>
     </div>
   );
 }

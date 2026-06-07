@@ -2,6 +2,42 @@
 
 ## 2026-06-07
 
+- Task: publish the P0 API Key flow and visual QA changes as a GitHub PR.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: preparing a dedicated PR branch from `develop` for the current P0 flow/UI diff, targeting `tealigantal/lilsunspot` base `develop` rather than the Hermes upstream remote.
+- Validation: publish prerequisites checked with `gh --version`, `gh auth status`, repository/remote inspection, prior desktop build, secret guard, `scripts/check.ps1`, and visual QA evidence.
+- Remaining risk: final PR URL and remote checks are reported in the chat response after push/create succeeds.
+
+- Task: run visual acceptance and try Figma-backed UI adjustment for `LIL-P0-FLOW-UI-01`.
+- Files touched: `TASKS.md`, `lilsunspot/desktop/src/App.css`, `lilsunspot/desktop/src/features/settings/SettingsDrawer.tsx`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: created a Figma design file for visual QA, but both webpage capture and direct canvas write were blocked by the Starter plan MCP tool-call limit. Continued with local visual QA using a temporary daemon and headless Edge; tightened mobile header actions, changed mobile setup progress into a horizontal rail, widened the settings drawer, styled settings badges, shortened the chat transcript minimum height, and locked body scrolling while the drawer is open.
+- Validation: desktop build passed, secret guard passed, `scripts/check.ps1` passed, and headless Edge screenshots/metrics covered API Key, ChatHome, SettingsDrawer, and mobile API/chat states at 960x680 and 390x760 with no horizontal overflow.
+- Remaining risk: the Figma file exists but could not receive the editable UI adjustment board until MCP quota/access is available; production installed-app visual QA and real provider chat remain manual checks.
+
+- Task: accept the API Key save/reconfiguration fix end to end.
+- Files touched: `TASKS.md`, `lilsunspot/notes/agent-memory.md`, rebuilt desktop/sidecar/NSIS generated artifacts, and existing frontend/product files from the fix.
+- Decision/result: accepted the current flow with automated checks, rebuilt sidecar and NSIS installer, then used headless Edge against the real Vite UI with a mocked local daemon contract. The UI flow saved a placeholder API Key on first run, reached the first-chat step, skipped into ChatHome, reopened model settings, saved a second placeholder API Key, and returned to ChatHome. Desktop 960x680 and narrow 390x760 screenshots were visually checked for horizontal overflow. A newly built sidecar in a temporary data directory verified `/app/bootstrap` changed from `needs_model` to `chat_ready` after both first save and re-save.
+- Validation: `python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot`, `python -m pytest lilsunspot/daemon/tests`, `python scripts/guard_no_secrets.py`, `npm run build --prefix lilsunspot/desktop`, `pwsh scripts/check.ps1`, `pwsh scripts/build_lilsunspotd_sidecar.ps1`, `npm run tauri:build --prefix lilsunspot/desktop`, headless Edge CDP UI acceptance, and temporary sidecar API acceptance all passed. Sidecar logs did not contain the placeholder API Key or runtime token.
+- Remaining risk: this did not use a real provider API Key, did not test the complete Hermes agent loop, did not run on a clean Windows VM, and did not update Figma because MCP remains blocked by the Starter plan call limit.
+
+- Task: fix API Key reconfiguration save loop and responsive setup sizing.
+- Files touched: `TASKS.md`, `lilsunspot/desktop/README.md`, desktop onboarding/model/AppShell/CSS files, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: settings-driven model reconfiguration now opens the API Key/model save form for an already configured provider, saves without requiring a provider test, exits forced onboarding after save, and returns to ChatHome. First-run save now advances to the first-chat step without refreshing BootGate out from under the step, with a skip action so users are not trapped if the real provider is temporarily unavailable. The API Key form no longer duplicates model inputs, and setup/chat containers gained bounded scrolling and button wrapping for 960x680 and narrow layouts.
+- Validation: `npm run build --prefix lilsunspot/desktop`, `python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot`, `python -m pytest lilsunspot/daemon/tests`, `git diff --check`, and `python scripts/guard_no_secrets.py` passed. The existing installed `lilsunspotd.exe` occupied port 8765, so no temporary live daemon was bound there.
+- Remaining risk: Browser IAB returned `Browser is not available: iab`, so rendered click-through screenshots and responsive visual proof were not captured. Figma MCP still hit the Starter plan call limit, so no editable Figma screen was updated in this run.
+
+- Task: perform real setup.exe installed-app API Key save validation and uninstall afterward.
+- Files touched: `lilsunspot/desktop/src/api.ts`, `TASKS.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: real current-user setup.exe validation found the installed WebView still showed local service failure because `/health` used browser `fetch` while protected requests used the Tauri daemon proxy. Changed the desktop API layer so every installed-app daemon request, including `/health`, goes through the Tauri command proxy. Rebuilt and reinstalled the NSIS setup, then verified installed `Lilsunspot.exe` launched the installed sidecar, entered onboarding, saved provider/model/API Key settings with an isolated placeholder key, reached ChatHome, and reopened directly to ChatHome from the saved local config. The installed app was uninstalled after validation.
+- Validation: `npm run build --prefix lilsunspot/desktop` passed, `python -m pytest lilsunspot/tests/test_provider_api.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-installed` passed, `npm run tauri:build --prefix lilsunspot/desktop` produced `Lilsunspot_0.1.0_x64-setup.exe`, silent install passed, installed-app save/reopen smoke passed, and silent uninstall removed the app binaries, uninstall entry, and running processes.
+- Remaining risk: this used a placeholder key and isolated data dir to avoid touching real secrets; real provider test/chat and a clean Windows VM install are still not covered.
+
+- Task: fix installed setup.exe first-run API Key setup structure.
+- Files touched: `TASKS.md`, `lilsunspot/desktop/src/api.ts`, onboarding/model desktop components, `lilsunspot/desktop/design/p0-flow-ui-spec.md`, `lilsunspot/desktop/README.md`, `lilsunspot/tests/test_provider_api.py`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: decoupled saving model credentials from provider live testing; users can now save API Key/model/Base URL first and run connection testing as optional validation, so setup.exe first launch is not blocked by network, quota, model, or provider transient failures. Tauri runtime detection now also accepts `__TAURI__`, `tauri:` protocol, and `tauri.localhost`.
+- Validation: desktop TypeScript/Vite build passed; product test added to verify save does not require a successful `/providers/test`; `scripts/check.ps1` passed. Browser IAB invocation returned `Browser is not available: iab`, so rendered interaction QA could not be completed in Codex.
+- Remaining risk: clean installed-app UI verification with a real API Key still needs manual acceptance after rebuilding the installer.
+
 - Task: check Figma before publishing `LIL-P0-FLOW-UI-01`.
 - Files touched: `lilsunspot/desktop/design/p0-flow-ui-spec.md` and `lilsunspot/notes/agent-memory.md`.
 - Decision/result: Figma authenticated and created `https://www.figma.com/design/k47dWzEZutMAKpoI2mCbvk`, but Starter plan MCP rate limits blocked continued design-system lookup and canvas work; per user instruction, proceeded toward PR submission instead of attempting more Figma writes.

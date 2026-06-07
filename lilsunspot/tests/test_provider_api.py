@@ -153,6 +153,41 @@ def test_save_provider_supports_model_and_base_url_override(tmp_path, monkeypatc
     assert "https://api.deepseek.com/v1" in config_text
 
 
+def test_save_provider_does_not_require_successful_test(tmp_path, monkeypatch):
+    app_module, config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
+
+    async def fake_test_provider_connection(provider, model, api_key, base_url_override=None):
+        return {
+            "ok": False,
+            "provider": provider["id"],
+            "model": model,
+            "error_code": "network_error",
+            "message": "无法连接模型服务。",
+            "suggestion": "请稍后再试。",
+        }
+
+    monkeypatch.setattr(app_module, "test_provider_connection", fake_test_provider_connection)
+
+    test_response = client.post(
+        "/providers/test",
+        headers=headers,
+        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": "placeholder-save-without-test"},
+    )
+    assert test_response.status_code == 200
+    assert test_response.json()["ok"] is False
+
+    save_response = client.post(
+        "/providers/save",
+        headers=headers,
+        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": "placeholder-save-without-test"},
+    )
+
+    assert save_response.status_code == 200
+    assert save_response.json()["ok"] is True
+    config_text = (config_paths.get_runtime_paths().hermes_home / "config.yaml").read_text(encoding="utf-8")
+    assert "deepseek-chat" in config_text
+
+
 def test_save_local_provider_allows_empty_key(tmp_path, monkeypatch):
     _app_module, config_paths, client, headers = _load_test_app(tmp_path, monkeypatch)
 

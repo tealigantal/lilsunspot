@@ -34,6 +34,17 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeCha
     if (!open) {
       return;
     }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
     setActive(initialTab);
     let mounted = true;
     async function load() {

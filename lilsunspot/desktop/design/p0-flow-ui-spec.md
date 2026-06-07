@@ -15,7 +15,7 @@ App -> BootGate -> 状态分流：
 
 首启流程：
 
-WelcomeStep -> ChooseModelServiceStep -> ApiKeyStep -> TestAndSaveStep -> FirstChatStep -> ChatHome
+WelcomeStep -> ChooseModelServiceStep -> ApiKeyStep -> FirstChatStep -> ChatHome
 
 设置入口：
 
@@ -117,11 +117,7 @@ Layout：
 
 ### ApiKeyStep
 
-标题“粘贴 API Key”。显示“打开官网获取 Key”“从剪贴板粘贴”“下一步：测试连接”。本地 Ollama 文案改为“本地模型通常不用 API Key”。
-
-### TestAndSaveStep
-
-可编辑“推荐模型”，高级设置折叠内可编辑 Base URL。按钮为“测试并保存”；本地 provider 文案为“检测本地服务”。失败时用 ErrorWithAction 展示 Key 不正确、网络连不上、模型不可用、额度不足、服务商错误或未知错误。
+标题“保存模型设置”。同屏显示推荐模型、API Key、高级设置和 Base URL。主按钮为“保存并继续”，直接写入本机配置；“测试连接”为可选验证，不阻断保存。失败时用 ErrorWithAction 展示 Key 不正确、网络连不上、模型不可用、额度不足、服务商错误或未知错误。本地 Ollama 文案改为“本地模型通常不用 API Key”。
 
 ### FirstChatStep
 

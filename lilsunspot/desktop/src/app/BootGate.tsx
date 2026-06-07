@@ -32,6 +32,8 @@ export function BootGate({
   onBootstrapChanged,
   onFirstChatDone
 }: BootGateProps) {
+  const reconfiguringExistingModel = forceOnboarding && bootstrap.runtime.configured;
+
   if (bootstrap.stage === "starting") {
     return (
       <PrimaryActionPanel
@@ -60,6 +62,8 @@ export function BootGate({
         onFirstChatDone={onFirstChatDone}
         onOpenDoctor={onOpenDoctor}
         initialProvider={bootstrap.runtime.provider}
+        initialStep={reconfiguringExistingModel ? "api_key" : bootstrap.runtime.provider ? "choose" : undefined}
+        completion={reconfiguringExistingModel ? "return_to_chat" : "first_chat"}
       />
     );
   }

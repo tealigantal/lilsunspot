@@ -38,10 +38,12 @@ App -> BootGate -> 启动检查 -> 首启设置流程 -> 第一句聊天 -> 日�
 首启模型流程：
 
 ```text
-WelcomeStep -> ChooseModelServiceStep -> ApiKeyStep -> TestAndSaveStep -> FirstChatStep
+WelcomeStep -> ChooseModelServiceStep -> ApiKeyStep -> FirstChatStep
 ```
 
-Model 设置支持普通用户可见的 AI 服务、推荐模型、API Key、测试并保存；高级设置折叠后可编辑 `model` 和 `base_url_override`。本地 Ollama 允许空 API Key。云 provider 的 base URL override 必须是 https，本地 provider 只允许 `http://127.0.0.1:port/v1`。
+Model 设置支持普通用户可见的 AI 服务、推荐模型和 API Key。API Key 保存是主路径，连接测试是保存前后的可选验证，避免安装包首启时因为网络、额度或服务商临时错误而无法完成设置。高级设置折叠后可编辑 `model` 和 `base_url_override`。本地 Ollama 允许空 API Key。云 provider 的 base URL override 必须是 https，本地 provider 只允许 `http://127.0.0.1:port/v1`。
+
+从设置抽屉进入“模型服务”重新配置时，已配置用户会直接进入保存 API Key / 模型表单；保存成功后退出强制设置流程并回到聊天主界面。首启用户保存后进入“第一句聊天”，如果真实服务商暂时不可用，也可以选择稍后再聊进入主界面，避免被连接测试或首次聊天阻断。
 
 Chat 当前仍是 `lilsunspot_provider_adapter`：它调用 OpenAI-compatible provider adapter，不等同完整 Hermes agent loop；`conversation_id` 多轮会话后续再接入。
 
@@ -92,3 +94,5 @@ npm run tauri:build --prefix lilsunspot/desktop
 Still requires manual acceptance on a clean Windows install with a real API Key: first launch, test/save, close and reopen into ChatHome, real chat send, and visual review of 960x680 plus narrow responsive layout.
 
 This task also checked that the local Vite page responds over HTTP. Browser IAB was unavailable in the Codex environment and local Playwright/puppeteer were not installed, so screenshot-level visual QA remains manual.
+
+On 2026-06-07, the API Key reconfiguration path was rechecked locally with TypeScript/Vite build, daemon/product pytest, `git diff --check`, and secret guard. Figma MCP remained blocked by the Starter plan rate limit, so the in-repo P0 design spec remains the source of truth until Figma access is available.

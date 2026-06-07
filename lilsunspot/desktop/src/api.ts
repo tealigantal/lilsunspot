@@ -34,9 +34,16 @@ type ApiErrorBody = {
 };
 
 function isTauriRuntime() {
+  const tauriWindow = window as Window & {
+    __TAURI__?: unknown;
+    __TAURI_INTERNALS__?: unknown;
+  };
   return (
     typeof window !== "undefined" &&
-    "__TAURI_INTERNALS__" in (window as Window & { __TAURI_INTERNALS__?: unknown })
+    ("__TAURI_INTERNALS__" in tauriWindow ||
+      "__TAURI__" in tauriWindow ||
+      window.location.protocol === "tauri:" ||
+      window.location.hostname === "tauri.localhost")
   );
 }
 
@@ -140,7 +147,7 @@ async function requestViaTauri<T>(path: string, options: RequestInit): Promise<T
 }
 
 async function requestJson<T>(path: string, options: RequestInit = {}, protectedApi = true): Promise<T> {
-  if (protectedApi && isTauriRuntime()) {
+  if (isTauriRuntime()) {
     try {
       return await requestViaTauri<T>(path, options);
     } catch (error) {

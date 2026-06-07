@@ -4,40 +4,47 @@ import { StepLayout } from "../../shared/components/StepLayout";
 import { ErrorWithAction } from "../../shared/components/ErrorWithAction";
 import type { Provider, ProviderTestResult } from "../../types";
 import type { ChatMessage } from "../chat/ChatTranscript";
-import { ApiKeyStep } from "./ApiKeyStep";
 import { ChooseModelServiceStep } from "./ChooseModelServiceStep";
 import { FirstChatStep } from "./FirstChatStep";
-import { TestAndSaveStep } from "./TestAndSaveStep";
+import { ApiKeyStep } from "./ApiKeyStep";
 import { WelcomeStep } from "./WelcomeStep";
 
-type OnboardingStep = "welcome" | "choose" | "api_key" | "test_save" | "first_chat";
+type OnboardingStep = "welcome" | "choose" | "api_key" | "first_chat";
 
 type OnboardingFlowProps = {
   initialProvider?: string;
+  initialStep?: "welcome" | "choose" | "api_key";
+  completion?: "first_chat" | "return_to_chat";
   onSaved: () => Promise<void> | void;
   onFirstChatDone: (messages: ChatMessage[]) => void;
   onOpenDoctor: () => void;
 };
 
-const STEPS = ["欢迎", "选择 AI 服务", "粘贴 API Key", "测试并保存", "第一句聊天"];
+const STEPS = ["欢迎", "选择 AI 服务", "保存 API Key", "第一句聊天"];
 
 function stepNumber(step: OnboardingStep) {
-  return ["welcome", "choose", "api_key", "test_save", "first_chat"].indexOf(step) + 1;
+  return ["welcome", "choose", "api_key", "first_chat"].indexOf(step) + 1;
 }
 
 function stepCopy(step: OnboardingStep) {
   const copy: Record<OnboardingStep, { title: string; message: string }> = {
     welcome: { title: "欢迎使用小黑子", message: "先给小黑子设置一个 AI 服务，就能开始聊天。" },
     choose: { title: "选择 AI 服务", message: "推荐先选一个常用服务，也可以稍后在设置里更换。" },
-    api_key: { title: "粘贴 API Key", message: "API Key 只保存在你的电脑本机，不会显示在主界面。" },
-    test_save: { title: "测试并保存", message: "确认 AI 服务能正常响应，测试成功后自动保存。" },
-    first_chat: { title: "试着说第一句话", message: "发送成功后就会进入日常聊天主界面。" }
+    api_key: { title: "保存模型设置", message: "API Key 只保存在你的电脑本机；测试连接是保存后的可选验证。" },
+    first_chat: { title: "试着说第一句话", message: "如果服务商暂时连不上，也可以稍后回到设置里重新测试。" }
   };
   return copy[step];
 }
 
-export function OnboardingFlow({ initialProvider, onSaved, onFirstChatDone, onOpenDoctor }: OnboardingFlowProps) {
-  const [step, setStep] = useState<OnboardingStep>(initialProvider ? "choose" : "welcome");
+export function OnboardingFlow({
+  initialProvider,
+  initialStep,
+  completion = "first_chat",
+  onSaved,
+  onFirstChatDone,
+  onOpenDoctor
+}: OnboardingFlowProps) {
+  const [step, setStep] = useState<OnboardingStep>(initialStep || (initialProvider ? "choose" : "welcome"));
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState(initialProvider || "");
   const [model, setModel] = useState("");
@@ -46,6 +53,7 @@ export function OnboardingFlow({ initialProvider, onSaved, onFirstChatDone, onOp
   const [providerTest, setProviderTest] = useState<ProviderTestResult | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<"idle" | "saving" | "testing">("idle");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -116,29 +124,76 @@ export function OnboardingFlow({ initialProvider, onSaved, onFirstChatDone, onOp
     }
   }
 
-  async function testAndSave() {
+  async function testConnection() {
     if (!selectedProviderConfig) {
       setError("请先选择 AI 服务。");
       return;
     }
-    setBusy(true);
+    const nextModel = model.trim();
+    const nextApiKey = apiKey.trim();
+    const localProvider = selectedProviderConfig.type === "local";
+    if (!nextModel) {
+      setError("模型名称不能为空。");
+      return;
+    }
+    if (!localProvider && !nextApiKey) {
+      setError("API Key 不能为空。");
+      return;
+    }
+    setOperation("testing");
     setError("");
     setProviderTest(null);
     try {
-      const testResult = await testProvider(selectedProviderConfig.id, model, apiKey, baseUrlOverride);
+      const testResult = await testProvider(selectedProviderConfig.id, nextModel, nextApiKey, baseUrlOverride.trim());
       setProviderTest(testResult);
-      if (!testResult.ok) {
-        return;
+      if (testResult.ok) {
+        setModel(testResult.model);
       }
-      const saved = await saveProvider(selectedProviderConfig.id, testResult.model, apiKey, baseUrlOverride);
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : "测试连接失败，请稍后重试。");
+    } finally {
+      setOperation("idle");
+    }
+  }
+
+  async function saveAndContinue() {
+    if (!selectedProviderConfig) {
+      setError("请先选择 AI 服务。");
+      return;
+    }
+    const nextModel = model.trim();
+    const nextApiKey = apiKey.trim();
+    const nextBaseUrlOverride = baseUrlOverride.trim();
+    const localProvider = selectedProviderConfig.type === "local";
+    if (!nextModel) {
+      setError("模型名称不能为空。");
+      return;
+    }
+    if (!localProvider && !nextApiKey) {
+      setError("API Key 不能为空。");
+      return;
+    }
+    setOperation("saving");
+    setError("");
+    let leavingFlow = false;
+    try {
+      const saved = await saveProvider(selectedProviderConfig.id, nextModel, nextApiKey, nextBaseUrlOverride);
       setApiKey("");
       setModel(saved.model);
-      await onSaved();
+      setProviderTest(null);
+      if (completion === "return_to_chat") {
+        leavingFlow = true;
+        setOperation("idle");
+        await onSaved();
+        return;
+      }
       setStep("first_chat");
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "测试或保存失败，请稍后重试。");
+      setError(saveError instanceof Error ? saveError.message : "保存失败，请稍后重试。");
     } finally {
-      setBusy(false);
+      if (!leavingFlow) {
+        setOperation("idle");
+      }
     }
   }
 
@@ -175,27 +230,20 @@ export function OnboardingFlow({ initialProvider, onSaved, onFirstChatDone, onOp
           onPaste={pasteApiKey}
           onOpenKeyUrl={openKeyUrl}
           onBack={() => setStep("choose")}
-          onNext={() => setStep("test_save")}
-          busy={busy}
-        />
-      )}
-      {step === "test_save" && (
-        <TestAndSaveStep
-          provider={selectedProviderConfig}
           model={model}
           baseUrlOverride={baseUrlOverride}
           result={providerTest}
-          testing={busy}
           onModelChange={setModel}
           onBaseUrlChange={setBaseUrlOverride}
-          onBack={() => setStep("api_key")}
-          onTestAndSave={testAndSave}
-          onRepaste={() => setStep("api_key")}
+          onSave={saveAndContinue}
+          onTest={testConnection}
           onChangeProvider={() => setStep("choose")}
-          onOpenKeyUrl={openKeyUrl}
+          busy={busy || operation !== "idle"}
+          saving={operation === "saving"}
+          testing={operation === "testing"}
         />
       )}
-      {step === "first_chat" && <FirstChatStep onDone={onFirstChatDone} />}
+      {step === "first_chat" && <FirstChatStep onDone={onFirstChatDone} onSkip={onFirstChatDone} />}
     </StepLayout>
   );
 }

@@ -30,8 +30,8 @@ export function ModelTestResult({
   if (!result) {
     return (
       <div className="inlineNotice">
-        <StatusBadge>未测试</StatusBadge>
-        <span>测试通过后会自动保存到本机。</span>
+        <StatusBadge>可选测试</StatusBadge>
+        <span>可以先保存到本机；测试连接只用于确认 Key、模型和网络是否可用。</span>
       </div>
     );
   }

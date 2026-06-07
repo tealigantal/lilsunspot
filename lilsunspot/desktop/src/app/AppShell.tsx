@@ -21,6 +21,7 @@ export function AppShell() {
   }
 
   async function handleSaved() {
+    setForceOnboarding(false);
     await bootstrapState.refresh();
   }
 

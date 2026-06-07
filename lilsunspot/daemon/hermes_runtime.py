@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .provider_client import ProviderValidationError, validate_base_url_override
 
 
 class HermesRuntimeError(RuntimeError):
@@ -70,13 +71,19 @@ def save_provider_credentials(
     provider_config: dict[str, Any],
     model: str,
     api_key: str,
+    base_url_override: str | None = None,
     paths: RuntimePaths | None = None,
 ) -> dict[str, str]:
     paths = paths or ensure_runtime_dirs()
     provider_id = str(provider_config.get("id") or "").strip()
     hermes_provider = str(provider_config.get("hermes_provider") or provider_id).strip()
     env_key = str(provider_config.get("env_key") or "").strip()
-    base_url = str(provider_config.get("base_url") or "").strip()
+    try:
+        base_url = validate_base_url_override(provider_config, base_url_override)
+    except ProviderValidationError as exc:
+        raise HermesRuntimeError(str(exc)) from exc
+    if not base_url:
+        base_url = str(provider_config.get("base_url") or "").strip()
     provider_type = str(provider_config.get("type") or "cloud").strip().lower()
     model = model.strip()
     api_key = api_key.strip()

@@ -71,7 +71,7 @@ def test_chat_runtime_requires_provider_config(daemon_client):
     body = response.json()
     assert body["ok"] is False
     assert body["error_code"] == "setup_required"
-    assert "首启向导" in body["message"]
+    assert "还没有设置 AI 服务" in body["message"]
 
 
 def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
@@ -103,7 +103,7 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "hermes_runtime"
+    assert body["engine"] == "lilsunspot_provider_adapter"
     assert body["reply"] == "这是模型回复。"
     assert seen_payload["model"] == "llama3.2"
     default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]

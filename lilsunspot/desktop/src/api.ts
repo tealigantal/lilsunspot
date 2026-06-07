@@ -1,5 +1,6 @@
 import type {
   AppState,
+  AppBootstrapState,
   ChatSendResult,
   CurrentMode,
   DaemonConnectStatus,
@@ -177,6 +178,10 @@ export async function getAppState(): Promise<AppState> {
   return requestJson<AppState>("/app/state");
 }
 
+export async function getAppBootstrap(): Promise<AppBootstrapState> {
+  return requestJson<AppBootstrapState>("/app/bootstrap");
+}
+
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   return requestJson<RuntimeInfo>("/runtime/info");
 }
@@ -197,22 +202,24 @@ export async function openProviderKeyUrl(provider: string): Promise<string> {
 export async function testProvider(
   provider: string,
   model: string,
-  apiKey: string
+  apiKey: string,
+  baseUrlOverride = ""
 ): Promise<ProviderTestResult> {
   return requestJson<ProviderTestResult>("/providers/test", {
     method: "POST",
-    body: JSON.stringify({ provider, model, api_key: apiKey })
+    body: JSON.stringify({ provider, model, api_key: apiKey, base_url_override: baseUrlOverride })
   });
 }
 
 export async function saveProvider(
   provider: string,
   model: string,
-  apiKey: string
+  apiKey: string,
+  baseUrlOverride = ""
 ): Promise<SaveProviderResult> {
   return requestJson<SaveProviderResult>("/providers/save", {
     method: "POST",
-    body: JSON.stringify({ provider, model, api_key: apiKey })
+    body: JSON.stringify({ provider, model, api_key: apiKey, base_url_override: baseUrlOverride })
   });
 }
 
@@ -232,10 +239,13 @@ export async function getCurrentMode(): Promise<CurrentMode> {
   return requestJson<CurrentMode>("/modes/current");
 }
 
-export async function selectMode(mode: string): Promise<CurrentMode> {
+export async function selectMode(
+  mode: string,
+  sliders?: Pick<ModeProfile, "style_axis" | "detail_level" | "autonomy_level">
+): Promise<CurrentMode> {
   return requestJson<CurrentMode>("/modes/select", {
     method: "POST",
-    body: JSON.stringify({ mode })
+    body: JSON.stringify({ mode, ...(sliders || {}) })
   });
 }
 

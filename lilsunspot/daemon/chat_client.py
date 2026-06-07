@@ -16,12 +16,13 @@ CHAT_TIMEOUT_SECONDS = 45.0
 
 CHAT_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     "empty_message": ("请先输入要发送的内容。", "输入一句话后再发送。"),
-    "setup_required": ("请先完成首启向导。", "打开 Provider 页，保存一个模型服务商配置。"),
-    "provider_required": ("请先完成模型配置。", "在 Provider 页选择服务商和模型后保存。"),
-    "missing_api_key": ("请先填写 API Key。", "重新配置模型并保存 API Key。本地模型可留空。"),
+    "setup_required": ("还不能聊天：还没有设置 AI 服务。", "请先完成首启设置，测试并保存一个 AI 服务。"),
+    "provider_required": ("还不能聊天：模型服务设置不可用。", "请重新选择 AI 服务和模型后保存。"),
+    "missing_api_key": ("还不能聊天：请先填写 API Key。", "重新配置模型并保存 API Key。本地模型可留空。"),
     "invalid_key": ("模型服务没有接受当前 API Key。", "请回到模型设置页，重新测试并保存 API Key。"),
     "quota_exceeded": ("模型服务额度可能不足。", "请打开模型服务官网检查余额或额度。"),
     "rate_limited": ("请求太频繁。", "请稍等一会儿再发送。"),
+    "provider_error": ("模型服务商暂时没有正常响应。", "请稍后重试，或到模型设置里换一个服务。"),
     "network_error": ("暂时连不上模型服务。", "请检查网络、本地模型服务或代理设置。"),
     "model_not_found": ("当前模型名称不可用。", "请回到模型设置页，选择推荐模型后重新保存。"),
     "empty_response": ("模型服务没有返回可显示内容。", "请稍后重试，或换一个模型。"),
@@ -159,6 +160,10 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
     provider_config = provider_by_id(provider_id)
     if provider_config is None:
         return _chat_error("provider_required"), None
+    provider_config = dict(provider_config)
+    saved_base_url = str(model_config.get("base_url") or "").strip()
+    if saved_base_url:
+        provider_config["base_url"] = saved_base_url
 
     env_key = str(provider_config.get("env_key") or "").strip()
     provider_type = str(provider_config.get("type") or "cloud").strip().lower()
@@ -186,7 +191,9 @@ async def send_chat_message(
     conversation_id: str | None = None,
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any]:
-    del conversation_id
+    # P0 chat is a single-turn OpenAI-compatible provider adapter. The
+    # conversation id is returned as unsupported instead of being silently used.
+    conversation_id_requested = bool(conversation_id)
     message = message.strip()
     if not message:
         return _chat_error("empty_message")
@@ -223,7 +230,10 @@ async def send_chat_message(
     return {
         "ok": True,
         "reply": reply,
-        "engine": "hermes_runtime",
+        "engine": "lilsunspot_provider_adapter",
         "provider": settings["provider"],
         "model": settings["model"],
+        "conversation_id": None,
+        "conversation_id_supported": False,
+        "conversation_id_requested": conversation_id_requested,
     }

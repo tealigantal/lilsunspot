@@ -161,6 +161,24 @@ def test_provider_client_quota_status(monkeypatch):
     assert result["error_code"] == "quota_exceeded"
 
 
+def test_provider_client_provider_error(monkeypatch):
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": "temporary upstream error"}})
+
+    _mock_client(monkeypatch, handler)
+
+    result = asyncio.run(
+        provider_client.test_provider_connection(
+            OPENROUTER_PROVIDER,
+            "openai/gpt-4o-mini",
+            "placeholder-provider-value",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "provider_error"
+
+
 def test_provider_client_network_error(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("mock connection failed", request=request)

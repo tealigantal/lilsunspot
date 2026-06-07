@@ -32,9 +32,22 @@ desktop
 -> hermes_home/.env
 -> hermes_home/config.yaml
 
+## Product Bootstrap 流
+
+desktop
+-> BootGate
+-> `/app/bootstrap`
+-> `starting | daemon_failed | needs_model | model_test_required | chat_ready | repair_required`
+-> 首启向导或聊天主界面
+-> 设置抽屉
+
+`/app/bootstrap` 是桌面端新的产品启动状态契约。它只返回普通用户可理解的标题、说明、下一步按钮、简化 checks、runtime 是否已配置、provider/model 标识和用户可见 blockers；不得返回 API Key、runtime token、完整敏感路径、traceback 或大段技术 JSON。
+
+旧 `/app/state` 继续保留兼容，但桌面端优先读取 `/app/bootstrap`。BootGate 是启动后进入首启、聊天或修复页的唯一分流入口。
+
 ## Chat 请求流
 
-当前仓库显示 `/chat/send` 由 `lilsunspot/daemon/chat_client.py` 读取 `hermes_home/config.yaml`、`hermes_home/.env` 和当前 mode profile，再调用 provider registry 指向的 OpenAI-compatible `chat/completions`。这更接近 provider adapter chat；本任务未验证它等同完整 Hermes agent loop。
+当前仓库显示 `/chat/send` 由 `lilsunspot/daemon/chat_client.py` 读取 `hermes_home/config.yaml`、`hermes_home/.env`、保存的安全 `base_url_override` 和当前 mode profile，再调用 OpenAI-compatible `chat/completions`。这仍是单轮 `lilsunspot_provider_adapter`，不等同完整 Hermes agent loop。`conversation_id` 当前不实现多轮会话，返回中明确标记 unsupported。
 
 ## Mode 计划流
 
@@ -43,13 +56,15 @@ mode profile
 -> chat 前注入
 -> 桌面滑杆/微信命令共用
 
-当前仓库已有 mode profile API 和 chat 前 system hint 注入迹象，三滑杆和完整 prompt 编译链路按部分实现记录。
+当前仓库已有 mode profile API 和 chat 前 system hint 注入。LIL-P0-FLOW-UI-01 增加三滑杆保存到 lilsunspot 独立数据目录；下一条 chat system_hint 会追加表达风格、细节程度和自主程度偏好。不修改 `SOUL.md`。
 
 ## Weixin 计划流
 
 复用 Hermes Weixin gateway，不新写微信机器人。
 
 当前 lilsunspot 层有 Weixin 状态和命令骨架；真实扫码、联系人、私聊收发未验证，按骨架/未验证处理。
+
+桌面端不再把 Weixin 放在首屏主导航；它位于设置抽屉，文案明确说明当前版本不会扫码登录或发送消息。
 
 ## Safety 计划流
 
@@ -60,6 +75,8 @@ mode profile
 
 当前仓库有审批队列 API 和测试迹象；真实高危动作拦截、桌面完整允许/拒绝和 `audit.db` 未验证，按部分实现处理。
 
+桌面端不再把 Safety 放在首屏主导航；它位于设置抽屉，文案明确说明基础接口存在但真实高危动作拦截仍需验证。
+
 ## Diagnostics 计划流
 
 doctor checks
@@ -67,6 +84,8 @@ doctor checks
 -> redacted logs export
 
 当前仓库有 doctor/repair 入口；诊断包导出未实现/未验证。
+
+桌面端 Doctor 位于设置抽屉；一键检查和一键修复可触发现有接口，诊断包导出标记为待接入，不提供可点击假按钮。
 
 ## 当前架构风险
 

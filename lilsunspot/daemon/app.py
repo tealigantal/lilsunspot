@@ -96,12 +96,14 @@ class SaveProviderRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
     api_key: str = ""
+    base_url_override: str | None = None
 
 
 class ProviderTestRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     model: str | None = None
     api_key: str = ""
+    base_url_override: str | None = None
 
 
 class ChatSendRequest(BaseModel):
@@ -111,6 +113,9 @@ class ChatSendRequest(BaseModel):
 
 class SelectModeRequest(BaseModel):
     mode: str = Field(..., min_length=1)
+    style_axis: int | None = None
+    detail_level: int | None = None
+    autonomy_level: int | None = None
 
 
 class ApprovalPlaceholderRequest(BaseModel):
@@ -169,6 +174,84 @@ async def app_state() -> dict[str, str]:
         "message": "小黑子已经启动，但还没有配置可用的模型。",
         "next_action": "open_provider_wizard",
     }
+
+
+def _action(action_id: str, label: str) -> dict[str, str]:
+    return {"id": action_id, "label": label}
+
+
+def _app_bootstrap_state() -> dict[str, Any]:
+    runtime_model = current_runtime_model(ensure_runtime_dirs())
+    configured = bool(runtime_model["configured"])
+    provider_id = str(runtime_model.get("provider") or "")
+    model = str(runtime_model.get("model") or "")
+    provider_config = provider_by_id(provider_id) if provider_id else None
+
+    checks = {
+        "daemon": "ok",
+        "model_config": "present" if configured and provider_config else "missing" if not configured else "invalid",
+        "chat": "ready" if configured and provider_config else "blocked",
+        "mode": "ready",
+        "weixin": "unavailable",
+        "safety": "placeholder",
+    }
+    runtime = {
+        "configured": bool(configured and provider_config),
+        "provider": provider_id if provider_config else "",
+        "model": model if provider_config else "",
+    }
+
+    if configured and provider_config:
+        return {
+            "stage": "chat_ready",
+            "title": "小黑子已准备好",
+            "message": "AI 服务已设置，可以直接开始聊天。",
+            "primary_action": _action("open_chat", "开始聊天"),
+            "secondary_actions": [_action("open_settings", "打开设置")],
+            "checks": checks,
+            "runtime": runtime,
+            "user_visible_blockers": [],
+        }
+
+    if configured and provider_config is None:
+        return {
+            "stage": "repair_required",
+            "title": "模型服务设置需要修复",
+            "message": "已保存的 AI 服务不在当前支持列表里，请重新选择一个服务。",
+            "primary_action": _action("setup_model", "重新设置"),
+            "secondary_actions": [_action("open_doctor", "一键检查")],
+            "checks": checks,
+            "runtime": runtime,
+            "user_visible_blockers": [
+                {
+                    "code": "invalid_model_config",
+                    "message": "已保存的 AI 服务不可用。",
+                    "suggestion": "请重新选择 AI 服务并测试保存。",
+                }
+            ],
+        }
+
+    return {
+        "stage": "needs_model",
+        "title": "还差一步：设置 AI 服务",
+        "message": "先给小黑子设置一个 AI 服务，就能开始聊天。",
+        "primary_action": _action("setup_model", "开始设置"),
+        "secondary_actions": [_action("open_doctor", "一键检查")],
+        "checks": checks,
+        "runtime": runtime,
+        "user_visible_blockers": [
+            {
+                "code": "missing_model",
+                "message": "还没有设置 AI 服务。",
+                "suggestion": "先完成模型服务设置。",
+            }
+        ],
+    }
+
+
+@app.get("/app/bootstrap", dependencies=[Depends(require_token)])
+async def app_bootstrap() -> dict[str, Any]:
+    return _app_bootstrap_state()
 
 
 @app.get("/runtime/info", dependencies=[Depends(require_token)])
@@ -230,7 +313,7 @@ async def providers_test(payload: ProviderTestRequest) -> dict[str, Any]:
                 "http_status": 404,
             },
         }
-    return await test_provider_connection(provider, payload.model, payload.api_key)
+    return await test_provider_connection(provider, payload.model, payload.api_key, payload.base_url_override or "")
 
 
 @app.post("/providers/save", dependencies=[Depends(require_token)])
@@ -239,7 +322,7 @@ async def save_provider(payload: SaveProviderRequest) -> dict[str, str | bool]:
     if provider is None:
         raise HTTPException(status_code=404, detail="没有找到这个模型服务商。")
     try:
-        result = save_provider_credentials(provider, payload.model, payload.api_key)
+        result = save_provider_credentials(provider, payload.model, payload.api_key, payload.base_url_override or "")
     except HermesRuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("provider saved provider=%s model=%s", result["provider"], result["model"])
@@ -264,7 +347,12 @@ async def modes_current() -> dict[str, Any]:
 @app.post("/modes/select", dependencies=[Depends(require_token)])
 async def modes_select(payload: SelectModeRequest) -> dict[str, Any]:
     try:
-        return select_mode(payload.mode)
+        return select_mode(
+            payload.mode,
+            style_axis=payload.style_axis,
+            detail_level=payload.detail_level,
+            autonomy_level=payload.autonomy_level,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

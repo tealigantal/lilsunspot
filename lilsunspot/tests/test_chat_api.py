@@ -54,7 +54,7 @@ def test_chat_send_unconfigured_returns_human_error(tmp_path, monkeypatch):
     body = response.json()
     assert body["ok"] is False
     assert body["error_code"] == "setup_required"
-    assert "首启向导" in body["message"]
+    assert "还没有设置 AI 服务" in body["message"]
 
 
 def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch):
@@ -86,7 +86,7 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "hermes_runtime"
+    assert body["engine"] == "lilsunspot_provider_adapter"
     assert body["reply"] == "本地模型回复。"
     assert seen_payload["model"] == "llama3.2"
     default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
@@ -130,3 +130,40 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
         {"role": "system", "content": selected_hint},
         {"role": "user", "content": "帮我整理下一步"},
     ]
+
+
+def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
+    chat_client, config_paths, hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+    provider = {
+        "id": "ollama",
+        "type": "local",
+        "env_key": "OLLAMA_API_KEY",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "hermes_provider": "custom",
+    }
+    hermes_runtime.save_provider_credentials(provider, "llama3.2", "", paths=config_paths.get_runtime_paths())
+    selected = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "balanced", "style_axis": 80, "detail_level": 25, "autonomy_level": 20},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["profile"]["style_axis"] == 80
+    assert "当前输出偏好" in selected.json()["profile"]["system_hint"]
+    seen_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "已按滑杆偏好回复。"}}]})
+
+    _mock_chat_http_client(chat_client, monkeypatch, handler)
+
+    response = client.post("/chat/send", headers=headers, json={"message": "下一步做什么"})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    system_hint = seen_payload["messages"][0]["content"]
+    assert "当前输出偏好" in system_hint
+    assert "表达更有陪伴感" in system_hint
+    assert "回答保持简短" in system_hint
+    assert "风险或不确定时优先确认" in system_hint

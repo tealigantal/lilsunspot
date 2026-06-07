@@ -42,6 +42,51 @@ export type AppState = {
   next_action: string;
 };
 
+export type AppBootstrapStage =
+  | "starting"
+  | "daemon_failed"
+  | "needs_model"
+  | "model_test_required"
+  | "chat_ready"
+  | "repair_required";
+
+export type AppBootstrapAction = {
+  id: "wait" | "repair" | "setup_model" | "test_model" | "open_chat" | "open_doctor" | "open_settings" | "retry";
+  label: string;
+};
+
+export type AppBootstrapChecks = {
+  daemon: "ok" | "failed" | "unknown";
+  model_config: "missing" | "present" | "invalid" | "unknown";
+  chat: "ready" | "blocked" | "unknown";
+  mode: "ready" | "defaulted" | "unknown";
+  weixin: "not_configured" | "connected" | "unavailable";
+  safety: "ready" | "placeholder" | "unknown";
+};
+
+export type AppBootstrapRuntime = {
+  configured: boolean;
+  provider: string;
+  model: string;
+};
+
+export type UserVisibleBlocker = {
+  code: string;
+  message: string;
+  suggestion: string;
+};
+
+export type AppBootstrapState = {
+  stage: AppBootstrapStage;
+  title: string;
+  message: string;
+  primary_action: AppBootstrapAction;
+  secondary_actions: AppBootstrapAction[];
+  checks: AppBootstrapChecks;
+  runtime: AppBootstrapRuntime;
+  user_visible_blockers: UserVisibleBlocker[];
+};
+
 export type Provider = {
   id: string;
   display_name: string;
@@ -106,9 +151,12 @@ export type ChatSendResult =
   | {
       ok: true;
       reply: string;
-      engine: "hermes_runtime" | string;
+      engine: "lilsunspot_provider_adapter" | string;
       provider: string;
       model: string;
+      conversation_id: string | null;
+      conversation_id_supported: boolean;
+      conversation_id_requested: boolean;
     }
   | {
       ok: false;

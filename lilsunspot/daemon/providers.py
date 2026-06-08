@@ -9,6 +9,7 @@ import yaml
 RESOURCE_DIR = Path(__file__).resolve().parents[1] / "resources"
 PROVIDER_REGISTRY_FILE = RESOURCE_DIR / "provider_registry.yaml"
 MODE_PROFILES_FILE = RESOURCE_DIR / "default_mode_profiles.yaml"
+MODE_PROMPT_FILE = RESOURCE_DIR / "default_mode_prompt.yaml"
 SAFETY_POLICY_FILE = RESOURCE_DIR / "default_safety_policy.yaml"
 
 
@@ -33,4 +34,4 @@ def provider_by_id(provider_id: str) -> dict[str, Any] | None:
 
 
 def required_resource_files() -> list[Path]:
-    return [PROVIDER_REGISTRY_FILE, MODE_PROFILES_FILE, SAFETY_POLICY_FILE]
+    return [PROVIDER_REGISTRY_FILE, MODE_PROFILES_FILE, MODE_PROMPT_FILE, SAFETY_POLICY_FILE]

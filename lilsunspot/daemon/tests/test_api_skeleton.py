@@ -31,6 +31,12 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     selected = client.post("/modes/select", headers=headers, json={"mode": "default"})
     assert selected.status_code == 200
     assert selected.json()["current"] == "default"
+    assert selected.json()["profile"]["system_hint"] == selected.json()["prompt"]["system_hint"]
+    assert [layer["id"] for layer in selected.json()["prompt"]["layers"]] == [
+        "product_baseline",
+        "mode_profile",
+        "slider_overrides",
+    ]
 
     weixin = client.get("/gateway/weixin/status", headers=headers)
     assert weixin.status_code == 200

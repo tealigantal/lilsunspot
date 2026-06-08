@@ -14,6 +14,7 @@ def test_required_resources_parse():
     for relative in [
         "lilsunspot/resources/provider_registry.yaml",
         "lilsunspot/resources/default_mode_profiles.yaml",
+        "lilsunspot/resources/default_mode_prompt.yaml",
         "lilsunspot/resources/default_safety_policy.yaml",
     ]:
         path = ROOT / relative

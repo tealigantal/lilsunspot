@@ -121,10 +121,36 @@ pwsh scripts/build_lilsunspotd_sidecar.ps1
 npm run tauri:build --prefix lilsunspot/desktop
 ```
 
+## 安装版仓库外 smoke
+
+LIL-P0-03 新增安装版 smoke 脚本，用隔离数据目录验证仓库外 `Lilsunspot.exe` 能启动同目录 `lilsunspotd.exe`，并检查 `/health`、带 `X-Lilsunspot-Token` 的 `/providers`、`127.0.0.1` 绑定和 daemon 日志 token 泄漏。
+
+在当前开发机复用已安装 app 时：
+
+```powershell
+pwsh scripts/smoke_lilsunspot_installed_app.ps1 -SkipInstall -InstallDir "$env:LOCALAPPDATA\Lilsunspot"
+```
+
+在干净 Windows VM 上验证安装包时，先把仓库和构建好的 NSIS 安装包放入 VM，然后运行：
+
+```powershell
+pwsh scripts/smoke_lilsunspot_installed_app.ps1
+```
+
+直接安装到当前用户真实安装目录并人工/脚本验证时：
+
+```powershell
+.\lilsunspot\desktop\src-tauri\target\release\bundle\nsis\Lilsunspot_0.1.0_x64-setup.exe /S /D=$env:LOCALAPPDATA\Lilsunspot
+```
+
+脚本默认把安装目录放在系统临时目录下的 `lilsunspot-installed-app-smoke\app`，并使用 `ignored\installed-app-smoke\data` 作为临时数据目录，不会打印 runtime token。不要把该目录中的 token 文件内容复制到日志、截图或提交记录。
+
+2026-06-08 追加本机真实安装环境验证：从环境变量读取 DeepSeek API Key 到内存，跑通 `/providers/test`、`/providers/save`、连续 `/chat/send`、mode profile/sliders、Weixin command skeleton、Safety approval queue 和 `/doctor`。当前 `/chat/send` adapter 返回 `conversation_id_supported=false`，因此跨轮记忆不按已实现能力验收。安装版窗口视觉 QA 用 DWM 截图覆盖 960x680 和 390x760；如需复查，不要把 API Key、runtime token 或回复正文带入截图或日志。
+
 ## 当前未完成项
 
 - clean Windows install
-- mode sliders
+- full mode prompt compilation
 - Weixin real private chat
 - real high-risk approval interception
 - diagnostics export

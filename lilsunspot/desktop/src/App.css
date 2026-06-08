@@ -37,6 +37,7 @@ body {
   min-height: 100vh;
   margin: 0;
   background: var(--color-bg);
+  overflow: hidden;
 }
 
 button,
@@ -142,10 +143,15 @@ pre {
 }
 
 .appShell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-4);
   width: min(1040px, calc(100vw - 40px));
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   margin: 0 auto;
-  padding: var(--space-5) 0 var(--space-8);
+  overflow: hidden;
+  padding: var(--space-5) 0;
 }
 
 .appHeader,
@@ -166,7 +172,6 @@ pre {
 
 .appHeader {
   justify-content: space-between;
-  margin-bottom: var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   padding: var(--space-4);
@@ -557,9 +562,10 @@ label {
 
 .chatHome {
   display: grid;
-  grid-template-rows: auto auto minmax(240px, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: var(--space-4);
-  min-height: min(570px, calc(100vh - 132px));
+  min-height: 0;
+  overflow: hidden;
   padding: var(--space-5);
 }
 
@@ -583,8 +589,7 @@ label {
   display: grid;
   align-content: start;
   gap: var(--space-3);
-  min-height: 240px;
-  max-height: min(46vh, 420px);
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
@@ -818,7 +823,7 @@ label {
 @media (max-width: 660px) {
   .appShell {
     width: min(100vw - 24px, 1040px);
-    padding: var(--space-4) 0 var(--space-6);
+    padding: var(--space-4) 0;
   }
 
   .appHeader,
@@ -900,11 +905,29 @@ label {
   }
 
   .chatComposer {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) 76px;
+  }
+
+  .chatHome {
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  .chatTranscript {
+    padding: var(--space-3);
+  }
+
+  .emptyChat {
+    padding: var(--space-3);
+  }
+
+  .chatComposer textarea {
+    min-height: 56px;
+    resize: none;
   }
 
   .chatComposer button {
-    min-height: 44px;
+    min-height: 56px;
   }
 
   .chatBubble {

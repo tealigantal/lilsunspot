@@ -37,6 +37,10 @@ def _mock_chat_http_client(chat_client, monkeypatch, handler):
     monkeypatch.setattr(chat_client, "_make_chat_http_client", make_client)
 
 
+def _prompt_layer_ids(mode_response):
+    return [layer["id"] for layer in mode_response["prompt"]["layers"]]
+
+
 def test_chat_send_requires_token(tmp_path, monkeypatch):
     _chat_client, _config_paths, _hermes_runtime, client, _headers = _load_test_app(tmp_path, monkeypatch)
 
@@ -89,7 +93,12 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     assert body["engine"] == "lilsunspot_provider_adapter"
     assert body["reply"] == "本地模型回复。"
     assert seen_payload["model"] == "llama3.2"
-    default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
+    current_mode = client.get("/modes/current", headers=headers).json()
+    default_hint = current_mode["prompt"]["system_hint"]
+    assert current_mode["profile"]["system_hint"] == default_hint
+    assert _prompt_layer_ids(current_mode) == ["product_baseline", "mode_profile", "slider_overrides"]
+    assert "普通中文" in default_hint
+    assert "当前输出偏好" in default_hint
     assert seen_payload["messages"] == [
         {"role": "system", "content": default_hint},
         {"role": "user", "content": "你好"},
@@ -109,7 +118,10 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     hermes_runtime.save_provider_credentials(provider, "llama3.2", "", paths=paths)
     selected = client.post("/modes/select", headers=headers, json={"mode": "pragmatic"})
     assert selected.status_code == 200
-    selected_hint = selected.json()["profile"]["system_hint"]
+    selected_mode = selected.json()
+    selected_hint = selected_mode["prompt"]["system_hint"]
+    assert selected_mode["profile"]["system_hint"] == selected_hint
+    assert selected_mode["prompt"]["layers"][1]["summary"] == "偏务实执行，减少铺垫，优先给出可运行结果。"
     seen_payload = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -150,6 +162,7 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert selected.status_code == 200
     assert selected.json()["profile"]["style_axis"] == 80
     assert "当前输出偏好" in selected.json()["profile"]["system_hint"]
+    assert selected.json()["prompt"]["slider_summary"] == selected.json()["prompt"]["layers"][2]["summary"]
     seen_payload = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -167,3 +180,33 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert "表达更有陪伴感" in system_hint
     assert "回答保持简短" in system_hint
     assert "风险或不确定时优先确认" in system_hint
+
+
+def test_mode_prompt_compiles_defaults_and_clamps_saved_sliders(tmp_path, monkeypatch):
+    _chat_client, _config_paths, _hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+
+    default_response = client.get("/modes/current", headers=headers)
+    assert default_response.status_code == 200
+    default_mode = default_response.json()
+    assert default_mode["profile"]["style_axis"] == 35
+    assert default_mode["profile"]["detail_level"] == 45
+    assert default_mode["profile"]["autonomy_level"] == 55
+    assert _prompt_layer_ids(default_mode) == ["product_baseline", "mode_profile", "slider_overrides"]
+    assert "表达更务实" in default_mode["prompt"]["slider_summary"]
+    assert default_mode["profile"]["system_hint"] == default_mode["prompt"]["system_hint"]
+
+    selected = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "emotional", "style_axis": -20, "detail_level": 140},
+    )
+
+    assert selected.status_code == 200
+    body = selected.json()
+    assert body["current"] == "emotional"
+    assert body["profile"]["style_axis"] == 0
+    assert body["profile"]["detail_level"] == 100
+    assert body["profile"]["autonomy_level"] == 45
+    assert "表达更务实" in body["prompt"]["slider_summary"]
+    assert "回答给出更充分细节" in body["prompt"]["slider_summary"]
+    assert "在自动推进和必要确认之间保持平衡" in body["prompt"]["slider_summary"]

@@ -174,9 +174,24 @@ export type ModeProfile = {
   system_hint: string;
 };
 
+export type ModePromptLayerId = "product_baseline" | "mode_profile" | "slider_overrides";
+
+export type ModePromptLayer = {
+  id: ModePromptLayerId;
+  label: string;
+  summary: string;
+};
+
+export type ModePrompt = {
+  system_hint: string;
+  layers: ModePromptLayer[];
+  slider_summary: string;
+};
+
 export type CurrentMode = {
   current: string;
   profile: ModeProfile;
+  prompt: ModePrompt;
 };
 
 export type WeixinStatus = {

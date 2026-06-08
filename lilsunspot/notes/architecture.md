@@ -56,7 +56,7 @@ mode profile
 -> chat 前注入
 -> 桌面滑杆/微信命令共用
 
-当前仓库已有 mode profile API 和 chat 前 system hint 注入。LIL-P0-FLOW-UI-01 增加三滑杆保存到 lilsunspot 独立数据目录；下一条 chat system_hint 会追加表达风格、细节程度和自主程度偏好。不修改 `SOUL.md`。
+LIL-P1-01 后，mode prompt 编译在 lilsunspot 产品层完成，不修改 `SOUL.md` 或 Hermes core。编译顺序固定为“产品基线 + 模式预设 + 三滑杆覆盖”：产品基线来自 `default_mode_prompt.yaml`，模式预设来自 `default_mode_profiles.yaml`，滑杆值来自 lilsunspot 独立数据目录中的 `mode-profile.json`，缺失滑杆使用所选 profile 默认值。`/modes/current` 和 `/modes/select` 返回 `prompt.system_hint`、`prompt.layers[]` 和 `prompt.slider_summary`；`profile.system_hint` 保留为编译后 prompt 的兼容字段。`/chat/send` 只读取编译后的 `prompt.system_hint` 注入 OpenAI-compatible system message。
 
 ## Weixin 计划流
 

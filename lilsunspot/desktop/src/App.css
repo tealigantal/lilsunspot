@@ -1166,6 +1166,37 @@ label {
   margin-top: var(--space-3);
 }
 
+.modePromptLayers {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.modePromptLayers li {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+
+.modePromptLayers b {
+  color: var(--ikun-yellow);
+  font-size: 13px;
+}
+
+.modePromptLayers span,
+.modeSliderSummary {
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.modeSliderSummary {
+  margin: 0;
+}
+
 .safetyMiniPanel {
   display: grid;
   gap: 8px;
@@ -2020,6 +2051,7 @@ label {
 @media (max-width: 760px) {
   body {
     overflow: auto;
+    overflow-x: hidden;
   }
 
   .appShell {
@@ -2038,8 +2070,8 @@ label {
   }
 
   .sideNav nav {
-    grid-template-columns: repeat(5, minmax(46px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(5, minmax(42px, 1fr));
+    gap: 4px;
   }
 
   .sideNavItem {
@@ -2130,6 +2162,24 @@ label {
   .settingsSection,
   .modeQuickPanelPage {
     padding: 18px;
+  }
+
+  .modeQuickPanelPage .modeMixerBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modeQuickPanelPage .sliderGrid,
+  .modeQuickPanelPage .modePreviewPanel {
+    min-width: 0;
+  }
+
+  .modeQuickPanelPage > .actionRow {
+    position: static;
+    justify-content: stretch;
+  }
+
+  .modeQuickPanelPage > .actionRow button {
+    width: 100%;
   }
 
   .chatBubble,

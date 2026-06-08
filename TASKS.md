@@ -33,19 +33,24 @@
   - 2026-06-08：追加多轮/多能力/视觉验证：真实安装版连续 3 次 DeepSeek chat 成功，当前 `/chat/send` 明确 `conversation_id_supported=false`，跨轮记忆未作为已实现能力验收；mode default/pragmatic/balanced 与三滑杆保存后 chat 均通过并恢复原 mode；Weixin `/help`、`/mode pragmatic` 骨架命令通过；Safety approval create/reject 后 pending 归零；Doctor 返回 10 项检查；DWM 截图发现窄屏聊天输入框首屏不可见后，已调整 ChatHome/AppShell CSS、重建并重装，最终 960x680 和 390x760 安装版截图中输入框可见且未见重叠/横向溢出。
   - 本轮结论：LIL-P0-03 本机直接安装验收完成；clean Windows VM 不再作为当前阻断项。
 
+- LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
+  - 2026-06-08：完成后端 prompt compiler，固定按“产品基线 + 模式预设 + 三滑杆覆盖”三层合并；新增 `default_mode_prompt.yaml`，`/modes/current` 和 `/modes/select` 返回 `prompt.system_hint`、三层 `prompt.layers[]` 和 `prompt.slider_summary`，并保留 `profile.system_hint` 作为编译后 prompt 兼容字段。
+  - `/chat/send` 现在只读取编译后的 `prompt.system_hint` 作为 OpenAI-compatible system message；缺失滑杆时使用所选 mode profile 默认值，保存滑杆继续 clamp 到 `0..100`。
+  - 桌面输出模式页读取新 `prompt` 结构，展示三层合并摘要和当前滑杆效果；未新增生产依赖，未修改 Hermes core。
+  - 验证已跑：daemon pytest 25 passed、product pytest 33 passed、`test_chat_api.py` 6 passed、`npm run build --prefix lilsunspot/desktop`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 通过。Browser IAB 当前返回 unavailable；2026-06-08 重试改用 headless Chrome/CDP 截图复验 Chat compact panel 和 Mode page 的 960x680 / 390x760，均无页面级横向溢出，三层 prompt 摘要和滑杆效果可见。截图位于 `%TEMP%\lilsunspot-p1-ui-recheck-20260608-225323`，未包含 API Key 或 runtime token。
+
 ## Next
 
-1. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
-2. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
-3. LIL-P3-01：真实高危动作审批拦截和 audit.db。
-4. LIL-P4-01：诊断包导出和脱敏。
+1. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
+2. LIL-P3-01：真实高危动作审批拦截和 audit.db。
+3. LIL-P4-01：诊断包导出和脱敏。
 
 ## Blocked / Unknown
 
 - 当前开发机用户级 setup.exe 安装/启动/保存/重开/卸载已验证；2026-06-08 追加本机真实安装目录 `%LOCALAPPDATA%\Lilsunspot` 直接安装和运行验证，以及 DeepSeek 真实 provider test/save/chat 验证。
 - NSIS installer 可在仓库外启动已验证于当前开发机；2026-06-08 新增可复用 installed-app smoke 脚本，并已验证当前已安装 exe 的 `-SkipInstall` 路径、真实静默安装到临时目录路径、当前用户真实安装目录路径。
 - 桌面聊天是否等同完整 Hermes agent loop 未验证；当前验证覆盖的是 `lilsunspot_provider_adapter` 单轮真实 DeepSeek 聊天。
-- Mode 三滑杆在安装版 API 路径已保存并随 chat 通过；完整 prompt 编译仍留给 LIL-P1-01。
+- Mode 三滑杆和 prompt 编译已在本地 API/test/build 路径完成；Browser IAB 不可用，但已用 headless Chrome/CDP 完成 960x680 / 390x760 截图级复验。
 - Weixin `/help` 和 `/mode` 骨架命令已验证；真实私聊闭环未验证。
 - Safety approval 队列 create/reject 已验证；是否拦截真实高危动作未验证。
 - Doctor API 已在安装版返回 10 项检查；Diagnostics export 未完成或未验证。

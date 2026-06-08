@@ -47,6 +47,18 @@ function previewCopy(modeId: string, styleAxis: number, detailLevel: number, aut
   ];
 }
 
+function sliderSummary(styleAxis: number, detailLevel: number, autonomyLevel: number) {
+  const style = styleAxis <= 35 ? "表达更务实" : styleAxis >= 70 ? "表达更有陪伴感" : "表达平衡清楚";
+  const detail = detailLevel <= 35 ? "回答保持简短" : detailLevel >= 70 ? "回答给出更充分细节" : "回答详略适中";
+  const autonomy =
+    autonomyLevel <= 35
+      ? "风险或不确定时优先确认"
+      : autonomyLevel >= 70
+        ? "可自动推进明确的下一步"
+        : "在自动推进和必要确认之间保持平衡";
+  return `${style}；${detail}；${autonomy}。`;
+}
+
 export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPanelProps) {
   const [modes, setModes] = useState<ModeProfile[]>([]);
   const [current, setCurrent] = useState<CurrentMode | null>(null);
@@ -94,6 +106,20 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
     () => previewCopy(selectedMode, styleAxis, detailLevel, autonomyLevel),
     [selectedMode, styleAxis, detailLevel, autonomyLevel]
   );
+  const localSliderSummary = useMemo(() => sliderSummary(styleAxis, detailLevel, autonomyLevel), [styleAxis, detailLevel, autonomyLevel]);
+  const promptLayers = useMemo(
+    () =>
+      (current?.prompt?.layers || []).map((layer) => {
+        if (layer.id === "mode_profile") {
+          return { ...layer, summary: selectedProfile?.description || layer.summary };
+        }
+        if (layer.id === "slider_overrides") {
+          return { ...layer, summary: localSliderSummary };
+        }
+        return layer;
+      }),
+    [current?.prompt?.layers, localSliderSummary, selectedProfile?.description]
+  );
 
   function applyMode(profile: ModeProfile, modeId = profile.id) {
     setSelectedMode(modeId);
@@ -120,6 +146,7 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
         detail_level: detailLevel,
         autonomy_level: autonomyLevel
       });
+      applyMode(result.profile, result.current);
       setCurrent(result);
       onModeChanged?.(result);
       setStatus(`已保存为${modeName(result.current)}输出模式。`);
@@ -135,7 +162,7 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
       <div className="settingsHeader modeHeader">
         <div>
           <h3>{variant === "compact" ? "模式混音器" : "输出模式不是设置页，是回答风格的调音台"}</h3>
-          <p>{variant === "compact" ? "下一条消息会使用这个偏好。" : "拖动后立即看到预览；保存后下一条桌面聊天和微信私聊都生效。"}</p>
+          <p>{variant === "compact" ? "下一条消息会使用这个偏好。" : "拖动后立即看到预览；保存后下一条桌面聊天会使用这个偏好，微信私聊仍待接入。"}</p>
         </div>
         <StatusBadge tone="ok">{variant === "compact" ? modeName(current?.current) : `当前：${modeName(current?.current)}`}</StatusBadge>
       </div>
@@ -170,6 +197,17 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
                 <p key={line}>{line}</p>
               ))}
             </div>
+            {promptLayers.length > 0 && (
+              <ul className="modePromptLayers" aria-label="Prompt 编译层">
+                {promptLayers.map((layer) => (
+                  <li key={layer.id}>
+                    <b>{layer.label}</b>
+                    <span>{layer.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="modeSliderSummary">当前滑杆：{localSliderSummary}</p>
           </aside>
         )}
       </div>

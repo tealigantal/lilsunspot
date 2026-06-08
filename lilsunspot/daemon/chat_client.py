@@ -172,8 +172,8 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         return _chat_error("missing_api_key"), None
 
     current_mode = get_current_mode(paths)
-    profile = current_mode.get("profile") if isinstance(current_mode.get("profile"), dict) else {}
-    system_hint = str(profile.get("system_hint") or "").strip()
+    prompt = current_mode.get("prompt") if isinstance(current_mode.get("prompt"), dict) else {}
+    system_hint = str(prompt.get("system_hint") or "").strip()
 
     return None, {
         "provider": str(provider_config["id"]),

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .prompt_compiler import compile_mode_prompt
 from .providers import MODE_PROFILES_FILE, load_yaml_resource
 
 
@@ -35,15 +36,8 @@ def _coerce_slider(value: Any) -> int | None:
     return max(0, min(100, number))
 
 
-def _slider_hint(profile: dict[str, Any]) -> str:
-    style_axis = int(profile.get("style_axis") or 0)
-    detail_level = int(profile.get("detail_level") or 0)
-    autonomy_level = int(profile.get("autonomy_level") or 0)
-
-    style = "表达更务实" if style_axis <= 35 else "表达更有陪伴感" if style_axis >= 70 else "表达平衡清楚"
-    detail = "回答保持简短" if detail_level <= 35 else "回答给出更充分细节" if detail_level >= 70 else "回答详略适中"
-    autonomy = "风险或不确定时优先确认" if autonomy_level <= 35 else "可自动推进明确的下一步" if autonomy_level >= 70 else "在自动推进和必要确认之间保持平衡"
-    return f"{style}；{detail}；{autonomy}。"
+def _profile_slider_default(profile: dict[str, Any], key: str) -> int:
+    return _coerce_slider(profile.get(key)) or 0
 
 
 def get_current_mode(paths: RuntimePaths | None = None) -> dict[str, Any]:
@@ -66,11 +60,11 @@ def get_current_mode(paths: RuntimePaths | None = None) -> dict[str, Any]:
 
     profiles = load_mode_profiles()
     profile = dict(next((item for item in profiles if item["id"] == selected), None) or profiles[0])
-    if sliders:
-        profile.update(sliders)
-        base_hint = str(profile.get("system_hint") or "").strip()
-        profile["system_hint"] = f"{base_hint}\n当前输出偏好：{_slider_hint(profile)}".strip()
-    return {"current": profile["id"], "profile": profile}
+    for key in SLIDER_KEYS:
+        profile[key] = sliders.get(key, _profile_slider_default(profile, key))
+    prompt = compile_mode_prompt(profile)
+    profile["system_hint"] = prompt["system_hint"]
+    return {"current": profile["id"], "profile": profile, "prompt": prompt}
 
 
 def select_mode(

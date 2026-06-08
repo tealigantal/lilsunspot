@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppBootstrapState, CurrentMode } from "../../types";
-import { getCurrentMode, sendChatMessage } from "../../api";
-import { StatusBadge } from "../../shared/components/StatusBadge";
+import { getCurrentMode, getSafetyApprovals, sendChatMessage } from "../../api";
 import { ModeQuickPanel, modeName } from "../mode/ModeQuickPanel";
 import { displayProvider } from "../model/ProviderCard";
 import { ChatBlockedState } from "./ChatBlockedState";
@@ -14,14 +13,21 @@ type ChatHomeProps = {
   onSetupModel: () => void;
   onRefresh: () => void;
   onOpenSettings: () => void;
+  onModeChanged?: (mode: CurrentMode) => void;
 };
 
-export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
+const EXAMPLE_PROMPTS = [
+  { title: "帮我整理今天要做的三件事", note: "适合务实模式，输出清单" },
+  { title: "我明天交方案但没开始", note: "先安抚，再给步骤" },
+  { title: "微信里把模式调到 80", note: "命令同步到桌面端" }
+];
+
+export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings, onModeChanged }: ChatHomeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<CurrentMode | null>(null);
-  const [modeOpen, setModeOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   useEffect(() => {
     setMessages(initialMessages);
@@ -34,6 +40,7 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
         const current = await getCurrentMode();
         if (mounted) {
           setMode(current);
+          onModeChanged?.(current);
         }
       } catch {
         if (mounted) {
@@ -47,8 +54,33 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    async function loadApprovals() {
+      try {
+        const approvals = await getSafetyApprovals();
+        if (mounted) {
+          setPendingApprovals(approvals.pending.length);
+        }
+      } catch {
+        if (mounted) {
+          setPendingApprovals(0);
+        }
+      }
+    }
+    void loadApprovals();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
     return <ChatBlockedState bootstrap={bootstrap} onSetupModel={onSetupModel} onRetry={onRefresh} />;
+  }
+
+  function updateMode(nextMode: CurrentMode) {
+    setMode(nextMode);
+    onModeChanged?.(nextMode);
   }
 
   async function send() {
@@ -100,26 +132,36 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
 
   return (
     <section className="chatHome">
-      <header className="chatTopBar">
-        <div>
-          <h2>和小黑子聊天</h2>
-          <p>
-            {displayProvider(bootstrap.runtime.provider)} / {bootstrap.runtime.model}
-          </p>
-        </div>
-        <div className="topBarActions">
-          <StatusBadge tone="ok">输出：{modeName(mode?.current)}</StatusBadge>
-          <button type="button" className="secondaryButton" onClick={() => setModeOpen((current) => !current)}>
-            输出模式
+      <article className="chatMainPanel">
+        <header className="panelHeader chatPanelHeader">
+          <div>
+            <h2>今日任务台</h2>
+            <p>把普通聊天、桌面执行、微信命令都压进同一个控制台。</p>
+          </div>
+          <button type="button" className="secondaryButton compactButton" onClick={onOpenSettings}>
+            模型服务
           </button>
-          <button type="button" className="secondaryButton" onClick={onOpenSettings}>
-            设置
-          </button>
-        </div>
-      </header>
-      {modeOpen && <ModeQuickPanel onModeChanged={setMode} />}
-      <ChatTranscript messages={messages} />
-      <ChatComposer value={input} onChange={setInput} onSend={send} busy={busy} />
+        </header>
+        <ChatTranscript messages={messages} examples={EXAMPLE_PROMPTS} onExampleSelect={setInput} />
+        <ChatComposer
+          value={input}
+          onChange={setInput}
+          onSend={send}
+          busy={busy}
+          placeholder="输入你想问的内容，Ctrl+Enter 发送"
+        />
+      </article>
+      <aside className="chatSidePanel" aria-label="模式和安全摘要">
+        <ModeQuickPanel variant="compact" onModeChanged={updateMode} />
+        <section className="safetyMiniPanel">
+          <h3>安全审批</h3>
+          <strong>{pendingApprovals > 0 ? `${pendingApprovals} 个待审批` : "暂无待处理高危动作"}</strong>
+          <p>Shell / 删除文件 / 微信发送 会先确认</p>
+        </section>
+        <p className="modeRuntimeLine">
+          当前：{modeName(mode?.current)} · {displayProvider(bootstrap.runtime.provider)} / {bootstrap.runtime.model}
+        </p>
+      </aside>
     </section>
   );
 }

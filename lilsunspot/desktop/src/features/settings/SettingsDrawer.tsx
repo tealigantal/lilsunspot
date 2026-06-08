@@ -21,9 +21,9 @@ type SettingsDrawerProps = {
 const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
   { id: "model", label: "模型服务" },
   { id: "mode", label: "输出模式" },
-  { id: "weixin", label: "微信", badge: "暂未开放" },
-  { id: "safety", label: "安全审批", badge: "待验证" },
-  { id: "doctor", label: "诊断", badge: "骨架" }
+  { id: "weixin", label: "微信", badge: "未连接" },
+  { id: "safety", label: "安全审批", badge: "暂无待处理" },
+  { id: "doctor", label: "诊断", badge: "未检查" }
 ];
 
 export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeChanged, initialTab = "model" }: SettingsDrawerProps) {
@@ -80,7 +80,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeCha
         <header>
           <div>
             <h2>设置</h2>
-            <p>高级功能放在这里，未完成状态会明确标记。</p>
+            <p>模型、输出风格和本地连接状态都在这里调整。</p>
           </div>
           <button type="button" className="iconButton" onClick={onClose} aria-label="关闭设置">
             ×

@@ -194,8 +194,26 @@ export type WeixinCommand = {
 
 export type SafetyPolicy = Record<string, unknown>;
 
+export type SafetyApproval = {
+  id: string;
+  operation: string;
+  status: "pending" | "approved" | "rejected" | string;
+  summary: string;
+  source: string;
+  details: Record<string, unknown>;
+  created_at: string;
+  decided_at: string | null;
+};
+
 export type SafetyApprovals = {
-  pending: unknown[];
+  pending: SafetyApproval[];
+  history?: SafetyApproval[];
+  message: string;
+};
+
+export type SafetyApprovalDecision = {
+  ok: boolean;
+  approval: SafetyApproval;
   message: string;
 };
 

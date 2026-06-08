@@ -20,7 +20,7 @@ type OnboardingFlowProps = {
   onOpenDoctor: () => void;
 };
 
-const STEPS = ["欢迎", "选择 AI 服务", "保存 API Key", "第一句聊天"];
+const STEPS = ["欢迎", "选择模型", "保存 Key", "第一句聊天"];
 
 function stepNumber(step: OnboardingStep) {
   return ["welcome", "choose", "api_key", "first_chat"].indexOf(step) + 1;
@@ -218,6 +218,7 @@ export function OnboardingFlow({
           showMore={showMore}
           onShowMoreChange={setShowMore}
           onSelect={chooseProvider}
+          onBack={() => setStep("welcome")}
           onNext={() => setStep("api_key")}
           busy={busy}
         />

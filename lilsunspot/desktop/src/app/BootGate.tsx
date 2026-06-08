@@ -6,6 +6,7 @@ import { TechnicalDetails } from "../shared/components/TechnicalDetails";
 import { ChatHome } from "../features/chat/ChatHome";
 import type { ChatMessage } from "../features/chat/ChatTranscript";
 import { OnboardingFlow } from "../features/onboarding/OnboardingFlow";
+import type { CurrentMode } from "../types";
 
 type BootGateProps = {
   bootstrap: AppBootstrapState;
@@ -18,6 +19,7 @@ type BootGateProps = {
   onSetupModel: () => void;
   onBootstrapChanged: () => Promise<void> | void;
   onFirstChatDone: (messages: ChatMessage[]) => void;
+  onModeChanged?: (mode: CurrentMode) => void;
 };
 
 export function BootGate({
@@ -30,7 +32,8 @@ export function BootGate({
   onOpenSettings,
   onSetupModel,
   onBootstrapChanged,
-  onFirstChatDone
+  onFirstChatDone,
+  onModeChanged
 }: BootGateProps) {
   const reconfiguringExistingModel = forceOnboarding && bootstrap.runtime.configured;
 
@@ -93,6 +96,7 @@ export function BootGate({
         onSetupModel={onSetupModel}
         onRefresh={onRefresh}
         onOpenSettings={onOpenSettings}
+        onModeChanged={onModeChanged}
       />
     );
   }

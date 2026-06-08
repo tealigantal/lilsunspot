@@ -7,6 +7,7 @@ type ChooseModelServiceStepProps = {
   showMore: boolean;
   onShowMoreChange: (value: boolean) => void;
   onSelect: (provider: Provider) => void;
+  onBack: () => void;
   onNext: () => void;
   busy?: boolean;
 };
@@ -19,6 +20,7 @@ export function ChooseModelServiceStep({
   showMore,
   onShowMoreChange,
   onSelect,
+  onBack,
   onNext,
   busy = false
 }: ChooseModelServiceStepProps) {
@@ -33,7 +35,7 @@ export function ChooseModelServiceStep({
       </div>
       {more.length > 0 && (
         <details className="moreProviders" open={showMore} onToggle={(event) => onShowMoreChange(event.currentTarget.open)}>
-          <summary>更多 AI 服务</summary>
+          <summary>更多服务：OpenAI、OpenRouter、自定义 OpenAI Compatible</summary>
           <div className="chipRow">
             {more.map((provider) => (
               <button
@@ -49,8 +51,11 @@ export function ChooseModelServiceStep({
         </details>
       )}
       <div className="actionRow">
+        <button type="button" className="secondaryButton" onClick={onBack} disabled={busy}>
+          上一步
+        </button>
         <button type="button" onClick={onNext} disabled={busy || !selectedProvider}>
-          下一步
+          下一步：保存 Key
         </button>
       </div>
     </div>

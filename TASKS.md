@@ -20,30 +20,53 @@
   - 2026-06-07：按 `lilsunspot/feed_back/feed_back07-06-2026` 插入并完成 LIL-P0-02A 首启体验修复；覆盖黑窗构建配置、首启模型向导、API Key 保存提示、聊天输入清空、Mode 横向选择和安装包图标。
   - 2026-06-07：继续修正 setup.exe 产物；安装包现在安装 `Lilsunspot.exe`，升级时关闭并清理旧 `lilsunspot_desktop.exe`，静默安装后快捷方式和注册表均指向 `Lilsunspot.exe`。
   - 2026-06-07：当前用户 setup.exe 安装版已验证仓库外 `Lilsunspot.exe` 首启、保存占位 API Key、关闭重开直达聊天页，并在验证后卸载。
-  - 仍未覆盖：干净 Windows VM 安装、真实 API Key provider 测试/聊天、真实桌面 UI 聊天闭环。
+  - 2026-06-08：用户确认除干净 Windows 安装以外，LIL-P0-01 其余人工验收已完成；clean Windows 安装保留给 LIL-P0-03。
+  - 仍未覆盖：干净 Windows VM 安装。
+
+- LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 Lilsunspot.exe 启动 lilsunspotd。
+  - 2026-06-08：新增 `scripts/smoke_lilsunspot_installed_app.ps1`，固定安装版 smoke 路径：可静默安装 NSIS、使用隔离 `LILSUNSPOT_DATA_DIR`、启动仓库外 `Lilsunspot.exe`、验证同目录 `lilsunspotd.exe` 进程、`127.0.0.1` runtime discovery、`/health`、带 token 的 `/providers`，并检查 daemon 日志不含 runtime token。
+  - 2026-06-08：本机已用当前用户已安装的仓库外 `%LOCALAPPDATA%\Lilsunspot\Lilsunspot.exe` 跑通 `-SkipInstall` smoke；临时数据目录为 `ignored\installed-app-smoke\data`，`/providers` 返回 6 个 provider，未打印 runtime token。
+  - 2026-06-08：经用户允许后跑通真实安装路径：`scripts/smoke_lilsunspot_installed_app.ps1` 静默安装到 `%TEMP%\lilsunspot-installed-app-smoke\app`，仓库外安装版启动同目录 sidecar，`/health` 和带 token 的 `/providers` 通过，随后自动静默卸载；为恢复本机当前用户安装状态，已用同一安装包重装回 `%LOCALAPPDATA%\Lilsunspot`，卸载注册表项和桌面/开始菜单快捷方式存在。
+  - 2026-06-08：按用户要求直接在本机安装环境验证：静默安装到 `%LOCALAPPDATA%\Lilsunspot`，启动真实安装版 `Lilsunspot.exe`，确认同目录 `lilsunspotd.exe` 进程、`http://127.0.0.1:8765`、真实数据目录 `%LOCALAPPDATA%\Lilsunspot\data`、`/health`、带 token 的 `/providers` 6 个 provider、`/app/bootstrap` stage=`chat_ready`；未打印 runtime token。
+  - 2026-06-08：按用户要求使用系统环境中的 DeepSeek API Key 验证真实 provider 主路径；从环境变量读取 Key 到内存，`/providers/test` 通过，`/providers/save` 保存 `deepseek/deepseek-chat`，`/chat/send` 真实返回 4 字回复，`/app/bootstrap` 仍为 `chat_ready`；未打印或记录 API Key、runtime token、回复正文。
+  - 2026-06-08：追加多轮/多能力/视觉验证：真实安装版连续 3 次 DeepSeek chat 成功，当前 `/chat/send` 明确 `conversation_id_supported=false`，跨轮记忆未作为已实现能力验收；mode default/pragmatic/balanced 与三滑杆保存后 chat 均通过并恢复原 mode；Weixin `/help`、`/mode pragmatic` 骨架命令通过；Safety approval create/reject 后 pending 归零；Doctor 返回 10 项检查；DWM 截图发现窄屏聊天输入框首屏不可见后，已调整 ChatHome/AppShell CSS、重建并重装，最终 960x680 和 390x760 安装版截图中输入框可见且未见重叠/横向溢出。
+  - 本轮结论：LIL-P0-03 本机直接安装验收完成；clean Windows VM 不再作为当前阻断项。
 
 ## Next
 
-1. LIL-P0-02：新增发布级 check_release.ps1，不允许静默跳过 desktop build。
-2. LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 Lilsunspot.exe 启动 lilsunspotd。
-3. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
-4. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
-5. LIL-P3-01：真实高危动作审批拦截和 audit.db。
-6. LIL-P4-01：诊断包导出和脱敏。
+1. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
+2. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
+3. LIL-P3-01：真实高危动作审批拦截和 audit.db。
+4. LIL-P4-01：诊断包导出和脱敏。
 
 ## Blocked / Unknown
 
-- Windows 干净 VM 安装未验证；当前开发机用户级 setup.exe 安装/启动/保存/重开/卸载已验证。
-- NSIS installer 可在仓库外启动已验证于当前开发机；干净 VM 仍未验证。
-- 桌面聊天是否等同完整 Hermes agent loop 未验证。
-- Mode 三滑杆未完成或未验证。
-- Weixin 私聊真实闭环未验证。
-- Safety 是否拦截真实高危动作未验证。
-- Diagnostics export 未完成或未验证。
+- 当前开发机用户级 setup.exe 安装/启动/保存/重开/卸载已验证；2026-06-08 追加本机真实安装目录 `%LOCALAPPDATA%\Lilsunspot` 直接安装和运行验证，以及 DeepSeek 真实 provider test/save/chat 验证。
+- NSIS installer 可在仓库外启动已验证于当前开发机；2026-06-08 新增可复用 installed-app smoke 脚本，并已验证当前已安装 exe 的 `-SkipInstall` 路径、真实静默安装到临时目录路径、当前用户真实安装目录路径。
+- 桌面聊天是否等同完整 Hermes agent loop 未验证；当前验证覆盖的是 `lilsunspot_provider_adapter` 单轮真实 DeepSeek 聊天。
+- Mode 三滑杆在安装版 API 路径已保存并随 chat 通过；完整 prompt 编译仍留给 LIL-P1-01。
+- Weixin `/help` 和 `/mode` 骨架命令已验证；真实私聊闭环未验证。
+- Safety approval 队列 create/reject 已验证；是否拦截真实高危动作未验证。
+- Doctor API 已在安装版返回 10 项检查；Diagnostics export 未完成或未验证。
 
 ## Done
 
 以下为历史任务记录，是否完全代表当前主线状态需以 lilsunspot/notes/mvp-p0-status.md 为准。
+
+### LIL-P0-02: 发布级 check_release.ps1。
+
+Goal:
+新增发布候选强校验入口，避免发布前因为缺少 npm 或 desktop 依赖而静默跳过桌面构建。
+
+Result:
+新增 `scripts/check_release.ps1`，固定执行 git diff check、daemon pytest、product pytest、secret guard、desktop build、sidecar build、NSIS build，并检查 sidecar exe 和 NSIS setup.exe 产物存在；缺少 `git`、`python`、`npm`、`uv` 或 `lilsunspot/desktop/node_modules` 时直接失败。新增脚本约束测试，防止 release check 回退到跳过 desktop build。
+
+Check:
+```powershell
+python -m pytest lilsunspot/tests/test_release_check_script.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
+pwsh scripts/check_release.ps1
+pwsh scripts/check.ps1
+```
 
 ### LIL-P0-02A: 安装后首启体验修复。
 

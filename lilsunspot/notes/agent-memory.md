@@ -2,6 +2,12 @@
 
 ## 2026-06-08
 
+- Task: run real installed-app UI visual acceptance for `LIL-P0-FLOW-UI-01`.
+- Files touched: `lilsunspot/desktop/src/App.css`, `lilsunspot/desktop/src/features/model/ProviderCard.tsx`, `lilsunspot/desktop/src/shared/components/StepLayout.tsx`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: rebuilt and reinstalled the current NSIS package into `%LOCALAPPDATA%\Lilsunspot`, then used Windows UI Automation and DWM screenshots at a 1365x768 window to inspect Chat, Mode, Weixin, Safety, Doctor, and Provider selection against `lilsunspot/lilsunspot_ui_v3_reference`. Fixed low-height/high-DPI visual issues: Weixin QR/status no longer clips, native scrollbars match the dark theme, Provider selection resets scroll on step changes, and compact Provider cards no longer break words or show half-cards. Screenshots stayed in `%TEMP%` and were not committed.
+- Validation: `npm run build --prefix lilsunspot/desktop`, `npm run tauri:build --prefix lilsunspot/desktop`, `git diff --check`, `python scripts/guard_no_secrets.py`, and `pwsh scripts/check.ps1` passed. Final visual evidence is in `%TEMP%\lilsunspot-ui-visual-final-20260608-202018`.
+- Remaining risk: acceptance used this development machine's installed app rather than a clean Windows VM; real Weixin private chat, real high-risk action interception, diagnostics export, and full Hermes agent-loop behavior remain out of scope.
+
 - Task: run multi-round, multi-capability, and installed-app visual QA for `LIL-P0-03`.
 - Files touched: `lilsunspot/desktop/src/App.css`, `TASKS.md`, `lilsunspot/README-dev.md`, `lilsunspot/notes/mvp-p0-status.md`, and `lilsunspot/notes/agent-memory.md`.
 - Decision/result: used the installed `%LOCALAPPDATA%\Lilsunspot\Lilsunspot.exe` and sidecar with the DeepSeek API Key read from environment only in memory. Consecutive chat calls succeeded, but the product adapter reports `conversation_id_supported=false`, so cross-turn memory was not treated as implemented. Verified mode profile/sliders, Weixin command skeleton, Safety approval queue, and Doctor APIs. Installed-app screenshots found the chat composer below the first viewport on narrow windows; adjusted AppShell/ChatHome/transcript/composer sizing so the composer remains visible.

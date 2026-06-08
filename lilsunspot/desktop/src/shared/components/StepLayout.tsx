@@ -12,7 +12,7 @@ export function StepLayout({ current, steps, title, message, children }: StepLay
   return (
     <section className="stepLayout">
       <aside className="stepRail" aria-label="设置步骤">
-        <strong>首启设置</strong>
+        <strong>首启向导</strong>
         {steps.map((step, index) => (
           <div key={step} className={index + 1 === current ? "activeStep" : index + 1 < current ? "doneStep" : ""}>
             <span>{index + 1}</span>
@@ -20,7 +20,7 @@ export function StepLayout({ current, steps, title, message, children }: StepLay
           </div>
         ))}
       </aside>
-      <article className="stepCard">
+      <article key={current} className="stepCard">
         <header>
           <span>第 {current} 步</span>
           <h2>{title}</h2>

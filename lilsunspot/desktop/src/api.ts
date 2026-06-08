@@ -13,6 +13,7 @@ import type {
   ProviderTestResult,
   RepairResult,
   RuntimeInfo,
+  SafetyApprovalDecision,
   SafetyApprovals,
   SafetyPolicy,
   SaveProviderResult,
@@ -272,6 +273,13 @@ export async function getSafetyPolicy(): Promise<SafetyPolicy> {
 
 export async function getSafetyApprovals(): Promise<SafetyApprovals> {
   return requestJson<SafetyApprovals>("/safety/approvals");
+}
+
+export async function decideSafetyApproval(approvalId: string, decision: "approved" | "rejected"): Promise<SafetyApprovalDecision> {
+  return requestJson<SafetyApprovalDecision>(`/safety/approvals/${encodeURIComponent(approvalId)}/decide`, {
+    method: "POST",
+    body: JSON.stringify({ decision })
+  });
 }
 
 export async function runDoctor(): Promise<DoctorResult> {

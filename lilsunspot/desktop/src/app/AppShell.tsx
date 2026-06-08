@@ -3,17 +3,41 @@ import lilsunspotIcon from "../assets/lilsunspot-icon.png";
 import type { CurrentMode } from "../types";
 import { SettingsDrawer, type SettingsTab } from "../features/settings/SettingsDrawer";
 import type { ChatMessage } from "../features/chat/ChatTranscript";
+import { ModeQuickPanel, modeName } from "../features/mode/ModeQuickPanel";
+import { displayProvider } from "../features/model/ProviderCard";
+import { DoctorSettings } from "../features/settings/DoctorSettings";
+import { SafetySettings } from "../features/settings/SafetySettings";
+import { WeixinSettings } from "../features/settings/WeixinSettings";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
 
+type ConsoleView = "chat" | "mode" | "weixin" | "safety" | "doctor";
+
+const NAV_ITEMS: { id: ConsoleView; short: string; label: string }[] = [
+  { id: "chat", short: "CH", label: "聊天" },
+  { id: "mode", short: "MD", label: "模式" },
+  { id: "weixin", short: "WX", label: "微信" },
+  { id: "safety", short: "OK", label: "审批" },
+  { id: "doctor", short: "DR", label: "诊断" }
+];
+
+const VIEW_COPY: Record<ConsoleView, { title: string; subtitle: string }> = {
+  chat: { title: "和小黑子聊天", subtitle: "桌面聊天、任务整理和本地 Agent 控制台" },
+  mode: { title: "输出模式调音台", subtitle: "拖动后保存，下一条聊天和微信命令会使用这个偏好" },
+  weixin: { title: "微信连接", subtitle: "WEIXIN GATEWAY.EXE · 私聊命令和资料文本" },
+  safety: { title: "安全审批", subtitle: "高危动作先确认，不展示原始工具 JSON" },
+  doctor: { title: "一键诊断", subtitle: "本地服务、Provider、模式文件和脱敏检查" }
+};
+
 export function AppShell() {
   const bootstrapState = useBootstrapState();
+  const [activeView, setActiveView] = useState<ConsoleView>("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [firstChatMessages, setFirstChatMessages] = useState<ChatMessage[]>([]);
   const [devToken, setDevToken] = useState("");
-  const [_lastMode, setLastMode] = useState<CurrentMode | null>(null);
+  const [lastMode, setLastMode] = useState<CurrentMode | null>(null);
 
   async function refreshAndReturn() {
     setForceOnboarding(false);
@@ -34,6 +58,7 @@ export function AppShell() {
   function setupModel() {
     setSettingsOpen(false);
     setForceOnboarding(true);
+    setActiveView("chat");
   }
 
   function openSettings(tab: SettingsTab = "model") {
@@ -41,59 +66,110 @@ export function AppShell() {
     setSettingsOpen(true);
   }
 
-  return (
-    <main className="appShell">
-      <header className="appHeader">
-        <div className="brandBlock">
-          <img src={lilsunspotIcon} alt="" className="brandIcon" />
-          <div>
-            <h1>Lilsunspot 小黑子</h1>
-            <p>Windows 桌面个人 Agent，运行在你的电脑本地</p>
-          </div>
-        </div>
-        <div className="headerActions">
-          <button type="button" className="secondaryButton" onClick={bootstrapState.refresh} disabled={bootstrapState.busy}>
-            重新检查
-          </button>
-          <button type="button" className="secondaryButton" onClick={() => openSettings("model")}>
-            设置
-          </button>
-        </div>
-      </header>
-
-      {bootstrapState.devMode && (
-        <details className="devPanel">
-          <summary>开发者模式：浏览器调试连接</summary>
-          <p>这里仅用于浏览器开发调试，正式桌面版不会显示，也不会要求手动填写。</p>
-          <div className="formRow">
-            <label>
-              调试 Token
-              <input
-                value={devToken}
-                onChange={(event) => setDevToken(event.target.value)}
-                type="password"
-                placeholder="仅开发模式手动填写"
-              />
-            </label>
-            <button type="button" onClick={() => bootstrapState.applyDevToken(devToken)} disabled={!devToken.trim()}>
-              使用调试 Token
-            </button>
-          </div>
-        </details>
-      )}
-
+  function renderActiveView() {
+    if (activeView === "mode") {
+      return <ModeQuickPanel variant="page" onModeChanged={setLastMode} />;
+    }
+    if (activeView === "weixin") {
+      return <WeixinSettings />;
+    }
+    if (activeView === "safety") {
+      return <SafetySettings />;
+    }
+    if (activeView === "doctor") {
+      return <DoctorSettings />;
+    }
+    return (
       <BootGate
         bootstrap={bootstrapState.bootstrap}
         forceOnboarding={forceOnboarding}
         initialMessages={firstChatMessages}
         busy={bootstrapState.busy}
         onRefresh={refreshAndReturn}
-        onOpenDoctor={() => openSettings("doctor")}
+        onOpenDoctor={() => setActiveView("doctor")}
         onOpenSettings={() => openSettings("model")}
         onSetupModel={setupModel}
         onBootstrapChanged={handleSaved}
         onFirstChatDone={handleFirstChatDone}
+        onModeChanged={setLastMode}
       />
+    );
+  }
+
+  const runtime = bootstrapState.bootstrap.runtime;
+  const chatConfigured = bootstrapState.bootstrap.stage === "chat_ready" && runtime.configured;
+  const connectionLabel = chatConfigured ? "已连接" : runtime.configured ? "已配置" : "未配置";
+  const activeCopy =
+    activeView === "chat" && !chatConfigured
+      ? { title: bootstrapState.bootstrap.stage === "starting" ? "正在准备小黑子" : "首启向导", subtitle: bootstrapState.bootstrap.message }
+      : VIEW_COPY[activeView];
+
+  return (
+    <main className="appShell">
+      <aside className="sideNav" aria-label="主导航">
+        <img src={lilsunspotIcon} alt="小黑子" className="sideNavIcon" />
+        <nav>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeView === item.id ? "sideNavItem active" : "sideNavItem"}
+              onClick={() => setActiveView(item.id)}
+              aria-current={activeView === item.id ? "page" : undefined}
+            >
+              <strong>{item.short}</strong>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="localStatus" aria-label="本地服务">
+          <span />
+          <small>LOCAL</small>
+        </div>
+      </aside>
+
+      <section className="consoleFrame">
+        <header className="topStatusBar">
+          <div className="topTitleBlock">
+            <h1>{activeCopy.title}</h1>
+            <p>
+              {activeView === "chat" && runtime.configured
+                ? `${displayProvider(runtime.provider)} / ${runtime.model || "未选择模型"} · 本地运行`
+                : activeCopy.subtitle}
+            </p>
+          </div>
+          <div className="topBarActions">
+            <span className="statusPill aqua">输出：{modeName(lastMode?.current || "balanced")}</span>
+            <span className={chatConfigured ? "statusPill green" : "statusPill warning"}>{connectionLabel}</span>
+            <button type="button" className="secondaryButton compactButton" onClick={() => openSettings("model")}>
+              设置
+            </button>
+          </div>
+        </header>
+
+        {bootstrapState.devMode && (
+          <details className="devPanel">
+            <summary>开发者模式：浏览器调试连接</summary>
+            <p>这里仅用于浏览器开发调试，正式桌面版不会显示，也不会要求手动填写。</p>
+            <div className="formRow">
+              <label>
+                调试 Token
+                <input
+                  value={devToken}
+                  onChange={(event) => setDevToken(event.target.value)}
+                  type="password"
+                  placeholder="仅开发模式手动填写"
+                />
+              </label>
+              <button type="button" onClick={() => bootstrapState.applyDevToken(devToken)} disabled={!devToken.trim()}>
+                使用调试 Token
+              </button>
+            </div>
+          </details>
+        )}
+
+        <div className="consoleContent">{renderActiveView()}</div>
+      </section>
 
       <SettingsDrawer
         open={settingsOpen}

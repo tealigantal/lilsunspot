@@ -35,10 +35,14 @@ export function ProviderCard({ provider, selected, onSelect }: ProviderCardProps
   const copy = providerCopy(provider);
   return (
     <button type="button" className={selected ? "providerCard selected" : "providerCard"} onClick={() => onSelect(provider)}>
-      <strong>{provider.display_name}</strong>
-      <span>{copy.description}</span>
-      <em>{copy.keyRequirement}</em>
-      <small>推荐模型：{provider.default_model}</small>
+      <span className="providerCardTop">
+        <strong>{provider.display_name}</strong>
+        {selected && <em>已选</em>}
+      </span>
+      <span className="providerDescription">{copy.description}</span>
+      <small>推荐模型</small>
+      <b>{provider.default_model}</b>
+      <span className="providerKeyRequirement">{copy.keyRequirement}</span>
     </button>
   );
 }

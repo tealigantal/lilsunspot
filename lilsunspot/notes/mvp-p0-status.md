@@ -43,10 +43,8 @@
 ## 当前 P0 阻断项
 
 - 安装包是否能在干净 Windows 上运行。
-- 仓库外已安装 `Lilsunspot.exe` 是否能自动启动或发现 `lilsunspotd`。
-- 真实 API Key 的 provider test/save/chat 是否稳定；本次只跑 mock 和历史记录级验证。
-- 桌面 UI 首启向导和聊天闭环未做人工/浏览器视觉验证。
-- 当前 `scripts/check.ps1` 仍会在缺少 desktop 依赖时跳过 desktop build，发布级强校验留给 LIL-P0-02。
+- 2026-06-08 用户确认除干净 Windows 安装以外，LIL-P0-01 其余人工验收已完成；本文件未记录真实 API Key、runtime token 或私有截图。
+- LIL-P0-02 已新增 `scripts/check_release.ps1` 作为发布候选强校验入口，不允许静默跳过 desktop build。
 
 ## LIL-P0-01 自动验证记录
 

@@ -99,6 +99,12 @@ npm run tauri:build --prefix lilsunspot/desktop
 
 同次验证还用 ignored 临时数据目录启动 release sidecar，确认 `/health`、token-protected `/providers`、`127.0.0.1` 绑定、runtime file 创建和 daemon 日志 token 泄漏检查通过；未记录 runtime token。
 
+发布候选使用强校验入口；该脚本要求 desktop 依赖已安装，并且不会静默跳过 desktop build：
+
+```powershell
+pwsh scripts/check_release.ps1
+```
+
 ## 构建 sidecar
 
 当前 `scripts/` 下存在 sidecar 构建脚本；LIL-P0-01 已验证可生成 `lilsunspotd-x86_64-pc-windows-msvc.exe`。

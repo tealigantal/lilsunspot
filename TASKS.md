@@ -20,16 +20,16 @@
   - 2026-06-07：按 `lilsunspot/feed_back/feed_back07-06-2026` 插入并完成 LIL-P0-02A 首启体验修复；覆盖黑窗构建配置、首启模型向导、API Key 保存提示、聊天输入清空、Mode 横向选择和安装包图标。
   - 2026-06-07：继续修正 setup.exe 产物；安装包现在安装 `Lilsunspot.exe`，升级时关闭并清理旧 `lilsunspot_desktop.exe`，静默安装后快捷方式和注册表均指向 `Lilsunspot.exe`。
   - 2026-06-07：当前用户 setup.exe 安装版已验证仓库外 `Lilsunspot.exe` 首启、保存占位 API Key、关闭重开直达聊天页，并在验证后卸载。
-  - 仍未覆盖：干净 Windows VM 安装、真实 API Key provider 测试/聊天、真实桌面 UI 聊天闭环。
+  - 2026-06-08：用户确认除干净 Windows 安装以外，LIL-P0-01 其余人工验收已完成；clean Windows 安装保留给 LIL-P0-03。
+  - 仍未覆盖：干净 Windows VM 安装。
 
 ## Next
 
-1. LIL-P0-02：新增发布级 check_release.ps1，不允许静默跳过 desktop build。
-2. LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 Lilsunspot.exe 启动 lilsunspotd。
-3. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
-4. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
-5. LIL-P3-01：真实高危动作审批拦截和 audit.db。
-6. LIL-P4-01：诊断包导出和脱敏。
+1. LIL-P0-03：干净 Windows 安装冒烟，验证仓库外 Lilsunspot.exe 启动 lilsunspotd。
+2. LIL-P1-01：输出模式三滑杆、三层合并和 prompt 编译。
+3. LIL-P2-01：Weixin gateway 二维码、状态和真实私聊。
+4. LIL-P3-01：真实高危动作审批拦截和 audit.db。
+5. LIL-P4-01：诊断包导出和脱敏。
 
 ## Blocked / Unknown
 
@@ -44,6 +44,21 @@
 ## Done
 
 以下为历史任务记录，是否完全代表当前主线状态需以 lilsunspot/notes/mvp-p0-status.md 为准。
+
+### LIL-P0-02: 发布级 check_release.ps1。
+
+Goal:
+新增发布候选强校验入口，避免发布前因为缺少 npm 或 desktop 依赖而静默跳过桌面构建。
+
+Result:
+新增 `scripts/check_release.ps1`，固定执行 git diff check、daemon pytest、product pytest、secret guard、desktop build、sidecar build、NSIS build，并检查 sidecar exe 和 NSIS setup.exe 产物存在；缺少 `git`、`python`、`npm`、`uv` 或 `lilsunspot/desktop/node_modules` 时直接失败。新增脚本约束测试，防止 release check 回退到跳过 desktop build。
+
+Check:
+```powershell
+python -m pytest lilsunspot/tests/test_release_check_script.py --timeout-method=thread --basetemp .tmp-pytest-lilsunspot
+pwsh scripts/check_release.ps1
+pwsh scripts/check.ps1
+```
 
 ### LIL-P0-02A: 安装后首启体验修复。
 

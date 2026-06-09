@@ -1628,6 +1628,7 @@ all = [
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
     { name = "pywinpty", marker = "sys_platform == 'win32'" },
+    { name = "qrcode" },
     { name = "ruff" },
     { name = "simple-term-menu" },
     { name = "ty" },
@@ -1754,6 +1755,7 @@ termux-all = [
     { name = "ptyprocess", marker = "sys_platform != 'win32'" },
     { name = "python-telegram-bot", extra = ["webhooks"] },
     { name = "pywinpty", marker = "sys_platform == 'win32'" },
+    { name = "qrcode" },
     { name = "simple-term-menu" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1769,7 +1771,9 @@ voice = [
     { name = "sounddevice" },
 ]
 web = [
+    { name = "aiohttp" },
     { name = "fastapi" },
+    { name = "qrcode" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 youtube = [
@@ -1783,6 +1787,7 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'messaging'", specifier = "==3.13.3" },
     { name = "aiohttp", marker = "extra == 'slack'", specifier = "==3.13.3" },
     { name = "aiohttp", marker = "extra == 'sms'", specifier = "==3.13.3" },
+    { name = "aiohttp", marker = "extra == 'web'", specifier = "==3.13.3" },
     { name = "aiohttp-socks", marker = "extra == 'matrix'", specifier = "==0.11.0" },
     { name = "aiosqlite", marker = "extra == 'matrix'", specifier = "==0.22.1" },
     { name = "alibabacloud-dingtalk", marker = "extra == 'dingtalk'", specifier = "==2.2.42" },
@@ -1859,6 +1864,7 @@ requires-dist = [
     { name = "qrcode", marker = "extra == 'dingtalk'", specifier = "==7.4.2" },
     { name = "qrcode", marker = "extra == 'feishu'", specifier = "==7.4.2" },
     { name = "qrcode", marker = "extra == 'messaging'", specifier = "==7.4.2" },
+    { name = "qrcode", marker = "extra == 'web'", specifier = "==7.4.2" },
     { name = "requests", specifier = "==2.33.0" },
     { name = "rich", specifier = "==14.3.3" },
     { name = "ruamel-yaml", specifier = "==0.18.17" },

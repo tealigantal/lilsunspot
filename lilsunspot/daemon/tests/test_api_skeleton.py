@@ -41,7 +41,8 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     weixin = client.get("/gateway/weixin/status", headers=headers)
     assert weixin.status_code == 200
     assert weixin.json()["connected"] is False
-    assert "不会扫码登录" in weixin.json()["message"]
+    assert weixin.json()["status"] in {"not_configured", "error"}
+    assert weixin.json()["capabilities"]["official_payment_or_materials_required"] is False
 
     commands = client.get("/gateway/weixin/commands", headers=headers)
     assert commands.status_code == 200
@@ -117,3 +118,36 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
         {"role": "system", "content": default_hint},
         {"role": "user", "content": "你好"},
     ]
+
+
+def test_weixin_private_text_reuses_chat_adapter(daemon_client, monkeypatch):
+    client = daemon_client.client
+    headers = daemon_client.headers
+    seen_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "微信私聊回复。"}}]})
+
+    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+
+    save = client.post(
+        "/providers/save",
+        headers=headers,
+        json={"provider": "ollama", "model": "llama3.2", "api_key": ""},
+    )
+    assert save.status_code == 200
+
+    response = client.post(
+        "/gateway/weixin/commands/handle",
+        headers=headers,
+        json={"text": "帮我总结今天安排"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["intent"]["kind"] == "chat_message"
+    assert body["chat"]["engine"] == "lilsunspot_provider_adapter"
+    assert body["chat"]["reply"] == "微信私聊回复。"
+    assert seen_payload["messages"][-1] == {"role": "user", "content": "帮我总结今天安排"}

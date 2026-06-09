@@ -3,6 +3,7 @@ from __future__ import annotations
 import platform
 import os
 import webbrowser
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -15,7 +16,16 @@ from .auth import load_or_create_token, require_token
 from .chat_client import current_runtime_model, send_chat_message
 from .config_paths import ensure_runtime_dirs
 from .doctor import repair_placeholder, run_doctor_checks
-from .gateway import parse_weixin_command, request_weixin_send_approval, weixin_commands, weixin_status
+from .gateway import (
+    WeixinGatewayError,
+    disconnect_weixin,
+    handle_weixin_command_text,
+    poll_weixin_login_status,
+    request_weixin_send_approval,
+    start_weixin_login,
+    weixin_commands,
+    weixin_status,
+)
 from .hermes_runtime import HermesRuntimeError, save_provider_credentials
 from .logging_utils import configure_logging
 from .modes import get_current_mode, load_mode_profiles, select_mode
@@ -30,6 +40,7 @@ from .safety import (
     load_safety_policy,
     request_safety_approval,
 )
+from .weixin_runtime import start_weixin_runtime, stop_weixin_runtime, weixin_runtime_status
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -58,6 +69,7 @@ BIND_HOST = _configured_host()
 BIND_PORT = _configured_port()
 
 paths = ensure_runtime_dirs()
+os.environ["HERMES_HOME"] = str(paths.hermes_home)
 logger = configure_logging(paths.logs_dir)
 load_or_create_token()
 runtime_descriptor = write_runtime_descriptor(BIND_HOST, BIND_PORT, paths)
@@ -67,12 +79,24 @@ logger.info(
     runtime_descriptor["pid"],
 )
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if current_runtime_model(paths)["configured"]:
+        await start_weixin_runtime(paths)
+    try:
+        yield
+    finally:
+        await stop_weixin_runtime()
+
+
 app = FastAPI(
     title="lilsunspotd",
     version=__version__,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -85,6 +109,10 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-Lilsunspot-Token"],
 )
+
+
+def _with_weixin_runtime_status(payload: dict[str, Any]) -> dict[str, Any]:
+    return {**payload, "runtime": weixin_runtime_status()}
 
 
 class OpenKeyUrlRequest(BaseModel):
@@ -186,13 +214,20 @@ def _app_bootstrap_state() -> dict[str, Any]:
     provider_id = str(runtime_model.get("provider") or "")
     model = str(runtime_model.get("model") or "")
     provider_config = provider_by_id(provider_id) if provider_id else None
+    weixin_state = weixin_status()
+    if weixin_state.get("connected"):
+        weixin_check = "connected"
+    elif weixin_state.get("available"):
+        weixin_check = "not_configured"
+    else:
+        weixin_check = "unavailable"
 
     checks = {
         "daemon": "ok",
         "model_config": "present" if configured and provider_config else "missing" if not configured else "invalid",
         "chat": "ready" if configured and provider_config else "blocked",
         "mode": "ready",
-        "weixin": "unavailable",
+        "weixin": weixin_check,
         "safety": "placeholder",
     }
     runtime = {
@@ -364,7 +399,29 @@ async def chat_send(payload: ChatSendRequest) -> dict[str, Any]:
 
 @app.get("/gateway/weixin/status", dependencies=[Depends(require_token)])
 async def gateway_weixin_status() -> dict[str, Any]:
-    return weixin_status()
+    return _with_weixin_runtime_status(weixin_status())
+
+
+@app.post("/gateway/weixin/login/start", dependencies=[Depends(require_token)])
+async def gateway_weixin_login_start() -> dict[str, Any]:
+    try:
+        return _with_weixin_runtime_status(await start_weixin_login())
+    except WeixinGatewayError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/gateway/weixin/login/status", dependencies=[Depends(require_token)])
+async def gateway_weixin_login_status() -> dict[str, Any]:
+    result = await poll_weixin_login_status()
+    if result.get("connected"):
+        await start_weixin_runtime(paths)
+    return _with_weixin_runtime_status(result)
+
+
+@app.post("/gateway/weixin/disconnect", dependencies=[Depends(require_token)])
+async def gateway_weixin_disconnect() -> dict[str, Any]:
+    await stop_weixin_runtime()
+    return _with_weixin_runtime_status(disconnect_weixin())
 
 
 @app.get("/gateway/weixin/commands", dependencies=[Depends(require_token)])
@@ -374,31 +431,7 @@ async def gateway_weixin_commands() -> dict[str, Any]:
 
 @app.post("/gateway/weixin/commands/handle", dependencies=[Depends(require_token)])
 async def gateway_weixin_command_handle(payload: WeixinCommandRequest) -> dict[str, Any]:
-    intent = parse_weixin_command(payload.text)
-    if not intent.get("ok"):
-        return {"ok": False, "intent": intent, "message": intent["message"]}
-
-    kind = intent.get("kind")
-    if kind == "help":
-        return {"ok": True, "intent": intent, "message": intent["message"], "commands": weixin_commands()["commands"]}
-    if kind == "list_modes":
-        return {"ok": True, "intent": intent, "message": intent["message"], "modes": load_mode_profiles()}
-    if kind == "select_mode":
-        try:
-            result = select_mode(str(intent["mode"]))
-        except ValueError as exc:
-            return {"ok": False, "intent": intent, "message": str(exc)}
-        return {"ok": True, "intent": intent, "message": "输出风格已切换。", "mode": result}
-    if kind == "approval_decision":
-        try:
-            result = decide_approval(str(intent["approval_id"]), str(intent["decision"]))
-        except ApprovalNotFoundError as exc:
-            return {"ok": False, "intent": intent, "message": str(exc)}
-        except ValueError as exc:
-            return {"ok": False, "intent": intent, "message": str(exc)}
-        return {"ok": True, "intent": intent, "message": result["message"], "approval": result["approval"]}
-
-    return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}
+    return await handle_weixin_command_text(payload.text)
 
 
 @app.post("/gateway/weixin/send", dependencies=[Depends(require_token)])

@@ -24,6 +24,7 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.providers as providers
     import lilsunspot.daemon.runtime_discovery as runtime_discovery
     import lilsunspot.daemon.safety as safety
+    import lilsunspot.daemon.weixin_runtime as weixin_runtime
     import lilsunspot.daemon.app as app_module
 
     config_paths = importlib.reload(config_paths)
@@ -37,6 +38,7 @@ def daemon_client(tmp_path, monkeypatch):
     modes = importlib.reload(modes)
     gateway = importlib.reload(gateway)
     safety = importlib.reload(safety)
+    weixin_runtime = importlib.reload(weixin_runtime)
     doctor = importlib.reload(doctor)
     app_module = importlib.reload(app_module)
 
@@ -53,4 +55,5 @@ def daemon_client(tmp_path, monkeypatch):
         headers=headers,
         hermes_runtime=hermes_runtime,
         token=token,
+        weixin_runtime=weixin_runtime,
     )

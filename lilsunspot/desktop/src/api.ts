@@ -266,6 +266,22 @@ export async function getWeixinCommands(): Promise<WeixinCommand[]> {
   return body.commands;
 }
 
+export async function startWeixinLogin(): Promise<WeixinStatus> {
+  return requestJson<WeixinStatus>("/gateway/weixin/login/start", {
+    method: "POST"
+  });
+}
+
+export async function getWeixinLoginStatus(): Promise<WeixinStatus> {
+  return requestJson<WeixinStatus>("/gateway/weixin/login/status");
+}
+
+export async function disconnectWeixin(): Promise<WeixinStatus> {
+  return requestJson<WeixinStatus>("/gateway/weixin/disconnect", {
+    method: "POST"
+  });
+}
+
 export async function getSafetyPolicy(): Promise<SafetyPolicy> {
   const body = await requestJson<{ policy: SafetyPolicy }>("/safety/policy");
   return body.policy;

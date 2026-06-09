@@ -1,6 +1,42 @@
 # Agent Memory
 
+## 2026-06-09
+
+- Task: research whether Weixin sync/files/PDF should reuse official Hermes gateway strategy.
+- Files touched: `lilsunspot/notes/architecture.md`, `TASKS.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: 联网和本地源码核对后，判断方向合理：后续不应继续扩展 lilsunspot 的手写微信文字桥，而应转向官方 Hermes gateway-first。官方 `gateway/platforms/weixin.py` 已有 `MessageEvent(media_urls/media_types)`、媒体下载缓存、`send_document()`、`send_image_file()` 和 `MEDIA:<path>` artifact 交付相关能力；lilsunspot 产品层应负责本地会话同步、桌面 UI、审批、脱敏、配置和 setup.exe 打包。
+- Validation: research/documentation-only update; no product code implementation was performed. Remaining validation is future setup.exe installed-app smoke with real Weixin file/PDF flows.
+- Remaining risk: 不能直接搬官方 CLI 交互；需要设计产品层会话库、artifact/document pipeline 和安全审批，且 iLink 媒体/文件能力必须真机验收。
+
+- Task: fix installed setup.exe Weixin QR scan usability after user feedback.
+- Files touched: `lilsunspot/daemon/gateway.py`, `lilsunspot/daemon/tests/test_weixin_gateway_login.py`, `lilsunspot/desktop/src/features/settings/WeixinSettings.tsx`, `lilsunspot/desktop/src/App.css`, `TASKS.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: 联网核对 Hermes 官方 Weixin adapter 后确认 `qrcode_img_content` 是完整可扫码 liteapp URL，`qrcode` 只应用于登录状态轮询；后端不再用 `qrcode` fallback 生成误导性二维码，缺少或格式异常时返回中文错误。桌面微信页进入后自动生成真实二维码，真实二维码未返回前只显示空状态，不再画假 QR；命令贴纸改为自然换行，避免安装版窗口里重叠。
+- Decision/result: after user confirmed scanning could start but the UI overlapped, split the real QR image box from the scan instruction/actions. The QR container now only renders the QR image or empty state; scan instructions and helper buttons live in a separate metadata panel with low-height sizing rules.
+- Decision/result: after user pointed out the right panel was meaningless, removed the developer-facing status timeline and command-sticker block from the Weixin page. The panel now shows a plain current-status card, the next action, and the small set of message forms a user can send after scanning.
+- Validation: focused Weixin pytest 7 passed, desktop build passed, Tauri NSIS setup.exe rebuild passed, setup.exe 静默重装到 `%LOCALAPPDATA%\Lilsunspot` passed, installed-app smoke passed, installed Weixin login/start returned `qr_pending` with URL payload host `liteapp.weixin.qq.com` and SVG data URL present without `token/account_id`, secret guard passed, `git diff --check` had only CRLF warnings, and `scripts/check.ps1` passed with daemon pytest 33 passed.
+- Validation: UI-overlap and right-panel follow-ups reran focused Weixin pytest 7 passed, desktop build passed, Tauri NSIS setup.exe rebuild passed, and setup.exe was reinstalled to `%LOCALAPPDATA%\Lilsunspot`; the installed Weixin page was opened for user visual recheck without logging QR contents.
+- Remaining risk: 真实手机扫码确认、iLink 私聊 `/help`/`/mode`/普通文本闭环、二维码过期和断线重连仍需要用户现场验收；真实二维码不能写入截图、日志或聊天记录。
+
+- Task: record standing project operating rules from the user.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: 后续默认用中文回复；本项目必须把 `setup.exe -> 安装版 Lilsunspot.exe -> 安装版 lilsunspotd.exe` 作为主要使用和验收链路，不能只验证源码开发态或 `dist` 产物。
+- Validation: memory-only update; no code validation required.
+- Remaining risk: setup.exe 链路仍需要在每次生成安装包后实际安装或 smoke 验证，尤其是微信接入、模型配置和首次启动流程。
+
+- Task: implement `LIL-P2-01` Weixin QR login and real private-chat runtime path.
+- Files touched: `TASKS.md`, `pyproject.toml`, `uv.lock`, `scripts/build_lilsunspotd_sidecar.ps1`, `lilsunspot/daemon/app.py`, `gateway.py`, `weixin_runtime.py`, `sidecar_main.py`, daemon/product Weixin and sidecar tests, desktop Weixin UI/API/types/CSS, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added token-protected Weixin QR login start/status/disconnect APIs, generated backend SVG QR data URLs, persisted confirmed iLink credentials under lilsunspot's isolated Hermes home, and returned redacted status/capability/runtime fields without token/account IDs. Added a lilsunspot Weixin runtime manager that constructs Hermes `WeixinAdapter`, handles private text through the existing command/chat path, starts after scan confirmation, and only auto-restores on daemon startup when a model is configured.
+- Decision/result: kept proactive Weixin sends behind safety approval, updated the desktop Weixin panel for QR display/polling/disconnect/runtime status, added sidecar Weixin hidden imports/dependencies without using the full messaging extra, and fixed windowed PyInstaller stdio so packaged `lilsunspotd` starts without a console.
+- Validation: focused Weixin/API tests passed with 10 tests, full daemon pytest passed with 32 tests, product pytest passed with 34 tests, desktop build passed through `scripts/check.ps1`, `python scripts/guard_no_secrets.py` passed, `pwsh -NoProfile -File scripts/check.ps1` passed, `git diff --check` passed with CRLF warnings only, sidecar build passed, and packaged windowed sidecar smoke reached `/health` plus token-protected `/gateway/weixin/status` without leaking runtime token or Weixin credential fields.
+- Remaining risk: no real phone Weixin QR scan or iLink private-chat send/receive was performed; QR expiry, reconnect, and installed-app UI clicks still need manual acceptance. Browser IAB was not used for screenshot-level Weixin UI validation in this run.
+
 ## 2026-06-08
+
+- Task: sync local `develop` to the latest `origin/develop`.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: fetched `origin/develop` and fast-forwarded local `develop` from `53ab94822` to `80a0554af`; the branch now contains PR #16 / `LIL-P1-01` prompt compiler changes.
+- Validation: `pwsh scripts/check.ps1` passed after the sync; `git status --short --branch` showed `develop` aligned with `origin/develop` before this memory note was added.
+- Remaining risk: this task did not run installer, sidecar, real provider, or visual acceptance checks; the memory note leaves one local uncommitted Markdown change by design.
 
 - Task: complete `LIL-P1-01` output mode prompt compilation.
 - Files touched: `TASKS.md`, `lilsunspot/daemon/prompt_compiler.py`, `lilsunspot/daemon/modes.py`, `lilsunspot/daemon/chat_client.py`, `lilsunspot/daemon/providers.py`, `lilsunspot/resources/default_mode_prompt.yaml`, daemon/product tests, desktop mode UI/types/CSS, `lilsunspot/notes/architecture.md`, and `lilsunspot/notes/agent-memory.md`.

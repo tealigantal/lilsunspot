@@ -62,9 +62,17 @@ LIL-P1-01 后，mode prompt 编译在 lilsunspot 产品层完成，不修改 `SO
 
 复用 Hermes Weixin gateway，不新写微信机器人。
 
-当前 lilsunspot 层有 Weixin 状态和命令骨架；真实扫码、联系人、私聊收发未验证，按骨架/未验证处理。
+当前 lilsunspot 层已经接入 Weixin 扫码登录和 Hermes `WeixinAdapter.connect()`，但运行时仍是产品层文字桥：只读取 `event.text`，普通文本走 `lilsunspot_provider_adapter`，非文字会被提示为“当前微信入口只支持文字私聊”。这还不等同官方 Hermes gateway 的完整处理链路。
 
-桌面端不再把 Weixin 放在首屏主导航；它位于设置抽屉，文案明确说明当前版本不会扫码登录或发送消息。
+后续 Weixin 同步、PDF 阅读、文件收发和生成文件发送，优先采用“官方 Hermes gateway-first”策略：
+
+- 以官方 `gateway/platforms/weixin.py` 为消息适配层来源，保留其 `MessageEvent(media_urls/media_types)`、媒体下载缓存、`send_document()`、`send_image_file()`、`MEDIA:<path>` 交付和 iLink 长轮询逻辑，不在 lilsunspot 里重新实现微信文件协议。
+- lilsunspot 增加产品桥接层，把官方 Hermes 处理后的入站/出站消息写入本地会话库，再由桌面端读取，实现微信和电脑端同一会话同步。
+- PDF/文件能力通过官方 Weixin adapter 下载到本地缓存后进入统一 artifact/document pipeline；桌面端展示文件、引用和下载入口，微信端发送文件必须先经过安全审批。
+- 生成文件发送优先复用 Hermes 的 native upload/deliverable 机制；lilsunspot 只做普通用户 UI、审批、脱敏和安装包打包，不改 Hermes core。
+- 该方向的官方依据包括 Hermes Weixin 文档和官方 `WeixinAdapter` 源码，源码里已有媒体下载、`MessageEvent` 媒体字段、`send_document()` 和 `MEDIA` artifact 交付相关实现。
+
+风险边界：不能简单把整个 Hermes CLI 交互搬进桌面；必须把配置、日志、会话库、审批和 token 脱敏留在 lilsunspot 产品层。iLink 私聊、媒体下载、文件上传仍需要真实微信账号和 setup.exe 安装版验收。
 
 ## Safety 计划流
 

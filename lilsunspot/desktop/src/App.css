@@ -898,6 +898,21 @@ label {
   background: rgba(31, 39, 53, 0.92);
 }
 
+.chatBubbleBody {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.assistantAvatar {
+  width: 42px;
+  height: 42px;
+  border: 2px solid rgba(99, 246, 218, 0.72);
+  border-radius: 50%;
+  background: #ffffff;
+  object-fit: cover;
+}
+
 .chatBubble span,
 .chatBubble em {
   color: var(--ikun-cyan);
@@ -930,6 +945,8 @@ label {
 }
 
 .assistantBubble {
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
   justify-self: start;
 }
 
@@ -1358,6 +1375,31 @@ label {
   text-align: center;
 }
 
+.qrPlaceholder.ready {
+  border-color: var(--ikun-orange);
+  background: #ffffff;
+}
+
+.qrPlaceholder.empty {
+  background: rgba(247, 251, 255, 0.06);
+}
+
+.qrEmptyState {
+  display: grid;
+  gap: 8px;
+  width: min(82%, 230px);
+  border: 1px dashed rgba(99, 246, 218, 0.44);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(7, 17, 30, 0.82);
+  color: var(--ikun-text);
+}
+
+.qrEmptyState strong {
+  font-size: 18px;
+  line-height: 24px;
+}
+
 .qrPlaceholder span {
   border-radius: 12px;
   padding: 10px 14px;
@@ -1367,12 +1409,205 @@ label {
   font-weight: 900;
 }
 
-.qrPlaceholder p {
-  max-width: 260px;
+.qrImage {
+  width: min(86%, 244px);
+  aspect-ratio: 1;
+  border-radius: 10px;
+  padding: 8px;
+  background: #ffffff;
+  object-fit: contain;
+}
+
+.qrMetaPanel {
+  display: grid;
+  justify-self: center;
+  gap: 10px;
+  width: min(100%, 360px);
+  min-height: 84px;
+  align-content: center;
+  border: 1px solid rgba(99, 246, 218, 0.18);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  background: rgba(7, 17, 30, 0.56);
+}
+
+.qrMetaPanel p {
+  margin: 0;
   border-radius: 12px;
   padding: 10px;
-  background: rgba(247, 251, 255, 0.88);
-  color: #233448;
+  background: rgba(247, 251, 255, 0.1);
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.weixinButtonRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.weixinDisconnectRow {
+  display: flex;
+  justify-content: center;
+}
+
+.weixinButtonRow button,
+.weixinDisconnectRow button {
+  min-width: 112px;
+  min-height: 36px;
+  border: 1px solid rgba(7, 17, 30, 0.18);
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  background: #07111e;
+  color: #f7fbff;
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.weixinButtonRow button {
+  border-color: var(--ikun-line-warm);
+  background: rgba(255, 139, 36, 0.16);
+  color: var(--ikun-text);
+}
+
+.weixinDisconnectRow button {
+  border-color: rgba(255, 90, 106, 0.4);
+  background: rgba(255, 90, 106, 0.12);
+  color: #ffd7dc;
+}
+
+.weixinButtonRow button:disabled,
+.weixinDisconnectRow button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.weixinBotIdentity {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255, 213, 82, 0.24);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: rgba(255, 139, 36, 0.1);
+}
+
+.weixinBotIdentity img {
+  width: 58px;
+  height: 58px;
+  border: 2px solid var(--ikun-orange);
+  border-radius: 50%;
+  background: #ffffff;
+  object-fit: cover;
+}
+
+.weixinBotIdentity div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.weixinBotIdentity small,
+.weixinBotIdentity span {
+  overflow: hidden;
+  color: var(--ikun-muted);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weixinBotIdentity strong {
+  color: var(--ikun-text);
+  font-size: 20px;
+  line-height: 26px;
+}
+
+.weixinUserStatus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(99, 246, 218, 0.2);
+  border-radius: var(--radius-card);
+  padding: 16px;
+  background: rgba(18, 32, 52, 0.58);
+}
+
+.weixinSignal {
+  width: 16px;
+  height: 16px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: var(--ikun-muted-2);
+  box-shadow: 0 0 0 5px rgba(153, 171, 194, 0.08);
+}
+
+.weixinSignal.pending {
+  background: var(--ikun-orange);
+  box-shadow: 0 0 20px rgba(255, 139, 36, 0.46);
+}
+
+.weixinSignal.ok {
+  background: #43ef86;
+  box-shadow: 0 0 20px rgba(67, 239, 134, 0.44);
+}
+
+.weixinUserStatus small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ikun-muted-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.weixinUserStatus h3,
+.weixinUseList h3 {
+  margin: 0;
+  color: var(--ikun-text);
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.weixinUserStatus p {
+  margin: 8px 0 0;
+  color: var(--ikun-muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.weixinUseList {
+  display: grid;
+  gap: 12px;
+}
+
+.weixinUseCards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.weixinUseCards div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(99, 246, 218, 0.16);
+  border-radius: var(--radius-control);
+  padding: 12px;
+  background: rgba(7, 17, 30, 0.44);
+}
+
+.weixinUseCards strong {
+  color: var(--ikun-text);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.weixinUseCards span {
+  color: var(--ikun-muted);
   font-size: 13px;
   line-height: 18px;
 }
@@ -1423,14 +1658,17 @@ label {
 }
 
 .commandStickerGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
 }
 
 .commandStickerGrid span {
   display: inline-flex;
+  flex: 0 1 auto;
   min-height: 36px;
+  max-width: 100%;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--ikun-line);
@@ -1438,6 +1676,16 @@ label {
   background: rgba(26, 34, 48, 0.82);
   color: var(--ikun-text);
   font-weight: 900;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+.runtimeStatusLine {
+  margin: 0;
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 
 .weixinConsole .inlineStatus {
@@ -1791,10 +2039,31 @@ label {
     font-size: 20px;
   }
 
-  .qrPlaceholder p {
+  .qrImage {
+    width: min(78%, 150px);
+    padding: 6px;
+  }
+
+  .qrMetaPanel {
+    min-height: 66px;
+    padding: 8px;
+  }
+
+  .qrMetaPanel p {
     padding: 8px;
     font-size: 12px;
     line-height: 16px;
+  }
+
+  .weixinButtonRow {
+    gap: 8px;
+  }
+
+  .weixinButtonRow button,
+  .weixinDisconnectRow button {
+    min-height: 32px;
+    padding: 6px 9px;
+    font-size: 12px;
   }
 
   .statusTimeline {
@@ -1822,15 +2091,13 @@ label {
   }
 
   .commandStickerGrid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 8px;
   }
 
   .commandStickerGrid span {
     min-height: 30px;
-    padding: 4px 6px;
+    padding: 4px 8px;
     font-size: 12px;
-    white-space: nowrap;
   }
 
   .weixinConsole .inlineStatus {

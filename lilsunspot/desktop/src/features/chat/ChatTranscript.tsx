@@ -1,3 +1,5 @@
+import lilsunspotIcon from "../../assets/lilsunspot-icon.png";
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -11,6 +13,8 @@ type ChatTranscriptProps = {
   examples?: { title: string; note: string }[];
   onExampleSelect?: (value: string) => void;
 };
+
+const ASSISTANT_NAME = "小黑子";
 
 export function ChatTranscript({ messages, examples = [], onExampleSelect }: ChatTranscriptProps) {
   return (
@@ -27,8 +31,11 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect }: Cha
             ))}
           </div>
           <article className="assistantBubble chatBubble seedBubble">
-            <span>小黑子</span>
-            <p>你可以直接问，也可以让我拆任务。当前输出模式会先给结论，再给必要步骤。</p>
+            <img className="assistantAvatar" src={lilsunspotIcon} alt={`${ASSISTANT_NAME}头像`} />
+            <div className="chatBubbleBody">
+              <span>{ASSISTANT_NAME}</span>
+              <p>你可以直接问，也可以让我拆任务。当前输出模式会先给结论，再给必要步骤。</p>
+            </div>
           </article>
         </div>
       ) : (
@@ -37,9 +44,14 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect }: Cha
             key={message.id}
             className={`chatBubble ${message.role === "user" ? "userBubble" : "assistantBubble"} ${message.error ? "errorBubble" : ""}`}
           >
-            <span>{message.role === "user" ? "你" : "小黑子"}</span>
-            <p>{message.text}</p>
-            {message.meta && <em>{message.meta}</em>}
+            {message.role === "assistant" && (
+              <img className="assistantAvatar" src={lilsunspotIcon} alt={`${ASSISTANT_NAME}头像`} />
+            )}
+            <div className="chatBubbleBody">
+              <span>{message.role === "user" ? "你" : ASSISTANT_NAME}</span>
+              <p>{message.text}</p>
+              {message.meta && <em>{message.meta}</em>}
+            </div>
           </article>
         ))
       )}

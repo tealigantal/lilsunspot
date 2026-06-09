@@ -32,6 +32,7 @@ Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config 
 - Implement the smallest working version.
 - Add or update tests.
 - Run `scripts/check.ps1`.
+- If the task changes desktop UI, `lilsunspot/desktop/src-tauri/**`, sidecar/runtime startup, installer scripts, app icons/assets used by the bundle, Weixin runtime delivery, or anything users only receive through the installed app, also run `npm run tauri:build --prefix lilsunspot/desktop` before finalizing and confirm the NSIS `setup.exe` exists. If this cannot run, document the blocker explicitly.
 - Update a relevant Markdown memory file for every agent task before finalizing.
 - Final response must include files changed, tests run, result, known risks, intentionally not done.
 
@@ -65,3 +66,4 @@ Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config 
 - No secret leak.
 - App skeleton still starts.
 - `scripts/check.ps1` passes, or failure is documented and unrelated.
+- For installer-impacting work, a fresh `setup.exe` is built and its path is reported, or the exact reason it could not be built is recorded.

@@ -198,7 +198,50 @@ export type WeixinStatus = {
   gateway: "weixin";
   available: boolean;
   connected: boolean;
+  status:
+    | "not_configured"
+    | "qr_pending"
+    | "scanned"
+    | "qr_expired"
+    | "connected"
+    | "credential_expired"
+    | "error"
+    | string;
+  commands_available: boolean;
+  bot_profile?: WeixinBotProfile;
+  login?: WeixinLoginState | null;
+  runtime?: WeixinRuntimeState;
+  capabilities?: {
+    qr_login: boolean;
+    private_chat: boolean;
+    commands: boolean;
+    active_send_requires_approval: boolean;
+    official_payment_or_materials_required: boolean;
+  };
   message: string;
+};
+
+export type WeixinBotProfile = {
+  nickname: string;
+  avatar_asset: string;
+  avatar_alt: string;
+};
+
+export type WeixinLoginState = {
+  status: string;
+  qr_payload: string;
+  qr_payload_kind: "url" | "text" | string;
+  qr_image_data_url?: string;
+  expires_at: number;
+  message: string;
+};
+
+export type WeixinRuntimeState = {
+  state: "stopped" | "starting" | "running" | "error" | string;
+  running: boolean;
+  last_inbound_at: string;
+  last_reply_at: string;
+  last_error: string;
 };
 
 export type WeixinCommand = {

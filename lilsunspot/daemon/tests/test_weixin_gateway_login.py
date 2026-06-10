@@ -200,6 +200,138 @@ def test_weixin_login_start_rejects_missing_scannable_qr_payload(daemon_client, 
     assert gateway._active_login is None
 
 
+def test_weixin_login_start_does_not_restore_session_after_disconnect(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    async def run_race():
+        release = asyncio.Event()
+
+        async def fake_api_get(*, base_url: str, endpoint: str) -> dict[str, object]:
+            assert endpoint == gateway._weixin_login_qr_endpoint()
+            await release.wait()
+            return {
+                "qrcode": "late-unit-qr",
+                "qrcode_img_content": "https://weixin.example/scan/late-unit-qr",
+            }
+
+        monkeypatch.setattr(gateway, "_weixin_requirements_available", lambda: True)
+        monkeypatch.setattr(gateway, "_weixin_api_get", fake_api_get)
+        monkeypatch.setattr(gateway, "_make_qr_image_data_url", lambda qr_payload: "data:image/svg+xml;base64,late")
+
+        task = asyncio.create_task(gateway.start_weixin_login())
+        await asyncio.sleep(0)
+        disconnected = gateway.disconnect_weixin()
+        release.set()
+        late_result = await task
+        return disconnected, late_result
+
+    disconnected, late_result = asyncio.run(run_race())
+
+    assert disconnected["status"] == "not_configured"
+    assert late_result["ok"] is False
+    assert "取代" in late_result["message"]
+    assert gateway._active_login is None
+
+
+def test_weixin_login_start_ignores_slow_result_after_new_refresh(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    async def run_race():
+        first_started = asyncio.Event()
+        first_release = asyncio.Event()
+        calls = 0
+
+        async def fake_api_get(*, base_url: str, endpoint: str) -> dict[str, object]:
+            nonlocal calls
+            assert endpoint == gateway._weixin_login_qr_endpoint()
+            calls += 1
+            if calls == 1:
+                first_started.set()
+                await first_release.wait()
+                return {
+                    "qrcode": "slow-unit-qr",
+                    "qrcode_img_content": "https://weixin.example/scan/slow-unit-qr",
+                }
+            return {
+                "qrcode": "fresh-unit-qr",
+                "qrcode_img_content": "https://weixin.example/scan/fresh-unit-qr",
+            }
+
+        monkeypatch.setattr(gateway, "_weixin_requirements_available", lambda: True)
+        monkeypatch.setattr(gateway, "_weixin_api_get", fake_api_get)
+        monkeypatch.setattr(gateway, "_make_qr_image_data_url", lambda qr_payload: "data:image/svg+xml;base64,fresh")
+
+        slow_task = asyncio.create_task(gateway.start_weixin_login())
+        await first_started.wait()
+        fresh_result = await gateway.start_weixin_login()
+        first_release.set()
+        slow_result = await slow_task
+        return fresh_result, slow_result
+
+    fresh_result, slow_result = asyncio.run(run_race())
+
+    assert fresh_result["ok"] is True
+    assert fresh_result["status"] == "qr_pending"
+    assert fresh_result["login"]["qr_payload"] == "https://weixin.example/scan/fresh-unit-qr"
+    assert slow_result["ok"] is False
+    assert "取代" in slow_result["message"]
+    assert gateway._active_login is not None
+    assert gateway._active_login.qrcode == "fresh-unit-qr"
+
+
+def test_weixin_login_status_does_not_save_credentials_after_disconnect(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    credential_value = "slow-status-credential-value"
+
+    async def run_race():
+        status_started = asyncio.Event()
+        status_release = asyncio.Event()
+
+        async def fake_api_get(*, base_url: str, endpoint: str) -> dict[str, object]:
+            if endpoint == gateway._weixin_login_qr_endpoint():
+                return {
+                    "qrcode": "status-race-qr",
+                    "qrcode_img_content": "https://weixin.example/scan/status-race-qr",
+                }
+            assert endpoint.startswith("ilink/bot/get_qrcode_status")
+            status_started.set()
+            await status_release.wait()
+            return {
+                "status": "confirmed",
+                "ilink_bot_id": "bot_status_race",
+                "bot_token": credential_value,
+                "baseurl": "https://ilink-status-race.example",
+                "ilink_user_id": "user_status_race",
+            }
+
+        monkeypatch.setattr(gateway, "_weixin_requirements_available", lambda: True)
+        monkeypatch.setattr(gateway, "_weixin_api_get", fake_api_get)
+        monkeypatch.setattr(gateway, "_make_qr_image_data_url", lambda qr_payload: "data:image/svg+xml;base64,status-race")
+
+        started = await gateway.start_weixin_login()
+        poll_task = asyncio.create_task(gateway.poll_weixin_login_status())
+        await status_started.wait()
+        disconnected = gateway.disconnect_weixin()
+        status_release.set()
+        late_poll = await poll_task
+        return started, disconnected, late_poll
+
+    started, disconnected, late_poll = asyncio.run(run_race())
+
+    assert started["status"] == "qr_pending"
+    assert disconnected["status"] == "not_configured"
+    assert late_poll["ok"] is False
+    assert "取代" in late_poll["message"]
+    assert gateway._active_login is None
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    state_path = paths.data_dir / "weixin-state.json"
+    account_file = paths.hermes_home / "weixin" / "accounts" / "bot_status_race.json"
+    assert not state_path.exists()
+    assert not account_file.exists()
+
+
 def test_weixin_runtime_fake_event_handles_command_and_chat(daemon_client, monkeypatch):
     runtime = daemon_client.weixin_runtime
 
@@ -208,11 +340,11 @@ def test_weixin_runtime_fake_event_handles_command_and_chat(daemon_client, monke
     assert runtime.weixin_runtime_status()["last_inbound_at"]
     assert runtime.weixin_runtime_status()["last_reply_at"]
 
-    async def fake_handle(text):
-        assert text == "你好"
+    async def fake_handle(event):
+        assert event.text == "你好"
         return {"ok": True, "message": "微信私聊回复已生成。", "chat": {"reply": "这是微信回复。"}}
 
-    monkeypatch.setattr(runtime, "handle_weixin_command_text", fake_handle)
+    monkeypatch.setattr(runtime, "handle_weixin_message_event", fake_handle)
     chat_reply = asyncio.run(runtime.handle_inbound_weixin_event(SimpleNamespace(text="你好")))
     assert chat_reply == "这是微信回复。"
 

@@ -1,10 +1,4 @@
 modes:
-  default:
-    style_axis: 35
-    detail_level: 45
-    autonomy_level: 55
-    description: 默认个人 agent 模式，先完成明确任务，必要时简短确认。
-    system_hint: 保持直接、清楚、实用。遇到风险操作先解释影响再请求确认。
   pragmatic:
     style_axis: 10
     detail_level: 35
@@ -23,3 +17,9 @@ modes:
     autonomy_level: 45
     description: 更有陪伴感的说明方式，适合聊天和生活辅助。
     system_hint: 语气温和，先照顾用户感受，再给出清楚建议。风险操作仍需确认。
+  custom:
+    style_axis: 45
+    detail_level: 60
+    autonomy_level: 60
+    description: 自定义输出模式，保存用户手动调整后的三滑杆组合。
+    system_hint: 按用户保存的滑杆偏好组织回答，保持普通中文、风险动作先确认。

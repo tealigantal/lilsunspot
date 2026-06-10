@@ -58,14 +58,14 @@ def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
     baseline_hint = _as_text(baseline.get("system_hint"))
     baseline_summary = _as_text(baseline.get("summary"))
     mode_hint = _as_text(profile.get("system_hint"))
-    mode_summary = _as_text(profile.get("description")) or f"使用 {profile.get('id', 'default')} 输出模式。"
+    mode_summary = _as_text(profile.get("description")) or f"使用 {profile.get('id', 'balanced')} 输出模式。"
     current_slider_summary = slider_summary(profile)
 
     system_hint = "\n\n".join(
         item
         for item in (
             baseline_hint,
-            f"当前输出模式：{_as_text(profile.get('id')) or 'default'}。\n{mode_hint}",
+            f"当前输出模式：{_as_text(profile.get('id')) or 'balanced'}。\n{mode_hint}",
             f"当前输出偏好：{current_slider_summary}",
         )
         if item.strip()

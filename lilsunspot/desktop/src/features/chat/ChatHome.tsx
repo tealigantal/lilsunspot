@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
-import type { AppBootstrapState, CurrentMode } from "../../types";
-import { getCurrentMode, getSafetyApprovals, sendChatMessage } from "../../api";
-import { ModeQuickPanel, modeName } from "../mode/ModeQuickPanel";
+import type { AppBootstrapState, Conversation, ConversationAttachment, LilsunspotEvent } from "../../types";
+import {
+  createConversation,
+  deleteConversation,
+  getConversations,
+  getConversationMessages,
+  listenDaemonEvents,
+  sendConversationMessage,
+  subscribeDaemonEvents,
+  updateConversation
+} from "../../api";
+import { ModeQuickPanel } from "../mode/ModeQuickPanel";
+import { useModeState } from "../mode/ModeState";
 import { displayProvider } from "../model/ProviderCard";
 import { ChatBlockedState } from "./ChatBlockedState";
 import { ChatComposer } from "./ChatComposer";
@@ -12,75 +22,273 @@ type ChatHomeProps = {
   initialMessages?: ChatMessage[];
   onSetupModel: () => void;
   onRefresh: () => void;
-  onOpenSettings: () => void;
-  onModeChanged?: (mode: CurrentMode) => void;
+  onOpenSettings: (tab?: "model" | "weixin" | "safety" | "doctor") => void;
 };
 
 const EXAMPLE_PROMPTS = [
   { title: "帮我整理今天要做的三件事", note: "适合务实模式，输出清单" },
   { title: "我明天交方案但没开始", note: "先安抚，再给步骤" },
-  { title: "微信里把模式调到 80", note: "命令同步到桌面端" }
+  { title: "切到务实一点", note: "自然语言调整回答风格" }
 ];
 
-export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings, onModeChanged }: ChatHomeProps) {
+const PERSONAL_CONVERSATION_ID = "personal";
+
+function mergeMessageList(current: ChatMessage[], incoming: ChatMessage) {
+  const index = current.findIndex((item) => item.id === incoming.id);
+  if (index >= 0) {
+    const next = [...current];
+    next[index] = { ...next[index], ...incoming, attachments: incoming.attachments || next[index].attachments || [] };
+    return next;
+  }
+  return [...current, incoming];
+}
+
+function mergeAttachment(current: ChatMessage[], attachment: ConversationAttachment) {
+  return current.map((message) => {
+    if (message.id !== attachment.message_id) {
+      return message;
+    }
+    const attachments = message.attachments || [];
+    const index = attachments.findIndex((item) => item.id === attachment.id);
+    const nextAttachments =
+      index >= 0
+        ? attachments.map((item) => (item.id === attachment.id ? { ...item, ...attachment } : item))
+        : [...attachments, attachment];
+    return { ...message, attachments: nextAttachments };
+  });
+}
+
+function isArchived(conversation: Conversation) {
+  const metadata = conversation.metadata || {};
+  return typeof metadata.archived_at === "string" && metadata.archived_at.length > 0;
+}
+
+function isWeixinActive(conversation: Conversation) {
+  return conversation.kind === "weixin" && conversation.metadata?.weixin_route_active === true;
+}
+
+function hasWeixinRoute(
+  conversation: Conversation | undefined
+): conversation is Conversation & { metadata: Record<string, unknown> & { weixin_route: Record<string, unknown> } } {
+  return Boolean(
+    conversation?.kind === "weixin" && conversation.metadata?.weixin_route && typeof conversation.metadata.weixin_route === "object"
+  );
+}
+
+function conversationKindLabel(conversation: Conversation) {
+  if (conversation.kind === "weixin") {
+    return isWeixinActive(conversation) ? "微信 · 当前" : "微信";
+  }
+  if (conversation.id === PERSONAL_CONVERSATION_ID) {
+    return "默认";
+  }
+  return "桌面";
+}
+
+export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState(PERSONAL_CONVERSATION_ID);
+  const [showArchived, setShowArchived] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<CurrentMode | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const modeState = useModeState();
+  const activeConversation = conversations.find((item) => item.id === activeConversationId);
 
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages]);
 
   useEffect(() => {
+    if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
+      return;
+    }
     let mounted = true;
-    async function loadMode() {
+
+    async function loadConversationList() {
       try {
-        const current = await getCurrentMode();
-        if (mounted) {
-          setMode(current);
-          onModeChanged?.(current);
+        let list = await getConversations(showArchived);
+        if (list.length === 0) {
+          const created = await createConversation({ title: "新对话" });
+          list = [created];
+        }
+        if (!mounted) {
+          return;
+        }
+        setConversations(list);
+        if (!list.some((item) => item.id === activeConversationId)) {
+          setActiveConversationId(list[0]?.id || PERSONAL_CONVERSATION_ID);
         }
       } catch {
         if (mounted) {
-          setMode(null);
+          setConversations([]);
         }
       }
     }
-    void loadMode();
+
+    void loadConversationList();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [bootstrap.stage, bootstrap.runtime.configured, showArchived]);
 
   useEffect(() => {
+    if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured || !activeConversationId) {
+      return;
+    }
     let mounted = true;
-    async function loadApprovals() {
+
+    async function loadConversationMessages() {
       try {
-        const approvals = await getSafetyApprovals();
+        const recent = await getConversationMessages(activeConversationId);
         if (mounted) {
-          setPendingApprovals(approvals.pending.length);
+          setMessages(recent);
         }
       } catch {
         if (mounted) {
-          setPendingApprovals(0);
+          setMessages([]);
         }
       }
     }
-    void loadApprovals();
+
+    void loadConversationMessages();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [bootstrap.stage, bootstrap.runtime.configured, activeConversationId]);
+
+  useEffect(() => {
+    if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
+      return;
+    }
+    let mounted = true;
+    let cleanup: (() => void) | undefined;
+
+    async function refreshList() {
+      try {
+        const list = await getConversations(showArchived);
+        if (mounted) {
+          setConversations(list);
+        }
+      } catch {
+        // The message stream remains usable; list refresh will retry on the next event.
+      }
+    }
+
+    function applyEvent(event: LilsunspotEvent) {
+      const payload = event.data || {};
+      const eventConversationId = typeof payload.conversation_id === "string" ? payload.conversation_id : "";
+      if (payload.message) {
+        if (eventConversationId === activeConversationId) {
+          setMessages((current) => mergeMessageList(current, payload.message as ChatMessage));
+        }
+        void refreshList();
+      }
+      if (payload.attachment) {
+        if (eventConversationId === activeConversationId) {
+          setMessages((current) => mergeAttachment(current, payload.attachment as ConversationAttachment));
+        }
+        void refreshList();
+      }
+      if (event.event.startsWith("conversation.")) {
+        void refreshList();
+      }
+      if (event.event === "mode.changed" && payload.mode) {
+        return;
+      }
+    }
+
+    async function subscribe() {
+      try {
+        cleanup = await listenDaemonEvents(applyEvent);
+        await subscribeDaemonEvents();
+      } catch {
+        cleanup = undefined;
+      }
+    }
+
+    void subscribe();
+    return () => {
+      mounted = false;
+      cleanup?.();
+    };
+  }, [bootstrap.stage, bootstrap.runtime.configured, activeConversationId, showArchived]);
 
   if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
     return <ChatBlockedState bootstrap={bootstrap} onSetupModel={onSetupModel} onRetry={onRefresh} />;
   }
 
-  function updateMode(nextMode: CurrentMode) {
-    setMode(nextMode);
-    onModeChanged?.(nextMode);
+  async function refreshConversations(preferredId = activeConversationId) {
+    const list = await getConversations(showArchived);
+    setConversations(list);
+    if (preferredId && list.some((item) => item.id === preferredId)) {
+      setActiveConversationId(preferredId);
+      return list;
+    }
+    if (list[0]) {
+      setActiveConversationId(list[0].id);
+    }
+    return list;
+  }
+
+  async function createDesktopConversation() {
+    const conversation = await createConversation({ title: "新对话" });
+    setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
+    setActiveConversationId(conversation.id);
+    setMessages([]);
+  }
+
+  async function createWeixinThread() {
+    if (!hasWeixinRoute(activeConversation)) {
+      return;
+    }
+    const route = activeConversation.metadata?.weixin_route as Record<string, unknown>;
+    const conversation = await createConversation({
+      title: `${activeConversation?.title || "微信私聊"} 新对话`,
+      kind: "weixin",
+      metadata: { weixin_route: route }
+    });
+    await refreshConversations(conversation.id);
+    setMessages([]);
+  }
+
+  async function activateWeixinConversation(conversation: Conversation) {
+    if (!hasWeixinRoute(conversation) || isWeixinActive(conversation)) {
+      return;
+    }
+    const updated = await updateConversation(conversation.id, { weixin_route_active: true });
+    await refreshConversations(updated.id);
+  }
+
+  async function renameActiveConversation(conversation: Conversation) {
+    const title = window.prompt("新的对话名称", conversation.title);
+    if (title === null || !title.trim()) {
+      return;
+    }
+    const updated = await updateConversation(conversation.id, { title: title.trim() });
+    setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+  }
+
+  async function archiveConversation(conversation: Conversation) {
+    const updated = await updateConversation(conversation.id, { archived: !isArchived(conversation) });
+    await refreshConversations(activeConversationId === conversation.id && isArchived(updated) ? "" : activeConversationId);
+  }
+
+  async function removeConversation(conversation: Conversation) {
+    if (!window.confirm("确定删除这个对话吗？此操作不能撤销。")) {
+      return;
+    }
+    await deleteConversation(conversation.id);
+    const remaining = await getConversations(false);
+    if (remaining.length > 0) {
+      setConversations(showArchived ? await getConversations(true) : remaining);
+      setActiveConversationId(remaining[0].id);
+      return;
+    }
+    const created = await createConversation({ title: "新对话" });
+    setConversations([created]);
+    setActiveConversationId(created.id);
+    setMessages([]);
   }
 
   async function send() {
@@ -88,41 +296,51 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
     if (!message) {
       return;
     }
-    const userMessage: ChatMessage = { id: `${Date.now()}-user`, role: "user", text: message };
+    const userMessage: ChatMessage = {
+      id: `pending-${Date.now()}-user`,
+      conversation_id: activeConversationId,
+      source: "desktop",
+      role: "user",
+      text: message,
+      attachments: [],
+      created_at: new Date().toISOString(),
+      status: "sent"
+    };
     setMessages((current) => [...current, userMessage]);
     setInput("");
     setBusy(true);
     try {
-      const result = await sendChatMessage(message);
+      const result = await sendConversationMessage(activeConversationId, message);
+      setMessages((current) => current.filter((item) => item.id !== userMessage.id));
+      void refreshConversations(activeConversationId);
       if (result.ok) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${Date.now()}-assistant`,
-            role: "assistant",
-            text: result.reply,
-            meta: `${displayProvider(result.provider)} / ${result.model}`
-          }
-        ]);
+        setMessages((current) =>
+          mergeMessageList(mergeMessageList(current, result.user_message), {
+            ...result.assistant_message,
+            metadata: {
+              ...(result.assistant_message.metadata || {}),
+              engine: `${displayProvider(result.chat.ok ? result.chat.provider : "")} / ${result.chat.ok ? result.chat.model : ""}`
+            }
+          })
+        );
+        if (result.chat.ok && result.chat.mode_intent) {
+          void modeState.reload();
+        }
       } else {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${Date.now()}-assistant-error`,
-            role: "assistant",
-            text: `${result.message}\n${result.suggestion}`,
-            error: true
-          }
-        ]);
+        setMessages((current) => mergeMessageList(mergeMessageList(current, result.user_message), result.assistant_message));
       }
     } catch (error) {
       setMessages((current) => [
-        ...current,
+        ...current.filter((item) => item.id !== userMessage.id),
         {
           id: `${Date.now()}-assistant-error`,
+          conversation_id: activeConversationId,
+          source: "assistant",
           role: "assistant",
           text: `${error instanceof Error ? error.message : "发送失败。"}\n请重新检查 AI 服务设置。`,
-          error: true
+          attachments: [],
+          created_at: new Date().toISOString(),
+          status: "error"
         }
       ]);
     } finally {
@@ -132,15 +350,63 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
 
   return (
     <section className="chatHome">
+      <aside className="conversationRail" aria-label="对话列表">
+        <div className="conversationRailHeader">
+          <strong>对话</strong>
+          <button type="button" className="compactButton" onClick={() => void createDesktopConversation()}>
+            新建
+          </button>
+        </div>
+        <label className="archiveToggle">
+          <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
+          <span>显示归档</span>
+        </label>
+        <div className="conversationList">
+          {conversations.map((conversation) => (
+            <article
+              key={conversation.id}
+              className={`conversationItem ${conversation.id === activeConversationId ? "active" : ""} ${isArchived(conversation) ? "archived" : ""}`}
+            >
+              <button type="button" className="conversationSelect" onClick={() => setActiveConversationId(conversation.id)}>
+                <strong>{conversation.title}</strong>
+                <span>{conversationKindLabel(conversation)}</span>
+              </button>
+              <div className="conversationActions">
+                <button type="button" className="secondaryButton compactButton" onClick={() => void renameActiveConversation(conversation)}>
+                  改名
+                </button>
+                <button type="button" className="secondaryButton compactButton" onClick={() => void archiveConversation(conversation)}>
+                  {isArchived(conversation) ? "恢复" : "归档"}
+                </button>
+                {conversation.kind === "weixin" && !isWeixinActive(conversation) && (
+                  <button type="button" className="secondaryButton compactButton" onClick={() => void activateWeixinConversation(conversation)}>
+                    设为当前
+                  </button>
+                )}
+                <button type="button" className="secondaryButton compactButton dangerMiniButton" onClick={() => void removeConversation(conversation)}>
+                  删除
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </aside>
       <article className="chatMainPanel">
         <header className="panelHeader chatPanelHeader">
           <div>
-            <h2>今日任务台</h2>
-            <p>把普通聊天、桌面执行、微信命令都压进同一个控制台。</p>
+            <h2>{activeConversation?.title || "今日任务台"}</h2>
+            <p>普通聊天和微信私聊按对话分开记录。</p>
           </div>
-          <button type="button" className="secondaryButton compactButton" onClick={onOpenSettings}>
-            模型服务
-          </button>
+          <div className="chatHeaderActions">
+            {hasWeixinRoute(activeConversation) && (
+              <button type="button" className="secondaryButton compactButton" onClick={() => void createWeixinThread()}>
+                新开此微信对话
+              </button>
+            )}
+            <button type="button" className="secondaryButton compactButton" onClick={() => onOpenSettings("model")}>
+              模型服务
+            </button>
+          </div>
         </header>
         <ChatTranscript messages={messages} examples={EXAMPLE_PROMPTS} onExampleSelect={setInput} />
         <ChatComposer
@@ -151,16 +417,8 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
           placeholder="输入你想问的内容，Ctrl+Enter 发送"
         />
       </article>
-      <aside className="chatSidePanel" aria-label="模式和安全摘要">
-        <ModeQuickPanel variant="compact" onModeChanged={updateMode} />
-        <section className="safetyMiniPanel">
-          <h3>安全审批</h3>
-          <strong>{pendingApprovals > 0 ? `${pendingApprovals} 个待审批` : "暂无待处理高危动作"}</strong>
-          <p>Shell / 删除文件 / 微信发送 会先确认</p>
-        </section>
-        <p className="modeRuntimeLine">
-          当前：{modeName(mode?.current)} · {displayProvider(bootstrap.runtime.provider)} / {bootstrap.runtime.model}
-        </p>
+      <aside className="chatSidePanel" aria-label="输出模式">
+        <ModeQuickPanel />
       </aside>
     </section>
   );

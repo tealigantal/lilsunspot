@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any
 import base64
 
+from . import conversations
+from .attachments import (
+    AttachmentError,
+    attachment_summaries_for_prompt,
+    recognize_image_attachments,
+    register_message_attachments,
+)
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .mode_intents import apply_mode_intent, slash_command_hint
 from .safety import request_safety_approval
 
 
@@ -41,6 +49,7 @@ WEIXIN_COMMANDS: list[dict[str, Any]] = [
 
 WEIXIN_STATE_FILE_NAME = "weixin-state.json"
 WEIXIN_LOGIN_TIMEOUT_SECONDS = 480
+WEIXIN_QR_REQUEST_TIMEOUT_MS = 9_000
 WEIXIN_ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 WEIXIN_QR_ENDPOINT = "ilink/bot/get_bot_qrcode"
 WEIXIN_QR_STATUS_ENDPOINT = "ilink/bot/get_qrcode_status"
@@ -54,12 +63,14 @@ class WeixinLoginSession:
     qr_payload: str
     base_url: str
     status: str
+    generation: int
     started_at: float
     expires_at: float
     message: str
 
 
 _active_login: WeixinLoginSession | None = None
+_login_generation = 0
 
 
 class WeixinGatewayError(RuntimeError):
@@ -102,6 +113,12 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _iso_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _bump_login_generation() -> int:
+    global _login_generation
+    _login_generation += 1
+    return _login_generation
 
 
 def _safe_account_file(paths: RuntimePaths, account_id: str) -> Path | None:
@@ -213,7 +230,7 @@ async def _weixin_api_get(*, base_url: str, endpoint: str) -> dict[str, Any]:
             session,
             base_url=base_url,
             endpoint=endpoint,
-            timeout_ms=hermes_weixin.QR_TIMEOUT_MS,
+            timeout_ms=WEIXIN_QR_REQUEST_TIMEOUT_MS,
         )
 
 
@@ -322,6 +339,9 @@ def weixin_status() -> dict[str, Any]:
             "qr_login": available,
             "private_chat": connected,
             "commands": True,
+            "attachments": True,
+            "attachment_send_requires_approval": True,
+            "official_adapter_media_methods": ["send", "send_document", "send_image_file", "send_video"],
             "active_send_requires_approval": True,
             "official_payment_or_materials_required": False,
         },
@@ -341,6 +361,7 @@ async def start_weixin_login() -> dict[str, Any]:
     global _active_login
     if not _weixin_requirements_available():
         raise WeixinGatewayError("微信网关缺少运行组件，请重新安装小黑子。")
+    generation = _bump_login_generation()
     try:
         qr_resp = await _weixin_api_get(
             base_url=WEIXIN_ILINK_BASE_URL,
@@ -359,6 +380,9 @@ async def start_weixin_login() -> dict[str, Any]:
         raise WeixinGatewayError("微信二维码内容缺失，请重新生成二维码。")
     if not qr_payload.startswith(("http://", "https://")):
         raise WeixinGatewayError("微信二维码格式异常，请重新生成二维码。")
+    if generation != _login_generation:
+        status = weixin_status()
+        return {"ok": False, **status, "message": "本次刷新已被新的操作取代。"}
 
     now = time.time()
     _active_login = WeixinLoginSession(
@@ -366,6 +390,7 @@ async def start_weixin_login() -> dict[str, Any]:
         qr_payload=qr_payload,
         base_url=WEIXIN_ILINK_BASE_URL,
         status="qr_pending",
+        generation=generation,
         started_at=now,
         expires_at=now + WEIXIN_LOGIN_TIMEOUT_SECONDS,
         message="请使用手机微信扫码，并在手机上确认登录。",
@@ -396,6 +421,9 @@ async def poll_weixin_login_status() -> dict[str, Any]:
         session.message = "微信扫码状态读取失败，请稍后再试。"
         status = weixin_status()
         return {"ok": False, **status}
+    if _active_login is not session or session.generation != _login_generation:
+        status = weixin_status()
+        return {"ok": False, **status, "message": "本次扫码状态已被新的操作取代。"}
 
     raw_status = str(status_resp.get("status") or "wait").strip()
     if raw_status == "wait":
@@ -437,6 +465,7 @@ async def poll_weixin_login_status() -> dict[str, Any]:
 
 def disconnect_weixin() -> dict[str, Any]:
     global _active_login
+    _bump_login_generation()
     _active_login = None
     _clear_connection_state()
     status = weixin_status()
@@ -499,48 +528,232 @@ def parse_weixin_command(text: str) -> dict[str, Any]:
     return {
         "ok": False,
         "kind": "unknown_command",
-        "message": "没有识别这个微信命令。请发送 /help 查看可用命令。",
+        "message": slash_command_hint(),
     }
 
 
-async def handle_weixin_command_text(text: str) -> dict[str, Any]:
-    from .chat_client import send_chat_message
+def _weixin_route_from_event(event: Any) -> dict[str, str]:
+    source = getattr(event, "source", None)
+    account_id = str(
+        getattr(source, "account_id", "")
+        or getattr(source, "accountId", "")
+        or getattr(event, "account_id", "")
+        or getattr(event, "accountId", "")
+        or "",
+    ).strip()
+    chat_id = str(getattr(source, "chat_id", "") or getattr(event, "chat_id", "") or "").strip()
+    user_id = str(getattr(source, "user_id", "") or getattr(event, "user_id", "") or "").strip()
+    chat_type = str(getattr(source, "chat_type", "") or "dm").strip() or "dm"
+    route: dict[str, str] = {"chat_type": chat_type}
+    if account_id:
+        route["account_id"] = account_id
+    if chat_id:
+        route["chat_id"] = chat_id
+    if user_id:
+        route["user_id"] = user_id
+    return route
+
+
+def _store_weixin_reply(
+    text: str,
+    metadata: dict[str, Any] | None = None,
+    paths: RuntimePaths | None = None,
+    *,
+    conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
+) -> dict[str, Any]:
+    return conversations.create_message(
+        conversation_id=conversation_id,
+        source="weixin",
+        role="assistant",
+        text=text,
+        status="sent",
+        metadata=metadata or {},
+        paths=paths,
+    )
+
+
+def _chat_prompt_with_attachments(text: str, attachments: list[dict[str, Any]]) -> str:
+    base = text.strip() or "用户发来了附件，请根据附件处理结果回复。"
+    summaries = attachment_summaries_for_prompt(attachments)
+    if not summaries:
+        return base
+    return f"{base}\n\n以下是用户发来的附件处理结果：\n{summaries}"
+
+
+async def _handle_weixin_after_store(
+    text: str,
+    *,
+    conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
+    current_message_id: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    route: dict[str, str] | None = None,
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    from .agent_runner import send_agent_message
     from .modes import load_mode_profiles, select_mode
     from .safety import ApprovalNotFoundError, decide_approval
 
-    intent = parse_weixin_command(text)
+    runtime_paths = paths or ensure_runtime_dirs()
+    attachments = attachments or []
+    mode_intent = await apply_mode_intent(text, runtime_paths)
+    if mode_intent is not None:
+        _store_weixin_reply(
+            mode_intent["message"],
+            {"kind": "mode_intent", "changed": mode_intent["changed"]},
+            runtime_paths,
+            conversation_id=conversation_id,
+        )
+        return mode_intent
+
+    intent = {"ok": True, "kind": "chat_message", "message": "准备作为微信私聊消息处理。"} if attachments and not text.strip() else parse_weixin_command(text)
     if not intent.get("ok"):
+        _store_weixin_reply(
+            intent["message"],
+            {"kind": intent.get("kind", "unknown_command")},
+            runtime_paths,
+            conversation_id=conversation_id,
+        )
         return {"ok": False, "intent": intent, "message": intent["message"]}
 
     kind = intent.get("kind")
     if kind == "help":
+        _store_weixin_reply(intent["message"], {"kind": "help"}, runtime_paths, conversation_id=conversation_id)
         return {"ok": True, "intent": intent, "message": intent["message"], "commands": weixin_commands()["commands"]}
     if kind == "list_modes":
+        _store_weixin_reply(intent["message"], {"kind": "list_modes"}, runtime_paths, conversation_id=conversation_id)
         return {"ok": True, "intent": intent, "message": intent["message"], "modes": load_mode_profiles()}
     if kind == "select_mode":
         try:
-            result = select_mode(str(intent["mode"]))
+            result = select_mode(str(intent["mode"]), runtime_paths)
         except ValueError as exc:
+            _store_weixin_reply(str(exc), {"kind": "select_mode_error"}, runtime_paths, conversation_id=conversation_id)
             return {"ok": False, "intent": intent, "message": str(exc)}
-        return {"ok": True, "intent": intent, "message": "输出风格已切换。", "mode": result}
+        message = "输出风格已切换。"
+        _store_weixin_reply(message, {"kind": "select_mode", "mode": result.get("current")}, runtime_paths, conversation_id=conversation_id)
+        return {"ok": True, "intent": intent, "message": message, "mode": result}
     if kind == "approval_decision":
         try:
             result = decide_approval(str(intent["approval_id"]), str(intent["decision"]))
         except ApprovalNotFoundError as exc:
+            _store_weixin_reply(str(exc), {"kind": "approval_error"}, runtime_paths, conversation_id=conversation_id)
             return {"ok": False, "intent": intent, "message": str(exc)}
         except ValueError as exc:
+            _store_weixin_reply(str(exc), {"kind": "approval_error"}, runtime_paths, conversation_id=conversation_id)
             return {"ok": False, "intent": intent, "message": str(exc)}
+        if result["approval"]["status"] == "approved":
+            from .weixin_runtime import send_approved_weixin_action
+
+            delivery = await send_approved_weixin_action(result["approval"])
+            result["delivery"] = delivery
+            if not delivery.get("ok"):
+                result["message"] = delivery.get("message") or result["message"]
+        _store_weixin_reply(
+            result["message"],
+            {"kind": "approval_decision", "approval_id": intent["approval_id"]},
+            runtime_paths,
+            conversation_id=conversation_id,
+        )
         return {"ok": True, "intent": intent, "message": result["message"], "approval": result["approval"]}
     if kind == "chat_message":
-        result = await send_chat_message(text)
+        prompt_text = _chat_prompt_with_attachments(text, attachments)
+        result = await send_agent_message(
+            prompt_text,
+            conversation_id,
+            runtime_paths,
+            current_message_id=current_message_id,
+            route=route,
+        )
         if not result.get("ok"):
+            _store_weixin_reply(
+                result.get("message", "微信私聊暂时不能回复。"),
+                {"kind": "chat_error", "error_code": result.get("error_code")},
+                runtime_paths,
+                conversation_id=conversation_id,
+            )
             return {"ok": False, "intent": intent, "message": result.get("message", "微信私聊暂时不能回复。"), "chat": result}
+        _store_weixin_reply(
+            str(result.get("reply") or ""),
+            {"kind": "chat_reply", "engine": result.get("engine"), "provider": result.get("provider")},
+            runtime_paths,
+            conversation_id=conversation_id,
+        )
         return {"ok": True, "intent": intent, "message": "微信私聊回复已生成。", "chat": result}
 
     return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}
 
 
-def request_weixin_send_approval(recipient: str, message: str) -> dict[str, Any]:
+async def handle_weixin_message_event(event: Any, paths: RuntimePaths | None = None) -> dict[str, Any]:
+    runtime_paths = paths or ensure_runtime_dirs()
+    text = str(getattr(event, "text", "") or "").strip()
+    media_urls = [str(item) for item in (getattr(event, "media_urls", None) or []) if str(item).strip()]
+    media_types = [str(item) for item in (getattr(event, "media_types", None) or []) if str(item).strip()]
+    route = _weixin_route_from_event(event)
+    if conversations.weixin_route_key(route):
+        active_conversation = conversations.ensure_active_weixin_conversation(route, paths=runtime_paths)
+        conversation_id = active_conversation["id"]
+    else:
+        conversation_id = conversations.PERSONAL_CONVERSATION_ID
+
+    user_message = conversations.create_message(
+        conversation_id=conversation_id,
+        source="weixin",
+        role="user",
+        text=text or "（收到附件）",
+        status="received",
+        metadata={
+            "message_id": str(getattr(event, "message_id", "") or ""),
+            "media_count": len(media_urls),
+            "weixin_route": route,
+        },
+        emit_event=False,
+        paths=runtime_paths,
+    )
+    attachments: list[dict[str, Any]] = []
+    if media_urls:
+        try:
+            attachments = register_message_attachments(
+                message_id=user_message["id"],
+                conversation_id=user_message["conversation_id"],
+                media_urls=media_urls,
+                media_types=media_types,
+                paths=runtime_paths,
+            )
+            attachments = await recognize_image_attachments(attachments, paths=runtime_paths)
+        except AttachmentError as exc:
+            conversations.create_system_message(
+                str(exc),
+                conversation_id=conversation_id,
+                metadata={"kind": "attachment_error", "message_id": user_message["id"]},
+                paths=runtime_paths,
+            )
+    conversations.record_message_event(user_message["id"], paths=runtime_paths)
+    return await _handle_weixin_after_store(
+        text,
+        conversation_id=conversation_id,
+        current_message_id=user_message["id"],
+        attachments=attachments,
+        route=route,
+        paths=runtime_paths,
+    )
+
+
+async def handle_weixin_command_text(text: str) -> dict[str, Any]:
+    class TextOnlyEvent:
+        media_urls: list[str] = []
+        media_types: list[str] = []
+        message_id = None
+
+        def __init__(self, value: str) -> None:
+            self.text = value
+
+    return await handle_weixin_message_event(TextOnlyEvent(text))
+
+
+def request_weixin_send_approval(
+    recipient: str,
+    message: str,
+    attachment_ids: list[str] | None = None,
+) -> dict[str, Any]:
     recipient_value = recipient.strip()
     message_value = message.strip()
     if not recipient_value:
@@ -557,8 +770,10 @@ def request_weixin_send_approval(recipient: str, message: str) -> dict[str, Any]
         f"发送微信消息给 {recipient_value}",
         {
             "recipient": recipient_value,
+            "message": message_value,
             "message_preview": preview,
             "message_length": len(message_value),
+            "attachment_ids": attachment_ids or [],
         },
         "weixin",
     )
@@ -568,5 +783,5 @@ def request_weixin_send_approval(recipient: str, message: str) -> dict[str, Any]
         "status": "approval_required" if approval_result.get("approval_required") else "unavailable",
         "approval_required": bool(approval_result.get("approval_required")),
         "approval": approval_result.get("approval"),
-        "message": "微信发送需要安全审批，当前版本不会直接发送消息。",
+        "message": "微信发送需要安全审批，通过后才会发送。",
     }

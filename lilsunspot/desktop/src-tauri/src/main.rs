@@ -1,14 +1,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
+use serde_json::json;
 use std::{
     env, fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
+};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, WindowEvent,
 };
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -16,6 +23,12 @@ const DEFAULT_PORT: u16 = 8765;
 const TOKEN_FILE_NAME: &str = "runtime-token.json";
 const RUNTIME_FILE_NAME: &str = "daemon-runtime.json";
 const WINDOWS_SIDECAR_NAME: &str = "lilsunspotd-x86_64-pc-windows-msvc.exe";
+const ATTACHMENT_DIR_NAME: &str = "attachments";
+const DAEMON_HTTP_DEFAULT_TIMEOUT_MS: u64 = 5_000;
+const DAEMON_HTTP_MAX_TIMEOUT_MS: u64 = 30_000;
+
+static SSE_RUNNING: AtomicBool = AtomicBool::new(false);
+static EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 struct DaemonEndpoint {
@@ -122,6 +135,7 @@ fn http_request(
     path: &str,
     body: Option<&str>,
     token: Option<&str>,
+    read_timeout: Duration,
 ) -> Result<DaemonHttpResponse, String> {
     if method != "GET" && method != "POST" {
         return Err("只支持 GET 和 POST 请求。".to_string());
@@ -135,7 +149,7 @@ fn http_request(
         .map_err(|_| "本地服务地址不正确。".to_string())?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(700))
         .map_err(|_| "小黑子本地服务没有响应。".to_string())?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_read_timeout(Some(read_timeout));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
 
     let body = body.unwrap_or("");
@@ -177,8 +191,195 @@ fn http_request(
     })
 }
 
+fn daemon_read_timeout(timeout_ms: Option<u64>) -> Duration {
+    let value = timeout_ms
+        .unwrap_or(DAEMON_HTTP_DEFAULT_TIMEOUT_MS)
+        .clamp(1_000, DAEMON_HTTP_MAX_TIMEOUT_MS);
+    Duration::from_millis(value)
+}
+
+fn validate_attachment_id(attachment_id: &str) -> Result<(), String> {
+    if attachment_id.is_empty()
+        || attachment_id.len() > 80
+        || !attachment_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err("附件编号不正确。".to_string());
+    }
+    Ok(())
+}
+
+fn attachment_path_from_response(body: &str) -> Result<PathBuf, String> {
+    let payload: serde_json::Value =
+        serde_json::from_str(body).map_err(|_| "附件信息格式不正确。".to_string())?;
+    let safe_path = payload
+        .get("attachment")
+        .and_then(|value| value.get("safe_path"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if safe_path.is_empty() {
+        return Err("附件路径为空。".to_string());
+    }
+    Ok(PathBuf::from(safe_path))
+}
+
+fn open_path_in_file_manager(file_path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("explorer.exe");
+        command.arg("/select,").arg(file_path);
+        hide_child_window(&mut command);
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "无法打开附件所在位置。".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg("-R")
+            .arg(file_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "无法打开附件所在位置。".to_string())
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
+        Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "无法打开附件所在位置。".to_string())
+    }
+}
+
+fn parse_sse_block(block: &str, app: &AppHandle, last_event_id: &mut u64) {
+    let mut id: Option<u64> = None;
+    let mut event_name = String::from("message");
+    let mut data_lines: Vec<String> = Vec::new();
+    for line in block.lines() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with(':') {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("id:") {
+            id = value.trim().parse::<u64>().ok();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("event:") {
+            event_name = value.trim().to_string();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("data:") {
+            data_lines.push(value.trim_start().to_string());
+        }
+    }
+    let Some(event_id) = id else {
+        return;
+    };
+    let data_text = data_lines.join("\n");
+    let data = serde_json::from_str::<serde_json::Value>(&data_text)
+        .unwrap_or_else(|_| serde_json::Value::String(data_text));
+    *last_event_id = event_id;
+    let _ = app.emit(
+        "lilsunspot:event",
+        json!({
+            "id": event_id,
+            "event": event_name,
+            "data": data,
+        }),
+    );
+}
+
+fn drain_sse_buffer(buffer: &mut String, app: &AppHandle, last_event_id: &mut u64) {
+    while let Some(index) = buffer.find("\n\n") {
+        let block = buffer[..index].to_string();
+        let rest = buffer[index + 2..].to_string();
+        *buffer = rest;
+        parse_sse_block(&block, app, last_event_id);
+    }
+}
+
+fn run_sse_loop(app: AppHandle, data_path: PathBuf, mut endpoint: DaemonEndpoint, mut token: String) {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(None)
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            SSE_RUNNING.store(false, Ordering::SeqCst);
+            return;
+        }
+    };
+    let mut last_event_id: u64 = 0;
+    while SSE_RUNNING.load(Ordering::SeqCst) {
+        if !health_ok(&endpoint) {
+            if let Some(next_endpoint) = healthy_endpoint(&data_path) {
+                endpoint = next_endpoint;
+                if let Ok(next_token) = read_runtime_token_from_path(data_path.join(TOKEN_FILE_NAME)) {
+                    token = next_token;
+                }
+            } else {
+                thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+        }
+        let url = format!("{}/events/stream", endpoint.base_url);
+        let mut request = client
+            .get(url)
+            .header("Accept", "text/event-stream")
+            .header("X-Lilsunspot-Token", token.as_str());
+        if last_event_id > 0 {
+            request = request.header("Last-Event-ID", last_event_id.to_string());
+        }
+        let Ok(mut response) = request.send() else {
+            thread::sleep(Duration::from_secs(2));
+            continue;
+        };
+        if !response.status().is_success() {
+            if matches!(response.status().as_u16(), 401 | 403) {
+                if let Ok(next_token) = read_runtime_token_from_path(data_path.join(TOKEN_FILE_NAME)) {
+                    token = next_token;
+                }
+            }
+            thread::sleep(Duration::from_secs(2));
+            continue;
+        }
+        let mut buffer = String::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            if !SSE_RUNNING.load(Ordering::SeqCst) {
+                return;
+            }
+            match response.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(size) => {
+                    let text = String::from_utf8_lossy(&chunk[..size]).replace("\r\n", "\n");
+                    buffer.push_str(&text);
+                    drain_sse_buffer(&mut buffer, &app, &mut last_event_id);
+                }
+                Err(_) => break,
+            }
+        }
+        thread::sleep(Duration::from_millis(800));
+    }
+}
+
 fn health_ok(endpoint: &DaemonEndpoint) -> bool {
-    let Ok(response) = http_request(endpoint, "GET", "/health", None, None) else {
+    let Ok(response) = http_request(
+        endpoint,
+        "GET",
+        "/health",
+        None,
+        None,
+        daemon_read_timeout(None),
+    ) else {
         return false;
     };
     if response.status != 200 {
@@ -388,20 +589,141 @@ fn discover_daemon() -> Result<DaemonDiscovery, String> {
 }
 
 #[tauri::command]
-fn daemon_request(path: String, method: String, body: Option<String>) -> Result<DaemonHttpResponse, String> {
+async fn daemon_request(
+    path: String,
+    method: String,
+    body: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<DaemonHttpResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let data_path = data_dir()?;
+        let endpoint = healthy_endpoint(&data_path)
+            .ok_or_else(|| "小黑子本地服务没有启动。".to_string())?;
+        let token = read_runtime_token_from_path(data_path.join(TOKEN_FILE_NAME))?;
+        http_request(
+            &endpoint,
+            &method,
+            &path,
+            body.as_deref(),
+            Some(&token),
+            daemon_read_timeout(timeout_ms),
+        )
+    })
+    .await
+    .map_err(|_| "本地服务请求被中断。".to_string())?
+}
+
+#[tauri::command]
+fn subscribe_events(app: AppHandle) -> Result<bool, String> {
+    if SSE_RUNNING.swap(true, Ordering::SeqCst) {
+        return Ok(true);
+    }
     let data_path = data_dir()?;
     let endpoint = healthy_endpoint(&data_path)
         .ok_or_else(|| "小黑子本地服务没有启动。".to_string())?;
     let token = read_runtime_token_from_path(data_path.join(TOKEN_FILE_NAME))?;
-    http_request(&endpoint, &method, &path, body.as_deref(), Some(&token))
+    thread::spawn(move || run_sse_loop(app, data_path, endpoint, token));
+    Ok(true)
+}
+
+#[tauri::command]
+fn open_attachment(attachment_id: String) -> Result<bool, String> {
+    validate_attachment_id(&attachment_id)?;
+    let data_path = data_dir()?;
+    let endpoint = healthy_endpoint(&data_path)
+        .ok_or_else(|| "小黑子本地服务没有启动。".to_string())?;
+    let token = read_runtime_token_from_path(data_path.join(TOKEN_FILE_NAME))?;
+    let response = http_request(
+        &endpoint,
+        "GET",
+        &format!("/attachments/{attachment_id}"),
+        None,
+        Some(&token),
+        daemon_read_timeout(None),
+    )?;
+    if response.status < 200 || response.status >= 300 {
+        return Err("附件信息读取失败。".to_string());
+    }
+    let file_path = attachment_path_from_response(&response.body)?
+        .canonicalize()
+        .map_err(|_| "附件文件不存在。".to_string())?;
+    let attachment_root = data_path
+        .join(ATTACHMENT_DIR_NAME)
+        .canonicalize()
+        .map_err(|_| "附件目录不存在。".to_string())?;
+    if !file_path.starts_with(&attachment_root) {
+        return Err("附件路径不在小黑子的安全目录内。".to_string());
+    }
+    open_path_in_file_manager(&file_path)?;
+    Ok(true)
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let open_item = MenuItem::with_id(app, "open", "打开小黑子", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let icon = app.default_window_icon().cloned();
+    let mut builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show_main_window(app),
+            "quit" => {
+                EXIT_REQUESTED.store(true, Ordering::SeqCst);
+                SSE_RUNNING.store(false, Ordering::SeqCst);
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                show_main_window(&tray.app_handle());
+            }
+        });
+    if let Some(icon) = icon {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
 }
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            setup_tray(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if !EXIT_REQUESTED.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             connect_daemon,
             discover_daemon,
-            daemon_request
+            daemon_request,
+            subscribe_events,
+            open_attachment
         ])
         .run(tauri::generate_context!())
         .expect("error while running lilsunspot desktop");

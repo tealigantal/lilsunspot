@@ -146,6 +146,9 @@ def request_safety_approval(
     }
     store["approvals"].append(approval)
     _write_store(store)
+    from . import conversations
+
+    conversations.record_approval_action(_public_approval(approval))
     return {
         "ok": True,
         "approval_required": True,
@@ -179,10 +182,15 @@ def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
         approval["status"] = normalized_decision
         approval["decided_at"] = _now_iso()
         _write_store(store)
+        from . import conversations
+
+        conversations.record_approval_action(_public_approval(approval))
+        hermes_resolved = _resolve_hermes_tool_approval(_public_approval(approval))
         return {
             "ok": True,
             "approval": _public_approval(approval),
             "message": "审批已通过。" if normalized_decision == "approved" else "审批已拒绝。",
+            "hermes_approval_resolved": hermes_resolved,
         }
 
     raise ApprovalNotFoundError("没有找到这个审批请求。")
@@ -193,3 +201,21 @@ def describe_approval_placeholder(operation: str) -> dict[str, Any]:
         **request_safety_approval(operation, f"请求执行 {operation}", {}, "placeholder_api"),
         "suggestion": "请在安全页查看并处理审批请求。",
     }
+
+
+def _resolve_hermes_tool_approval(approval: dict[str, Any]) -> int:
+    if approval.get("operation") != "hermes_tool_approval":
+        return 0
+    details = approval.get("details") if isinstance(approval.get("details"), dict) else {}
+    session_key = str(details.get("session_key") or "").strip()
+    if not session_key:
+        return 0
+    choice = "once" if approval.get("status") == "approved" else "deny"
+    try:
+        from tools.approval import resolve_gateway_approval
+    except Exception:
+        return 0
+    try:
+        return int(resolve_gateway_approval(session_key, choice))
+    except Exception:
+        return 0

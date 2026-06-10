@@ -8,6 +8,7 @@ from lilsunspot import __version__
 
 from .auth import token_file_exists
 from .config_paths import ensure_runtime_dirs
+from .hermes_compat import audit_hermes_compatibility
 from .providers import load_provider_registry, required_resource_files
 
 
@@ -41,10 +42,19 @@ def run_doctor_checks() -> dict[str, Any]:
     add_check("daemon_bind_host", True, "127.0.0.1")
     add_check("daemon_responding", True, "current request reached lilsunspotd")
     add_check("runtime_token_exists", token_file_exists(), str(runtime_paths.token_file))
+    compat = audit_hermes_compatibility()
+    for check in compat["checks"]:
+        add_check(f"hermes_compat:{check['name']}", bool(check["ok"]), str(check["detail"]))
 
     return {
         "ok": all(check["ok"] for check in checks),
         "daemon_version": __version__,
+        "hermes_compatibility": {
+            "ok": compat["ok"],
+            "hermes_version": compat["hermes_version"],
+            "upstream_commit": compat["upstream_commit"],
+            "capabilities": compat["capabilities"],
+        },
         "checks": checks,
     }
 

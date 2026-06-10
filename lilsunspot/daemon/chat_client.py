@@ -13,6 +13,10 @@ from .providers import provider_by_id
 
 
 CHAT_TIMEOUT_SECONDS = 45.0
+VISION_SUMMARY_PROMPT = (
+    "请用中文简要识别这张图片。只描述你确实看见的内容，"
+    "不要推测身份、隐私信息或图片外的背景。"
+)
 
 CHAT_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     "empty_message": ("请先输入要发送的内容。", "输入一句话后再发送。"),
@@ -74,16 +78,80 @@ def _chat_request_headers(api_key: str) -> dict[str, str]:
     return headers
 
 
-def _chat_payload(model: str, message: str, system_hint: str) -> dict[str, Any]:
+def _chat_payload(
+    model: str,
+    message: str,
+    system_hint: str,
+    *,
+    image_data_url: str | None = None,
+) -> dict[str, Any]:
     messages = []
     if system_hint:
         messages.append({"role": "system", "content": system_hint})
-    messages.append({"role": "user", "content": message})
+    if image_data_url:
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": message},
+                    {"type": "image_url", "image_url": {"url": image_data_url}},
+                ],
+            }
+        )
+    else:
+        messages.append({"role": "user", "content": message})
     return {
         "model": model,
         "messages": messages,
         "stream": False,
     }
+
+
+def _model_supports_image_url(provider: str, model: str) -> bool:
+    provider_value = provider.strip().lower()
+    model_value = model.strip().lower()
+    if provider_value == "deepseek":
+        return False
+    if provider_value == "openai":
+        return any(
+            token in model_value
+            for token in (
+                "gpt-4o",
+                "gpt-4.1",
+                "gpt-5",
+                "o3",
+                "o4",
+                "vision",
+            )
+        )
+    if provider_value == "qwen":
+        return any(token in model_value for token in ("vl", "qvq", "omni", "vision"))
+    if provider_value == "openrouter":
+        return any(
+            token in model_value
+            for token in (
+                "gpt-4o",
+                "gpt-4.1",
+                "gpt-5",
+                "claude-3",
+                "gemini",
+                "qwen-vl",
+                "qwen2.5-vl",
+                "vision",
+            )
+        )
+    if provider_value == "ollama":
+        return any(token in model_value for token in ("llava", "bakllava", "moondream", "minicpm-v", "qwen-vl"))
+    return "vision" in model_value or "-vl" in model_value
+
+
+def _image_not_supported_message(provider: str, model: str) -> str:
+    if provider.strip().lower() == "deepseek":
+        return f"图片已收到并可预览；当前 DeepSeek 文本模型 {model} 不能识别图片内容。"
+    return (
+        f"图片已收到并可预览；当前模型 {provider}/{model} 没有确认支持 image_url 视觉输入。"
+        "请切换到支持图片的 OpenAI 或 Qwen-VL 模型后再试。"
+    )
 
 
 def _content_to_text(content: Any) -> str:
@@ -181,7 +249,7 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         "provider_type": provider_type,
         "provider_config": provider_config,
         "api_key": api_key,
-        "mode": str(current_mode.get("current") or "default"),
+        "mode": str(current_mode.get("current") or "balanced"),
         "system_hint": system_hint,
     }
 
@@ -236,4 +304,89 @@ async def send_chat_message(
         "conversation_id": None,
         "conversation_id_supported": False,
         "conversation_id_requested": conversation_id_requested,
+    }
+
+
+async def describe_image_data_url(
+    image_data_url: str,
+    *,
+    file_name: str = "图片",
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    image_data_url = image_data_url.strip()
+    if not image_data_url.startswith("data:image/"):
+        return {
+            "ok": False,
+            "error_code": "invalid_image",
+            "message": "图片预览数据不可读取，暂时不能做视觉识别。",
+        }
+
+    paths = paths or ensure_runtime_dirs()
+    error, settings = _load_chat_settings(paths)
+    if error is not None:
+        return {
+            "ok": False,
+            "error_code": str(error.get("error_code") or "setup_required"),
+            "message": str(error.get("message") or "还不能识别图片：还没有设置 AI 服务。"),
+        }
+    assert settings is not None
+
+    provider = str(settings["provider"])
+    model = str(settings["model"])
+    if not _model_supports_image_url(provider, model):
+        return {
+            "ok": False,
+            "error_code": "image_not_supported",
+            "message": _image_not_supported_message(provider, model),
+        }
+
+    try:
+        base_url = provider_http._provider_base_url(settings["provider_config"])
+    except provider_http.ProviderValidationError:
+        return {
+            "ok": False,
+            "error_code": "provider_required",
+            "message": "当前模型服务设置不可用，暂时不能识别图片。",
+        }
+
+    prompt = f"{VISION_SUMMARY_PROMPT}\n文件名：{file_name or '图片'}"
+    try:
+        async with _make_chat_http_client(base_url) as client:
+            response = await client.post(
+                "chat/completions",
+                headers=_chat_request_headers(settings["api_key"]),
+                json=_chat_payload(
+                    model,
+                    prompt,
+                    settings["system_hint"],
+                    image_data_url=image_data_url,
+                ),
+            )
+    except (httpx.InvalidURL, httpx.RequestError):
+        return {
+            "ok": False,
+            "error_code": "network_error",
+            "message": "图片已收到并可预览；视觉识别暂时连不上模型服务。",
+        }
+
+    payload = provider_http._safe_json(response)
+    if response.status_code >= 400:
+        return {
+            "ok": False,
+            "error_code": provider_http._classify_http_error(response.status_code, payload),
+            "message": "图片已收到并可预览；当前模型没有成功完成视觉识别。",
+        }
+
+    reply = _extract_reply(payload)
+    if not reply:
+        return {
+            "ok": False,
+            "error_code": "empty_response",
+            "message": "图片已收到并可预览；当前模型没有返回可显示的识别结果。",
+        }
+    return {
+        "ok": True,
+        "summary": reply,
+        "provider": provider,
+        "model": model,
     }

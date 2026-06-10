@@ -1,32 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppBootstrapRuntime, CurrentMode, Provider } from "../../types";
+import type { AppBootstrapRuntime, Provider } from "../../types";
 import { getProviders } from "../../api";
 import { ModelSettings } from "../model/ModelSettings";
-import { ModeSettings } from "../mode/ModeSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { SafetySettings } from "./SafetySettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "mode" | "weixin" | "safety" | "doctor";
+export type SettingsTab = "model" | "weixin" | "safety" | "doctor";
 
 type SettingsDrawerProps = {
   open: boolean;
   runtime: AppBootstrapRuntime;
   onClose: () => void;
   onSetupModel: () => void;
-  onModeChanged?: (mode: CurrentMode) => void;
   initialTab?: SettingsTab;
 };
 
 const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
   { id: "model", label: "模型服务" },
-  { id: "mode", label: "输出模式" },
   { id: "weixin", label: "微信", badge: "未连接" },
   { id: "safety", label: "安全审批", badge: "暂无待处理" },
   { id: "doctor", label: "诊断", badge: "未检查" }
 ];
 
-export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeChanged, initialTab = "model" }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTab = "model" }: SettingsDrawerProps) {
   const [active, setActive] = useState<SettingsTab>(initialTab);
   const [providers, setProviders] = useState<Provider[]>([]);
 
@@ -80,7 +77,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeCha
         <header>
           <div>
             <h2>设置</h2>
-            <p>模型、输出风格和本地连接状态都在这里调整。</p>
+            <p>模型、本地连接状态、审批和诊断都在这里调整。</p>
           </div>
           <button type="button" className="iconButton" onClick={onClose} aria-label="关闭设置">
             ×
@@ -96,7 +93,6 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, onModeCha
         </nav>
         <div className="drawerBody">
           {active === "model" && <ModelSettings runtime={runtime} provider={currentProvider} onSetupModel={onSetupModel} />}
-          {active === "mode" && <ModeSettings onModeChanged={onModeChanged} />}
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}

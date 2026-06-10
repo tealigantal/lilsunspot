@@ -2,6 +2,48 @@
 
 ## Current
 
+- LIL-P2-02 + LIL-P2-03：微信私聊同步、文件附件、自然语言模式 UX 合并交付。
+  - 2026-06-09：新增 lilsunspot SQLite 会话库、事件表、附件表和审批动作表；`/conversations`、`/conversations/{id}/messages`、`/events/stream`、`/attachments/{id}` 全部继续要求 `X-Lilsunspot-Token`，`/chat/send` 兼容路径改为写入稳定 `personal` 会话。
+  - 2026-06-09：微信 `MessageEvent(media_urls/media_types)` 入站后登记附件、复制到 `data_dir/attachments/YYYYMM`、生成图片/PDF/txt/md/csv/docx/xlsx 摘要或中文不可读原因，并把附件摘要拼入 AI 回复 prompt；附件来源只允许 `data_dir/attachments` 和 Hermes 媒体缓存目录，不允许 Weixin credential 目录。
+  - 2026-06-09：桌面端聊天改为会话数据源，启动加载最近消息并通过 Tauri `subscribe_events` 接收 daemon SSE；Tauri 用 header token 连接 `/events/stream`，token 不进入 URL/前端 state，并新增受控 `open_attachment`。Tauri core 增加托盘：关窗隐藏到后台，“打开小黑子”恢复窗口，“退出”真实退出。
+  - 2026-06-09：微信模式入口支持普通自然语言：务实/平衡/温柔、详细/简短、主动/谨慎和当前风格查询；未知 slash command 返回中文提示，`/help`、`/mode` 保留为隐藏高级兼容路径。mode 变化落库为 system message 并广播 `mode.changed`。
+  - 2026-06-09：主动微信发送仍走安全审批；审批通过后才调用 Weixin adapter 的 `send`、`send_document` 或 `send_image_file`，拒绝不会发送。
+  - 2026-06-09 收尾复核：修复 CSV 被通用 `text/*` 提前解析的问题；SSE 等待改为跨线程 condition，避免非当前 asyncio loop 落库事件只能等 keepalive；Tauri SSE 重连会重新发现 endpoint 并在 401/403 后重读 token。
+  - 验证已跑：focused conversation/media/mode/approval pytest 5 passed、daemon pytest 38 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、`cargo check --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check`、`npm run tauri:build --prefix lilsunspot/desktop`、临时目录安装版 smoke 通过；NSIS 产物为 `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`。
+  - 2026-06-09：中断续跑收尾复核并补小修复：Weixin runtime 文本入站统一走事件入口，保留真实 `message_id`；审批通过发送微信文件前先验证所有附件存在且位于安全附件目录，避免文本已发送但附件失败的半完成状态。新增对应回归测试，更新 runtime fake event 测试入口。验证：focused conversation/safety pytest 11 passed、daemon pytest 40 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、`cargo check --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`pwsh -NoProfile -File scripts/build_lilsunspotd_sidecar.ps1`、`npm run tauri:build --prefix lilsunspot/desktop`、临时目录安装版 smoke 通过；NSIS 产物已确认存在。
+  - 2026-06-09：按“小白用户误点”视角修复微信扫码页卡顿体感：刷新请求进行中再次点击会排队一次并在二维码说明区给反馈；断开按钮不再被慢刷新禁用，二次确认后可抢占旧刷新；后端扫码登录增加 generation，断开或新刷新后旧的 `/login/start` / `/login/status` 慢响应不能重新写回扫码会话。顺手修复会话消息列表按随机 id 排序导致同一时间戳消息偶发倒序的问题，改为 SQLite 写入顺序。验证：focused Weixin pytest 8 passed、daemon pytest 41 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、`cargo check --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`npm run tauri:build --prefix lilsunspot/desktop`；最新 setup.exe 已覆盖安装到 `%LOCALAPPDATA%\Lilsunspot`，随后 `scripts/smoke_lilsunspot_installed_app.ps1 -SkipInstall -InstallDir %LOCALAPPDATA%\Lilsunspot` 通过。
+  - 2026-06-09：继续修复 Mode 同步、图片识别状态和微信附件基础链路。桌面新增统一 ModeProvider/useModeState，顶部状态、聊天右栏、模式页和设置抽屉共用同一份 mode state 并监听 `mode.changed`；图片附件区分 `preview_only` 和 `recognized`，支持 `image_url` 的 OpenAI/Qwen-VL 类模型可写入视觉摘要，DeepSeek 文本模型明确显示只能预览不能识别；微信私聊消息 metadata 记录脱敏 `chat_id/user_id` 路由；显式 `/gateway/weixin/send` 可携带安全 attachment ids 创建 `send_weixin_message` 审批，不直接发送；聊天右侧安全摘要增加进入审批的按钮。
+  - 验证新增已跑：focused conversation/media/mode/approval pytest 10 passed、daemon pytest 46 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、`cargo check --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check`、`npm run tauri:build --prefix lilsunspot/desktop` 通过；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`。Browser IAB 打开 Vite dev UI 后，默认桌面截图和 390x844 移动截图显示基础壳正常渲染。
+  - 未覆盖：Browser IAB 精确 960x680/390x760 批量截图调用超时，后续 viewport reset 调用也超时；CodeRabbit CLI 未安装，按插件技能通过 `bash -lc "curl -fsSL https://cli.coderabbit.ai/install.sh | sh"` 安装时 124 秒超时，未取得 CodeRabbit review 结果；真实微信发图片/PDF/docx/xlsx/csv 后桌面实时显示、审批后发回微信文件、关窗托盘/托盘打开/托盘退出仍需人工安装版验收。`cargo fmt --check` 未运行，因为本机 Rust toolchain 缺少 `rustfmt` 组件。
+  - 2026-06-10：新增 Hermes 官方接口兼容审计边界：`hermes_compat` 记录 provider、Weixin、attachment、mode、safety、doctor/runtime 的官方接口来源和产品层包装理由；Doctor 和 `/runtime/info` 暴露 Hermes 版本、upstream commit 与关键接口探测。显式微信发送仍创建 `send_weixin_message` 审批，审批通过后调用官方 `WeixinAdapter` / `BasePlatformAdapter` 的 `send()`、`send_image_file()`、`send_document()`；不安全附件路径和未连接微信都不会发送。验证：focused Hermes compat pytest 5 passed、focused approval/send pytest 5 passed、daemon pytest 56 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`npm run tauri:build --prefix lilsunspot/desktop` 通过；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`。
+  - 2026-06-10：按用户截图修复模式/对话真实状态错位。自然语言切换到目标 mode 时不再继承上一模式 sliders，而是写入目标 profile 默认值，避免后端 `current=balanced` 但 UI 仍显示感性滑杆；桌面 `/chat/send` 语义模式响应带回最新 mode，前端在收到 `mode_intent` 后主动重载共享 mode state，降低 SSE/Tauri 事件漏收时右侧展示条不同步的风险。Mode 面板三条滑杆标签从错误的“唱/RAP/篮球”修正为“风格/表达、长度/细节、确认/自主”。用户指出文件/附件判断不应混入产品层文本拦截后，已删除桌面和微信普通聊天路径上的附件能力/发送文件关键词拦截；mode 层只做 LLM 语义判断是否调整参数，未命中 mode 的消息回到正常聊天。验证：focused conversation/hermes compat pytest 6 passed、daemon pytest 57 passed、product pytest 34 passed、`npm run build --prefix lilsunspot/desktop`、旧拦截符号扫描、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`npm run tauri:build --prefix lilsunspot/desktop` 通过；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`。
+  - 2026-06-10：按“预设 + 自定义”重做 mode 边界。`default_mode_profiles.yaml` 仅保留 `pragmatic/balanced/emotional/custom` 四个模式，`balanced` 是默认；固定预设不再保存任意 sliders，API 或旧状态里出现“固定预设 + 非预设滑杆”会读取/保存为 `custom`，自然语言 slider 调整也落到 `custom`。桌面端删除左侧 `MD 模式` 页面、设置抽屉输出模式 tab 和 `ModeSettings.tsx`，聊天右侧改为四个模式按钮、滑杆、实时预览卡，移除原安全审批 mini panel 和 runtime line。验证：focused mode/conversation pytest 29 passed、daemon pytest 58 passed、product pytest 35 passed、`npm run build --prefix lilsunspot/desktop`、headless Chrome/CDP mock Tauri 截图检查四模式/无 MD/无安全 mini panel/无横向溢出、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`npm run tauri:build --prefix lilsunspot/desktop` 通过；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`。
+  - 2026-06-10：落实“微信连接 != 当前桌面对话”的多对话边界。普通桌面“新建”只创建桌面对话，不抢微信入站 route；微信私聊按 active Weixin conversation 落库，只有“新开此微信对话”或“设为当前”会切换同一微信 route 的入站落点；Weixin route key 增加 `account_id` 维度，兼容旧的无账号 route，真实 runtime handler 会把当前 adapter account id 注入事件 metadata。验证：focused conversation pytest 22 passed、daemon pytest 63 passed、product pytest 35 passed、`npm run build --prefix lilsunspot/desktop`、`py -3 scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check` 仅 CRLF warnings、`npm run tauri:build --prefix lilsunspot/desktop` 通过；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`，大小 62,214,241 bytes，时间 2026-06-10 14:34:45 +08:00。
+
+## Next
+
+1. LIL-P2-02/P2-03 安装版人工验收：真实微信发图片/PDF/docx/xlsx/csv 后桌面实时显示；生成文件经审批发送回微信；960x680 和 390x760 附件卡无重叠/横向溢出；关窗进托盘、托盘打开、托盘退出。
+2. LIL-P3-01：真实高危动作审批拦截和 audit.db。
+3. LIL-P4-01：诊断包导出和脱敏。
+4. LIL-UPSTREAM-01：Hermes 官方仓库同步自动化。配置 GitHub Action 定时/手动 `fetch upstream`，检测 `upstream/main` 新提交后创建同步 PR，不自动合并；PR 跑 `scripts/check.ps1`、secret guard、desktop build，涉及桌面/sidecar/installer 时跑 Tauri NSIS build；记录 upstream commit，冲突人工处理，暂不改 git submodule/subtree。
+
+## Blocked / Unknown
+
+- 当前开发机用户级 setup.exe 安装/启动/保存/重开/卸载已验证；2026-06-08 追加本机真实安装目录 `%LOCALAPPDATA%\Lilsunspot` 直接安装和运行验证，以及 DeepSeek 真实 provider test/save/chat 验证。
+- NSIS installer 可在仓库外启动已验证于当前开发机；2026-06-08 新增可复用 installed-app smoke 脚本，并已验证当前已安装 exe 的 `-SkipInstall` 路径、真实静默安装到临时目录路径、当前用户真实安装目录路径。
+- 桌面聊天是否等同完整 Hermes agent loop 未验证；当前验证覆盖的是 `lilsunspot_provider_adapter` 单轮真实 DeepSeek 聊天。
+- Mode 三滑杆和 prompt 编译已在本地 API/test/build 路径完成；Browser IAB 不可用，但已用 headless Chrome/CDP 完成 960x680 / 390x760 截图级复验。
+- Weixin 扫码登录产品层 API、二维码 data URL、runtime manager、普通私聊文本到 chat adapter、`/help` 和 `/mode` 命令已通过自动测试；packaged sidecar 可启动并返回脱敏 Weixin 状态；2026-06-09 用户人工确认真实桌面聊天、真实微信扫码登录、微信端登录、私聊文本回复、`/help`、`/mode` 和安装版 UI 点击均已跑通，P2-01 人工校验成功。
+- Weixin 后续能力方向已记录为官方 Hermes gateway-first：官方 adapter 已有媒体/文件下载、`MessageEvent` 媒体字段、`send_document()` 和 artifact 交付相关实现；lilsunspot 仍需补本地会话库、桌面同步 UI、PDF/artifact pipeline、审批和安装版验收。
+- Safety approval 队列 create/reject 已验证；是否拦截真实高危动作未验证。
+- Doctor API 已在安装版返回 10 项检查；Diagnostics export 未完成或未验证。
+
+## Done
+
+以下为历史任务记录，是否完全代表当前主线状态需以 lilsunspot/notes/mvp-p0-status.md 为准。
+
+### Moved From Current 2026-06-09
+
 - LIL-P0-FLOW-UI-01：产品流程重构 + UI 重排 + P0 主路径修复。
   - 2026-06-07：桌面主导航从开发者模块 tab 改为 BootGate 状态驱动流程；未配置模型进入首启向导，已配置模型进入聊天主界面，本地服务失败进入修复/诊断入口。
   - 新增 `/app/bootstrap` 作为前端启动状态契约；`/app/state` 保留兼容；当前聊天引擎如实命名为 `lilsunspot_provider_adapter`，不再假称完整 Hermes runtime。
@@ -59,30 +101,8 @@
   - 2026-06-09：按用户截图反馈精简微信扫码面板：底部三个操作收敛为唯一“刷新”按钮，刷新按状态执行读取状态/拉取扫码状态/重新生成二维码；移除“读取中”“正在生成二维码”“这里不会显示可扫描的假二维码”“复制扫码载荷”等用户无意义文案或控件。验证：`npm run build --prefix lilsunspot/desktop`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`npm run tauri:build --prefix lilsunspot/desktop`、setup.exe 覆盖安装到 `%LOCALAPPDATA%\Lilsunspot`、安装版 smoke 通过。Browser IAB 本轮返回不可用，未做截图级自动验收。
   - 2026-06-09：按用户补充要求恢复独立强制断开入口：微信扫码面板保留“刷新”主操作，另增单独“断开”按钮，直接调用 `/gateway/weixin/disconnect` 清理连接或扫码状态，不再把断开语义混入刷新。验证：`npm run build --prefix lilsunspot/desktop`、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`npm run tauri:build --prefix lilsunspot/desktop`、setup.exe 覆盖安装到 `%LOCALAPPDATA%\Lilsunspot`、安装版 smoke 通过；Browser IAB 仍返回不可用，未做截图级自动验收。
   - 2026-06-09：用户人工确认真实桌面端聊天、微信扫码登录、微信端成功登录、微信私聊文本回复、`/help` 和 `/mode` 均已跑通。先不实现但需记录的产品风险：`/help`、`/mode` 这类 slash command/命令式调整路径不适合本产品目标用户，绝大多数用户是代码小白，后续应改成自然语言、按钮/菜单、快捷卡或低门槛引导，不应要求用户理解类似代码的命令格式。
-  - 仍未覆盖：断线重连、二维码真实过期、安装版 UI 人工点击验收。
-
-## Next
-
-1. LIL-P2-01 剩余手工验收：断线/过期/重连、安装版 UI 人工点击验收。
-2. LIL-P2-03：微信私聊命令 UX 小白化。目标是替代 `/help`、`/mode` 这类命令式路径，改成普通用户能理解的自然语言引导、按钮/菜单、快捷卡或低门槛选择流程；保留 slash command 仅作为隐藏高级能力。
-3. LIL-P2-02：Weixin 官方 Hermes gateway-first 接入研究落地。目标不是继续手写微信文本桥，而是复用官方 `WeixinAdapter` 的 `MessageEvent(media_urls/media_types)`、媒体下载、`send_document()`、`send_image_file()` 和 `MEDIA:<path>` artifact 交付能力；lilsunspot 产品层只负责本地会话同步、桌面 UI、审批、脱敏、配置和 setup.exe 打包。验收应覆盖微信对话同步到电脑端、PDF/文件入站阅读、生成文件经审批发送到微信，以及安装版真实扫码/文件 smoke。
-4. LIL-P3-01：真实高危动作审批拦截和 audit.db。
-5. LIL-P4-01：诊断包导出和脱敏。
-
-## Blocked / Unknown
-
-- 当前开发机用户级 setup.exe 安装/启动/保存/重开/卸载已验证；2026-06-08 追加本机真实安装目录 `%LOCALAPPDATA%\Lilsunspot` 直接安装和运行验证，以及 DeepSeek 真实 provider test/save/chat 验证。
-- NSIS installer 可在仓库外启动已验证于当前开发机；2026-06-08 新增可复用 installed-app smoke 脚本，并已验证当前已安装 exe 的 `-SkipInstall` 路径、真实静默安装到临时目录路径、当前用户真实安装目录路径。
-- 桌面聊天是否等同完整 Hermes agent loop 未验证；当前验证覆盖的是 `lilsunspot_provider_adapter` 单轮真实 DeepSeek 聊天。
-- Mode 三滑杆和 prompt 编译已在本地 API/test/build 路径完成；Browser IAB 不可用，但已用 headless Chrome/CDP 完成 960x680 / 390x760 截图级复验。
-- Weixin 扫码登录产品层 API、二维码 data URL、runtime manager、普通私聊文本到 chat adapter、`/help` 和 `/mode` 命令已通过自动测试；packaged sidecar 可启动并返回脱敏 Weixin 状态；2026-06-09 用户人工确认真实桌面聊天、真实微信扫码登录、微信端登录、私聊文本回复、`/help` 和 `/mode` 均已跑通。
-- Weixin 后续能力方向已记录为官方 Hermes gateway-first：官方 adapter 已有媒体/文件下载、`MessageEvent` 媒体字段、`send_document()` 和 artifact 交付相关实现；lilsunspot 仍需补本地会话库、桌面同步 UI、PDF/artifact pipeline、审批和安装版验收。
-- Safety approval 队列 create/reject 已验证；是否拦截真实高危动作未验证。
-- Doctor API 已在安装版返回 10 项检查；Diagnostics export 未完成或未验证。
-
-## Done
-
-以下为历史任务记录，是否完全代表当前主线状态需以 lilsunspot/notes/mvp-p0-status.md 为准。
+  - 2026-06-09：用户补充确认 P2-01 安装版 UI 人工校验成功；P2-01 以真实桌面聊天、扫码登录、微信端登录、私聊文本回复、`/help`、`/mode` 和安装版 UI 点击验收通过收尾。
+  - 后续稳定性风险：断线重连、二维码真实过期仍需在后续 Weixin 能力迭代中补验，不再作为 P2-01 当前阻断项。
 
 ### LIL-P0-02: 发布级 check_release.ps1。
 

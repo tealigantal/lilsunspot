@@ -462,6 +462,7 @@ pre {
 .primaryActionPanel,
 .errorWithAction,
 .stepLayout,
+.conversationRail,
 .chatMainPanel,
 .chatSidePanel,
 .modeQuickPanel,
@@ -808,10 +809,140 @@ label {
 
 .chatHome {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(350px, 427px);
+  grid-template-columns: minmax(188px, 230px) minmax(0, 1fr) minmax(350px, 427px);
   gap: 18px;
   height: 100%;
   min-height: 0;
+}
+
+.conversationRail {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px;
+}
+
+.conversationRailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.conversationRailHeader strong {
+  overflow: hidden;
+  color: var(--ikun-text);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archiveToggle {
+  display: flex;
+  min-width: 0;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--ikun-muted);
+  font-size: 13px;
+}
+
+.archiveToggle input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: var(--ikun-orange);
+}
+
+.conversationList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.conversationItem {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(168, 182, 201, 0.18);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(7, 17, 30, 0.42);
+}
+
+.conversationItem.active {
+  border-color: var(--ikun-orange);
+  background: rgba(255, 139, 36, 0.12);
+}
+
+.conversationItem.archived {
+  opacity: 0.72;
+}
+
+.conversationSelect {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px;
+  background: transparent;
+  color: var(--ikun-text);
+  text-align: left;
+}
+
+.conversationSelect:hover:not(:disabled) {
+  transform: none;
+  background: rgba(99, 246, 218, 0.08);
+}
+
+.conversationSelect strong,
+.conversationSelect span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationSelect strong {
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.conversationSelect span {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+}
+
+.conversationActions,
+.chatHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.conversationActions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.dangerMiniButton {
+  border-color: rgba(255, 90, 106, 0.42);
+  color: #ffd7dc;
 }
 
 .chatMainPanel {
@@ -950,6 +1081,118 @@ label {
   justify-self: start;
 }
 
+.systemBubble {
+  width: min(92%, 820px);
+  justify-self: center;
+  border-color: rgba(255, 213, 82, 0.36);
+  background: rgba(255, 213, 82, 0.1);
+}
+
+.attachmentList {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 520px);
+  min-width: 0;
+}
+
+.attachmentCard {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 520px);
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid rgba(99, 246, 218, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(7, 17, 30, 0.56);
+}
+
+.attachmentPreview {
+  width: 100%;
+  max-height: 220px;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  background: #ffffff;
+  object-fit: contain;
+}
+
+.attachmentHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.attachmentHeader div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.attachmentHeader strong,
+.attachmentHeader span,
+.attachmentSummary p {
+  overflow-wrap: anywhere;
+}
+
+.attachmentHeader strong {
+  color: var(--ikun-text);
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.attachmentHeader span {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.attachmentHeader em {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(99, 246, 218, 0.16);
+  color: var(--ikun-cyan);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.attachmentSummary {
+  min-width: 0;
+}
+
+.attachmentSummary summary {
+  cursor: pointer;
+  color: var(--ikun-cyan);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.attachmentSummary p {
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 8px;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(247, 251, 255, 0.08);
+  color: var(--ikun-text);
+  font-size: 13px;
+  line-height: 19px;
+  white-space: pre-wrap;
+}
+
+.attachmentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachmentActions button {
+  min-width: 92px;
+}
+
 .errorBubble {
   border-color: rgba(255, 90, 106, 0.44);
   background: rgba(255, 90, 106, 0.14);
@@ -980,7 +1223,7 @@ label {
 
 .chatSidePanel {
   display: grid;
-  grid-template-rows: minmax(0, auto) auto auto;
+  align-content: start;
   gap: 16px;
   min-width: 0;
   min-height: 0;
@@ -996,13 +1239,6 @@ label {
   box-shadow: none;
 }
 
-.modeQuickPanelPage {
-  position: relative;
-  height: 100%;
-  overflow: hidden;
-  padding: 28px 32px;
-}
-
 .modeQuickPanelCompact {
   border: 0;
   border-radius: 0;
@@ -1015,6 +1251,8 @@ label {
 }
 
 .presetCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
 }
 
@@ -1028,10 +1266,6 @@ label {
   min-height: 48px;
   padding: 12px 16px;
   text-align: left;
-}
-
-.modeQuickPanelPage .presetButton {
-  min-height: 118px;
 }
 
 .presetButton strong {
@@ -1062,26 +1296,6 @@ label {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 24px;
-}
-
-.modeQuickPanelPage .modeMixerBody {
-  grid-template-columns: minmax(360px, 1fr) minmax(320px, 0.82fr);
-  align-items: stretch;
-}
-
-.modeQuickPanelPage > .mutedText {
-  display: none;
-}
-
-.modeQuickPanelPage > .actionRow {
-  position: absolute;
-  right: 60px;
-  bottom: 52px;
-  z-index: 2;
-}
-
-.modeQuickPanelCompact .actionRow {
-  display: none;
 }
 
 .sliderGrid {
@@ -1151,7 +1365,6 @@ label {
   border-radius: var(--radius-card);
   padding: 28px;
   background: rgba(26, 34, 48, 0.82);
-  padding-bottom: 86px;
 }
 
 .modePreviewPanel h3 {
@@ -1214,28 +1427,9 @@ label {
   margin: 0;
 }
 
-.safetyMiniPanel {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--ikun-line-warm);
-  border-radius: var(--radius-card);
-  padding: 20px;
-  background: rgba(255, 213, 82, 0.08);
-}
-
-.safetyMiniPanel h3 {
-  color: var(--ikun-yellow);
-}
-
-.safetyMiniPanel strong {
-  color: var(--ikun-text);
-  font-size: 16px;
-}
-
-.modeRuntimeLine {
-  color: var(--ikun-muted-2);
-  font-size: 12px;
-  line-height: 16px;
+.modePreviewActions {
+  justify-content: flex-end;
+  margin-top: var(--space-2);
 }
 
 .drawerBackdrop {
@@ -1471,6 +1665,11 @@ label {
   border-color: var(--ikun-line-warm);
   background: rgba(255, 139, 36, 0.16);
   color: var(--ikun-text);
+}
+
+.weixinButtonRow button.queued {
+  border-color: rgba(99, 246, 218, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(99, 246, 218, 0.18);
 }
 
 .weixinDisconnectRow button {
@@ -1795,7 +1994,7 @@ label {
   }
 
   .chatHome {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 330px);
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(280px, 330px);
     gap: 12px;
   }
 
@@ -1805,6 +2004,7 @@ label {
     overflow: hidden;
   }
 
+  .conversationRail,
   .chatMainPanel,
   .chatSidePanel {
     padding: 16px;
@@ -1867,11 +2067,6 @@ label {
     padding: 12px;
   }
 
-  .modeQuickPanelPage .modeMixerBody {
-    grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.82fr);
-    gap: 16px;
-  }
-
   .modeQuickPanelCompact .modeSlider {
     gap: 4px;
   }
@@ -1895,15 +2090,6 @@ label {
     height: 18px;
   }
 
-  .safetyMiniPanel {
-    gap: 6px;
-    padding: 12px;
-  }
-
-  .modeRuntimeLine {
-    display: none;
-  }
-
   .providerGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1912,6 +2098,10 @@ label {
 @media (max-width: 840px) {
   .chatHome {
     grid-template-columns: 1fr;
+  }
+
+  .conversationRail {
+    max-height: 260px;
   }
 
   .weixinGrid {
@@ -2104,6 +2294,7 @@ label {
     display: none;
   }
 
+  .conversationRail,
   .chatMainPanel,
   .chatSidePanel {
     padding: 16px;
@@ -2205,66 +2396,6 @@ label {
     padding: 12px;
   }
 
-  .modeQuickPanelPage {
-    padding: 20px;
-  }
-
-  .modeQuickPanelPage .modeHeader p {
-    display: none;
-  }
-
-  .modeQuickPanelPage .presetButton {
-    min-height: 58px;
-    height: 58px;
-    padding: 10px 12px;
-  }
-
-  .modeQuickPanelPage .presetButton span {
-    display: none;
-  }
-
-  .modeQuickPanelPage .modeMixerBody {
-    grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.82fr);
-    gap: 16px;
-  }
-
-  .modeQuickPanelPage .sliderGrid {
-    gap: 10px;
-    padding: 14px;
-  }
-
-  .modeQuickPanelPage .modeSlider {
-    gap: 4px;
-  }
-
-  .modeQuickPanelPage .modeSlider small {
-    display: none;
-  }
-
-  .modeQuickPanelPage .modePreviewPanel {
-    padding: 20px;
-    padding-bottom: 70px;
-  }
-
-  .modeQuickPanelPage .modePreviewPanel h3 {
-    font-size: 22px;
-    line-height: 27px;
-  }
-
-  .modeQuickPanelPage .modePreviewPanel > strong {
-    padding: 14px;
-  }
-
-  .modeQuickPanelPage .modePreviewPanel div {
-    display: none;
-  }
-
-  .modeQuickPanelPage > .actionRow {
-    right: 178px;
-    top: 22px;
-    bottom: auto;
-  }
-
   .modeQuickPanelCompact .modeSlider {
     gap: 4px;
   }
@@ -2288,30 +2419,18 @@ label {
     height: 18px;
   }
 
-  .safetyMiniPanel {
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 6px;
-    padding: 12px;
+  .modeQuickPanelCompact .modePreviewPanel {
+    gap: 10px;
+    padding: 18px;
   }
 
-  .safetyMiniPanel h3 {
-    margin: 0;
-    font-size: 16px;
-    line-height: 20px;
+  .modeQuickPanelCompact .modePreviewPanel h3 {
+    font-size: 22px;
+    line-height: 27px;
   }
 
-  .safetyMiniPanel strong {
-    font-size: 13px;
-    line-height: 18px;
-  }
-
-  .safetyMiniPanel p {
-    display: none;
-  }
-
-  .modeRuntimeLine {
-    display: none;
+  .modeQuickPanelCompact .modePreviewPanel > strong {
+    padding: 14px;
   }
 }
 
@@ -2337,7 +2456,7 @@ label {
   }
 
   .sideNav nav {
-    grid-template-columns: repeat(5, minmax(42px, 1fr));
+    grid-template-columns: repeat(4, minmax(42px, 1fr));
     gap: 4px;
   }
 
@@ -2377,7 +2496,6 @@ label {
   .consoleContent,
   .chatHome,
   .stepLayout,
-  .modeQuickPanelPage,
   .settingsSection {
     height: auto;
     overflow: visible;
@@ -2424,34 +2542,27 @@ label {
     gap: 18px;
   }
 
+  .conversationRail,
   .chatMainPanel,
   .chatSidePanel,
-  .settingsSection,
-  .modeQuickPanelPage {
+  .settingsSection {
     padding: 18px;
   }
 
-  .modeQuickPanelPage .modeMixerBody {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .modeQuickPanelPage .sliderGrid,
-  .modeQuickPanelPage .modePreviewPanel {
-    min-width: 0;
-  }
-
-  .modeQuickPanelPage > .actionRow {
-    position: static;
-    justify-content: stretch;
-  }
-
-  .modeQuickPanelPage > .actionRow button {
-    width: 100%;
-  }
-
   .chatBubble,
-  .seedBubble {
+  .seedBubble,
+  .attachmentList,
+  .attachmentCard {
     width: 100%;
+  }
+
+  .attachmentHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .attachmentActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .chatComposer {

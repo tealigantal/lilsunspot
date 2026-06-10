@@ -1,18 +1,5 @@
 from __future__ import annotations
 
-import json
-
-import httpx
-
-
-def _mock_chat_http_client(daemon_client, monkeypatch, handler):
-    transport = httpx.MockTransport(handler)
-
-    def make_client(base_url: str):
-        return httpx.AsyncClient(base_url=base_url, transport=transport)
-
-    monkeypatch.setattr(daemon_client.chat_client, "_make_chat_http_client", make_client)
-
 
 def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     client = daemon_client.client
@@ -26,11 +13,13 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
 
     modes = client.get("/modes", headers=headers)
     assert modes.status_code == 200
-    assert any(item["id"] == "default" for item in modes.json()["modes"])
+    mode_ids = {item["id"] for item in modes.json()["modes"]}
+    assert {"pragmatic", "balanced", "emotional", "custom"} <= mode_ids
+    assert "default" not in mode_ids
 
-    selected = client.post("/modes/select", headers=headers, json={"mode": "default"})
+    selected = client.post("/modes/select", headers=headers, json={"mode": "balanced"})
     assert selected.status_code == 200
-    assert selected.json()["current"] == "default"
+    assert selected.json()["current"] == "balanced"
     assert selected.json()["profile"]["system_hint"] == selected.json()["prompt"]["system_hint"]
     assert [layer["id"] for layer in selected.json()["prompt"]["layers"]] == [
         "product_baseline",
@@ -84,15 +73,22 @@ def test_chat_runtime_requires_provider_config(daemon_client):
 def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     client = daemon_client.client
     headers = daemon_client.headers
-    seen_payload = {}
+    seen = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_payload.update(json.loads(request.content.decode("utf-8")))
-        assert request.headers.get("authorization") is None
-        assert str(request.url) == "http://127.0.0.1:11434/v1/chat/completions"
-        return httpx.Response(200, json={"choices": [{"message": {"content": "这是模型回复。"}}]})
+    def fake_run_agent_turn(**kwargs):
+        seen.update(kwargs)
+        return {
+            "ok": True,
+            "reply": "这是模型回复。",
+            "engine": "hermes_agent_loop",
+            "provider": "ollama",
+            "model": "llama3.2",
+            "conversation_id": kwargs["conversation_id"],
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
 
-    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+    monkeypatch.setattr(daemon_client.agent_runner, "_run_agent_turn", fake_run_agent_turn)
 
     save = client.post(
         "/providers/save",
@@ -110,26 +106,34 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "lilsunspot_provider_adapter"
+    assert body["engine"] == "hermes_agent_loop"
     assert body["reply"] == "这是模型回复。"
-    assert seen_payload["model"] == "llama3.2"
-    default_hint = client.get("/modes/current", headers=headers).json()["profile"]["system_hint"]
-    assert seen_payload["messages"] == [
-        {"role": "system", "content": default_hint},
-        {"role": "user", "content": "你好"},
-    ]
+    assert seen["settings"]["model"] == "llama3.2"
+    assert seen["settings"]["hermes_provider"] == "custom"
+    default_hint = client.get("/modes/current", headers=headers).json()["prompt"]["system_hint"]
+    assert seen["settings"]["system_hint"] == default_hint
 
 
-def test_weixin_private_text_reuses_chat_adapter(daemon_client, monkeypatch):
+def test_weixin_private_text_uses_hermes_agent_loop(daemon_client, monkeypatch):
     client = daemon_client.client
     headers = daemon_client.headers
-    seen_payload = {}
+    seen = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_payload.update(json.loads(request.content.decode("utf-8")))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "微信私聊回复。"}}]})
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen["message"] = message
+        seen["conversation_id"] = conversation_id
+        return {
+            "ok": True,
+            "reply": "微信私聊回复。",
+            "engine": "hermes_agent_loop",
+            "provider": "ollama",
+            "model": "llama3.2",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
 
-    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     save = client.post(
         "/providers/save",
@@ -148,6 +152,7 @@ def test_weixin_private_text_reuses_chat_adapter(daemon_client, monkeypatch):
     body = response.json()
     assert body["ok"] is True
     assert body["intent"]["kind"] == "chat_message"
-    assert body["chat"]["engine"] == "lilsunspot_provider_adapter"
+    assert body["chat"]["engine"] == "hermes_agent_loop"
     assert body["chat"]["reply"] == "微信私聊回复。"
-    assert seen_payload["messages"][-1] == {"role": "user", "content": "帮我总结今天安排"}
+    assert seen["message"] == "帮我总结今天安排"
+    assert seen["conversation_id"] == "personal"

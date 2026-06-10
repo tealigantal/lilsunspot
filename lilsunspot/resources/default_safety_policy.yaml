@@ -8,6 +8,7 @@ high_risk:
     - write_sensitive_file
     - network_post
     - credential_access
+    - hermes_tool_approval
 defaults:
   unknown_operation_requires_approval: true
   explain_user_visible_errors: true

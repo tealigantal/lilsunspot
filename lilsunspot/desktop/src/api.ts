@@ -2,12 +2,16 @@ import type {
   AppState,
   AppBootstrapState,
   ChatSendResult,
+  Conversation,
+  ConversationMessage,
+  ConversationSendResult,
   CurrentMode,
   DaemonConnectStatus,
   DaemonDiscovery,
   DaemonHttpResponse,
   DoctorResult,
   HealthStatus,
+  LilsunspotEvent,
   ModeProfile,
   Provider,
   ProviderTestResult,
@@ -23,6 +27,8 @@ import type {
 
 const DEFAULT_DAEMON_URL = "http://127.0.0.1:8765";
 const TOKEN_HEADER = "X-Lilsunspot-Token";
+const WEIXIN_REQUEST_TIMEOUT_MS = 12_000;
+const WEIXIN_DISCONNECT_TIMEOUT_MS = 5_000;
 
 let runtimeToken = "";
 let daemonUrl = DEFAULT_DAEMON_URL;
@@ -32,6 +38,11 @@ type ApiErrorBody = {
   message?: string;
   suggestion?: string;
   title?: string;
+};
+
+type ApiRequestOptions = {
+  protectedApi?: boolean;
+  timeoutMs?: number;
 };
 
 function isTauriRuntime() {
@@ -101,6 +112,9 @@ function humanizeError(error: unknown): string {
     if (error.message === "Failed to fetch") {
       return "小黑子本地服务没有响应。请点击“重新检查”。";
     }
+    if (error.name === "AbortError") {
+      return "请求超时，请稍后再试。";
+    }
     return error.message;
   }
   return "请求失败，请稍后再试。";
@@ -132,14 +146,55 @@ function errorMessageFromBody(body: unknown): string {
   return "请求失败。";
 }
 
-async function requestViaTauri<T>(path: string, options: RequestInit): Promise<T> {
+function normalizeApiRequestOptions(value: boolean | ApiRequestOptions): Required<ApiRequestOptions> {
+  if (typeof value === "boolean") {
+    return { protectedApi: value, timeoutMs: 0 };
+  }
+  return {
+    protectedApi: value.protectedApi ?? true,
+    timeoutMs: value.timeoutMs ?? 0
+  };
+}
+
+function tauriHttpTimeoutMs(timeoutMs: number) {
+  if (!timeoutMs) {
+    return null;
+  }
+  return Math.max(1_000, timeoutMs - 500);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  if (!timeoutMs) {
+    return promise;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function requestViaTauri<T>(path: string, options: RequestInit, timeoutMs: number): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
   const rawBody = typeof options.body === "string" ? options.body : undefined;
-  const response = await invokeTauri<DaemonHttpResponse>("daemon_request", {
-    path,
-    method,
-    body: rawBody ?? null
-  });
+  const response = await withTimeout(
+    invokeTauri<DaemonHttpResponse>("daemon_request", {
+      path,
+      method,
+      body: rawBody ?? null,
+      timeoutMs: tauriHttpTimeoutMs(timeoutMs)
+    }),
+    timeoutMs,
+    "本地服务请求超时，请稍后再试。"
+  );
   const body = parseBodyText(response.body);
   if (response.status < 200 || response.status >= 300) {
     throw new Error(errorMessageFromBody(body));
@@ -147,10 +202,15 @@ async function requestViaTauri<T>(path: string, options: RequestInit): Promise<T
   return body as T;
 }
 
-async function requestJson<T>(path: string, options: RequestInit = {}, protectedApi = true): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  options: RequestInit = {},
+  requestOptions: boolean | ApiRequestOptions = true
+): Promise<T> {
+  const { protectedApi, timeoutMs } = normalizeApiRequestOptions(requestOptions);
   if (isTauriRuntime()) {
     try {
-      return await requestViaTauri<T>(path, options);
+      return await requestViaTauri<T>(path, options, timeoutMs);
     } catch (error) {
       throw new Error(humanizeError(error));
     }
@@ -166,15 +226,47 @@ async function requestJson<T>(path: string, options: RequestInit = {}, protected
     ...(options.headers || {})
   };
 
+  const controller = timeoutMs ? new AbortController() : null;
+  let timeoutId: number | null = null;
+  let timedOut = false;
+  const externalSignal = options.signal;
+  const abortFromExternal = () => controller?.abort();
   try {
-    const response = await fetch(`${daemonUrl}${path}`, { ...options, headers });
+    if (controller && externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+      }
+    }
+    if (controller) {
+      timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+    }
+    const response = await fetch(`${daemonUrl}${path}`, {
+      ...options,
+      headers,
+      signal: controller?.signal ?? options.signal
+    });
     const body = await parseBody(response);
     if (!response.ok) {
       throw new Error(errorMessageFromBody(body));
     }
     return body as T;
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(timedOut ? "请求超时，请稍后再试。" : humanizeError(error));
+    }
     throw new Error(humanizeError(error));
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+    if (controller && externalSignal) {
+      externalSignal.removeEventListener("abort", abortFromExternal);
+    }
   }
 }
 
@@ -238,6 +330,87 @@ export async function sendChatMessage(message: string): Promise<ChatSendResult> 
   });
 }
 
+export async function getConversations(includeArchived = false): Promise<Conversation[]> {
+  const params = new URLSearchParams();
+  if (includeArchived) {
+    params.set("include_archived", "true");
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const body = await requestJson<{ conversations: Conversation[] }>(`/conversations${suffix}`);
+  return body.conversations;
+}
+
+export async function createConversation(payload: {
+  title?: string;
+  kind?: string;
+  metadata?: Record<string, unknown>;
+} = {}): Promise<Conversation> {
+  const body = await requestJson<{ conversation: Conversation }>("/conversations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  return body.conversation;
+}
+
+export async function updateConversation(
+  conversationId: string,
+  payload: { title?: string; archived?: boolean; weixin_route_active?: boolean }
+): Promise<Conversation> {
+  const body = await requestJson<{ conversation: Conversation }>(`/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+  return body.conversation;
+}
+
+export async function deleteConversation(conversationId: string): Promise<boolean> {
+  const body = await requestJson<{ ok: boolean }>(`/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "DELETE"
+  });
+  return body.ok;
+}
+
+export async function getConversationMessages(conversationId = "personal", afterId = "", limit = 80): Promise<ConversationMessage[]> {
+  const params = new URLSearchParams();
+  if (afterId) {
+    params.set("after_id", afterId);
+  }
+  params.set("limit", String(limit));
+  const body = await requestJson<{ messages: ConversationMessage[] }>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`
+  );
+  return body.messages;
+}
+
+export async function sendConversationMessage(conversationId: string, message: string): Promise<ConversationSendResult> {
+  return requestJson<ConversationSendResult>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ message })
+  });
+}
+
+export async function subscribeDaemonEvents(): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  return invokeTauri<boolean>("subscribe_events");
+}
+
+export async function listenDaemonEvents(onEvent: (event: LilsunspotEvent) => void): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  const tauriEvent = await import("@tauri-apps/api/event");
+  return tauriEvent.listen<LilsunspotEvent>("lilsunspot:event", (event) => onEvent(event.payload));
+}
+
+export async function openAttachment(attachmentId: string): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    throw new Error("正式版会从本机安全目录打开附件。");
+  }
+  return invokeTauri<boolean>("open_attachment", { attachmentId });
+}
+
 export async function getModes(): Promise<ModeProfile[]> {
   const body = await requestJson<{ modes: ModeProfile[] }>("/modes");
   return body.modes;
@@ -258,7 +431,7 @@ export async function selectMode(
 }
 
 export async function getWeixinStatus(): Promise<WeixinStatus> {
-  return requestJson<WeixinStatus>("/gateway/weixin/status");
+  return requestJson<WeixinStatus>("/gateway/weixin/status", {}, { timeoutMs: WEIXIN_REQUEST_TIMEOUT_MS });
 }
 
 export async function getWeixinCommands(): Promise<WeixinCommand[]> {
@@ -269,17 +442,17 @@ export async function getWeixinCommands(): Promise<WeixinCommand[]> {
 export async function startWeixinLogin(): Promise<WeixinStatus> {
   return requestJson<WeixinStatus>("/gateway/weixin/login/start", {
     method: "POST"
-  });
+  }, { timeoutMs: WEIXIN_REQUEST_TIMEOUT_MS });
 }
 
 export async function getWeixinLoginStatus(): Promise<WeixinStatus> {
-  return requestJson<WeixinStatus>("/gateway/weixin/login/status");
+  return requestJson<WeixinStatus>("/gateway/weixin/login/status", {}, { timeoutMs: WEIXIN_REQUEST_TIMEOUT_MS });
 }
 
 export async function disconnectWeixin(): Promise<WeixinStatus> {
   return requestJson<WeixinStatus>("/gateway/weixin/disconnect", {
     method: "POST"
-  });
+  }, { timeoutMs: WEIXIN_DISCONNECT_TIMEOUT_MS });
 }
 
 export async function getSafetyPolicy(): Promise<SafetyPolicy> {

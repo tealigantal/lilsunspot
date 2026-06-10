@@ -1,9 +1,9 @@
 import { useState } from "react";
 import lilsunspotIcon from "../assets/lilsunspot-icon.png";
-import type { CurrentMode } from "../types";
 import { SettingsDrawer, type SettingsTab } from "../features/settings/SettingsDrawer";
 import type { ChatMessage } from "../features/chat/ChatTranscript";
-import { ModeQuickPanel, modeName } from "../features/mode/ModeQuickPanel";
+import { modeName } from "../features/mode/ModeQuickPanel";
+import { useModeState } from "../features/mode/ModeState";
 import { displayProvider } from "../features/model/ProviderCard";
 import { DoctorSettings } from "../features/settings/DoctorSettings";
 import { SafetySettings } from "../features/settings/SafetySettings";
@@ -11,11 +11,10 @@ import { WeixinSettings } from "../features/settings/WeixinSettings";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
 
-type ConsoleView = "chat" | "mode" | "weixin" | "safety" | "doctor";
+type ConsoleView = "chat" | "weixin" | "safety" | "doctor";
 
 const NAV_ITEMS: { id: ConsoleView; short: string; label: string }[] = [
   { id: "chat", short: "CH", label: "聊天" },
-  { id: "mode", short: "MD", label: "模式" },
   { id: "weixin", short: "WX", label: "微信" },
   { id: "safety", short: "OK", label: "审批" },
   { id: "doctor", short: "DR", label: "诊断" }
@@ -23,21 +22,20 @@ const NAV_ITEMS: { id: ConsoleView; short: string; label: string }[] = [
 
 const VIEW_COPY: Record<ConsoleView, { title: string; subtitle: string }> = {
   chat: { title: "和小黑子聊天", subtitle: "桌面聊天、任务整理和本地 Agent 控制台" },
-  mode: { title: "输出模式调音台", subtitle: "拖动后保存，下一条聊天和微信命令会使用这个偏好" },
-  weixin: { title: "微信连接", subtitle: "WEIXIN GATEWAY.EXE · 私聊命令和资料文本" },
+  weixin: { title: "微信连接", subtitle: "私聊同步、文件接收和审批后发送" },
   safety: { title: "安全审批", subtitle: "高危动作先确认，不展示原始工具 JSON" },
   doctor: { title: "一键诊断", subtitle: "本地服务、Provider、模式文件和脱敏检查" }
 };
 
 export function AppShell() {
   const bootstrapState = useBootstrapState();
+  const modeState = useModeState();
   const [activeView, setActiveView] = useState<ConsoleView>("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [firstChatMessages, setFirstChatMessages] = useState<ChatMessage[]>([]);
   const [devToken, setDevToken] = useState("");
-  const [lastMode, setLastMode] = useState<CurrentMode | null>(null);
 
   async function refreshAndReturn() {
     setForceOnboarding(false);
@@ -67,9 +65,6 @@ export function AppShell() {
   }
 
   function renderActiveView() {
-    if (activeView === "mode") {
-      return <ModeQuickPanel variant="page" onModeChanged={setLastMode} />;
-    }
     if (activeView === "weixin") {
       return <WeixinSettings />;
     }
@@ -87,11 +82,10 @@ export function AppShell() {
         busy={bootstrapState.busy}
         onRefresh={refreshAndReturn}
         onOpenDoctor={() => setActiveView("doctor")}
-        onOpenSettings={() => openSettings("model")}
+        onOpenSettings={openSettings}
         onSetupModel={setupModel}
         onBootstrapChanged={handleSaved}
         onFirstChatDone={handleFirstChatDone}
-        onModeChanged={setLastMode}
       />
     );
   }
@@ -139,7 +133,7 @@ export function AppShell() {
             </p>
           </div>
           <div className="topBarActions">
-            <span className="statusPill aqua">输出：{modeName(lastMode?.current || "balanced")}</span>
+            <span className="statusPill aqua">输出：{modeName(modeState.current?.current || "balanced")}</span>
             <span className={chatConfigured ? "statusPill green" : "statusPill warning"}>{connectionLabel}</span>
             <button type="button" className="secondaryButton compactButton" onClick={() => openSettings("model")}>
               设置
@@ -176,7 +170,6 @@ export function AppShell() {
         runtime={bootstrapState.bootstrap.runtime}
         onClose={() => setSettingsOpen(false)}
         onSetupModel={setupModel}
-        onModeChanged={setLastMode}
         initialTab={settingsTab}
       />
     </main>

@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import json
-
-import httpx
-import pytest
-
 
 DEEPSEEK_PROVIDER = {
     "id": "deepseek",
@@ -13,15 +8,6 @@ DEEPSEEK_PROVIDER = {
     "base_url": "https://api.deepseek.com/v1",
     "hermes_provider": "deepseek",
 }
-
-
-def _mock_chat_http_client(daemon_client, monkeypatch, handler):
-    transport = httpx.MockTransport(handler)
-
-    def make_client(base_url: str):
-        return httpx.AsyncClient(base_url=base_url, transport=transport)
-
-    monkeypatch.setattr(daemon_client.chat_client, "_make_chat_http_client", make_client)
 
 
 def _save_deepseek(daemon_client, api_key: str = "placeholder-chat-runtime-key") -> None:
@@ -33,19 +19,26 @@ def _save_deepseek(daemon_client, api_key: str = "placeholder-chat-runtime-key")
     )
 
 
-def test_chat_runtime_cloud_provider_uses_saved_key_without_leaking(daemon_client, monkeypatch):
+def test_chat_runtime_cloud_provider_uses_hermes_agent_loop_without_leaking(daemon_client, monkeypatch):
     secret = "placeholder-chat-runtime-key"
-    seen_headers = {}
-    seen_payload = {}
+    seen = {}
     _save_deepseek(daemon_client, secret)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_headers["authorization"] = request.headers.get("authorization")
-        seen_payload.update(json.loads(request.content.decode("utf-8")))
-        assert str(request.url) == "https://api.deepseek.com/v1/chat/completions"
-        return httpx.Response(200, json={"choices": [{"message": {"content": "收到。"}}]})
+    def fake_run_agent_turn(**kwargs):
+        seen.update(kwargs)
+        return {
+            "ok": True,
+            "reply": "收到。",
+            "engine": "hermes_agent_loop",
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "conversation_id": kwargs["conversation_id"],
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+            "hermes_session_id": kwargs["conversation_id"],
+        }
 
-    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+    monkeypatch.setattr(daemon_client.agent_runner, "_run_agent_turn", fake_run_agent_turn)
 
     response = daemon_client.client.post(
         "/chat/send",
@@ -56,44 +49,31 @@ def test_chat_runtime_cloud_provider_uses_saved_key_without_leaking(daemon_clien
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["engine"] == "lilsunspot_provider_adapter"
-    assert body["conversation_id_supported"] is False
+    assert body["engine"] == "hermes_agent_loop"
+    assert body["conversation_id"] == "personal"
+    assert body["conversation_id_supported"] is True
     assert body["reply"] == "收到。"
-    assert seen_headers["authorization"] == f"Bearer {secret}"
-    assert seen_payload["model"] == "deepseek-chat"
-    default_hint = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()["profile"][
+    assert seen["message"] == "你好"
+    assert seen["conversation_id"] == "personal"
+    assert seen["settings"]["api_key"] == secret
+    assert seen["settings"]["hermes_provider"] == "deepseek"
+    assert seen["settings"]["model"] == "deepseek-chat"
+    default_hint = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()["prompt"][
         "system_hint"
     ]
-    assert seen_payload["messages"] == [
-        {"role": "system", "content": default_hint},
-        {"role": "user", "content": "你好"},
-    ]
+    assert seen["settings"]["system_hint"] == default_hint
     assert secret not in response.text
 
 
-@pytest.mark.parametrize(
-    ("status_code", "payload", "expected_error"),
-    [
-        (401, {"error": {"message": "unauthorized"}}, "invalid_key"),
-        (402, {"error": {"message": "insufficient credits"}}, "quota_exceeded"),
-        (429, {"error": {"message": "rate limit"}}, "rate_limited"),
-        (404, {"error": {"message": "model not found"}}, "model_not_found"),
-    ],
-)
-def test_chat_runtime_http_errors_are_mapped_and_redacted(
-    daemon_client,
-    monkeypatch,
-    status_code,
-    payload,
-    expected_error,
-):
-    secret = "placeholder-chat-runtime-error-key"
-    _save_deepseek(daemon_client, secret)
+def test_chat_runtime_requires_provider_config_before_agent_loop(daemon_client, monkeypatch):
+    called = False
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status_code, json=payload)
+    def fake_run_agent_turn(**kwargs):
+        nonlocal called
+        called = True
+        return {"ok": True}
 
-    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+    monkeypatch.setattr(daemon_client.agent_runner, "_run_agent_turn", fake_run_agent_turn)
 
     response = daemon_client.client.post(
         "/chat/send",
@@ -104,17 +84,18 @@ def test_chat_runtime_http_errors_are_mapped_and_redacted(
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
-    assert body["error_code"] == expected_error
-    assert secret not in response.text
+    assert body["error_code"] == "setup_required"
+    assert "还没有设置 AI 服务" in body["message"]
+    assert called is False
 
 
-def test_chat_runtime_network_error_is_human_error(daemon_client, monkeypatch):
+def test_chat_runtime_agent_loop_errors_are_human_error(daemon_client, monkeypatch):
     _save_deepseek(daemon_client)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("mock chat connection failed", request=request)
+    def fake_run_agent_turn(**kwargs):
+        raise RuntimeError("provider secret should not leak")
 
-    _mock_chat_http_client(daemon_client, monkeypatch, handler)
+    monkeypatch.setattr(daemon_client.agent_runner, "_run_agent_turn", fake_run_agent_turn)
 
     response = daemon_client.client.post(
         "/chat/send",
@@ -125,5 +106,5 @@ def test_chat_runtime_network_error_is_human_error(daemon_client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
-    assert body["error_code"] == "network_error"
-    assert "连不上模型服务" in body["message"]
+    assert body["error_code"] == "unknown"
+    assert "聊天请求没有成功" in body["message"]

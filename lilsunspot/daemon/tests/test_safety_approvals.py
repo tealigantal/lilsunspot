@@ -23,13 +23,14 @@ def test_weixin_send_requires_token_and_creates_pending_approval(daemon_client):
     assert body["ok"] is False
     assert body["status"] == "approval_required"
     assert body["approval_required"] is True
-    assert "不会直接发送" in body["message"]
+    assert "安全审批" in body["message"]
 
     approval = body["approval"]
     assert approval["operation"] == "send_weixin_message"
     assert approval["status"] == "pending"
     assert approval["source"] == "weixin"
     assert approval["details"]["recipient"] == "文件传输助手"
+    assert approval["details"]["message"] == "帮我提醒一下明天开会。"
     assert approval["details"]["message_preview"] == "帮我提醒一下明天开会。"
     assert approval["details"]["message_length"] == len("帮我提醒一下明天开会。")
 
@@ -102,7 +103,7 @@ def test_weixin_command_handle_mode_and_approval_decision(daemon_client):
     unknown = client.post("/gateway/weixin/commands/handle", headers=headers, json={"text": "/unknown"})
     assert unknown.status_code == 200
     assert unknown.json()["ok"] is False
-    assert "没有识别" in unknown.json()["message"]
+    assert "不用输入代码式命令" in unknown.json()["message"]
 
 
 def test_safety_approval_request_redacts_sensitive_detail_fields(daemon_client):
@@ -134,3 +135,58 @@ def test_safety_approval_request_redacts_sensitive_detail_fields(daemon_client):
     assert daemon_client.token not in response.text
     assert "placeholder-api-key" not in response.text
     assert "placeholder-secret" not in response.text
+
+
+def test_hermes_tool_approval_decision_resolves_gateway_queue(daemon_client, monkeypatch):
+    calls = []
+
+    import tools.approval as hermes_approval
+
+    def fake_resolve_gateway_approval(session_key, choice, resolve_all=False):
+        calls.append((session_key, choice, resolve_all))
+        return 1
+
+    monkeypatch.setattr(hermes_approval, "resolve_gateway_approval", fake_resolve_gateway_approval)
+
+    created = daemon_client.client.post(
+        "/safety/approvals/request",
+        headers=daemon_client.headers,
+        json={
+            "operation": "hermes_tool_approval",
+            "summary": "Hermes 请求执行命令",
+            "details": {"session_key": "conv_unit", "command": "echo hello"},
+            "source": "hermes_agent_loop",
+        },
+    )
+    assert created.status_code == 200
+    approval_id = created.json()["approval"]["id"]
+
+    approved = daemon_client.client.post(
+        f"/safety/approvals/{approval_id}/decide",
+        headers=daemon_client.headers,
+        json={"decision": "approved"},
+    )
+
+    assert approved.status_code == 200
+    assert approved.json()["hermes_approval_resolved"] == 1
+    assert calls == [("conv_unit", "once", False)]
+
+    rejected_id = daemon_client.client.post(
+        "/safety/approvals/request",
+        headers=daemon_client.headers,
+        json={
+            "operation": "hermes_tool_approval",
+            "summary": "Hermes 请求执行命令",
+            "details": {"session_key": "conv_unit_2", "command": "rm file"},
+            "source": "hermes_agent_loop",
+        },
+    ).json()["approval"]["id"]
+
+    rejected = daemon_client.client.post(
+        f"/safety/approvals/{rejected_id}/decide",
+        headers=daemon_client.headers,
+        json={"decision": "rejected"},
+    )
+
+    assert rejected.status_code == 200
+    assert calls[-1] == ("conv_unit_2", "deny", False)

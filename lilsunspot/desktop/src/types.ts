@@ -157,6 +157,14 @@ export type ChatSendResult =
       conversation_id: string | null;
       conversation_id_supported: boolean;
       conversation_id_requested: boolean;
+      mode_intent?: {
+        kind?: string;
+        mode?: string | null;
+        slider?: string | null;
+        delta?: number;
+        [key: string]: unknown;
+      };
+      mode?: CurrentMode;
     }
   | {
       ok: false;
@@ -164,6 +172,74 @@ export type ChatSendResult =
       message: string;
       suggestion: string;
     };
+
+export type Conversation = {
+  id: string;
+  title: string;
+  kind: string;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type AttachmentSummaryStatus =
+  | "pending"
+  | "ready"
+  | "recognized"
+  | "preview_only"
+  | "unsupported"
+  | "unreadable"
+  | "too_large"
+  | string;
+
+export type ConversationAttachment = {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  summary_status: AttachmentSummaryStatus;
+  summary_text: string;
+  preview_data_url: string;
+  reason_cn: string;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ConversationMessage = {
+  id: string;
+  conversation_id: string;
+  source: "desktop" | "weixin" | "assistant" | "system" | string;
+  role: "user" | "assistant" | "system" | string;
+  text: string;
+  attachments: ConversationAttachment[];
+  created_at: string;
+  status: "sent" | "received" | "error" | string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ConversationSendResult = {
+  ok: boolean;
+  user_message: ConversationMessage;
+  assistant_message: ConversationMessage;
+  chat: ChatSendResult;
+};
+
+export type LilsunspotEvent = {
+  id: number;
+  event: string;
+  data: {
+    conversation_id?: string;
+    message_id?: string;
+    message?: ConversationMessage;
+    attachment?: ConversationAttachment;
+    mode?: CurrentMode;
+    approval?: SafetyApproval;
+    [key: string]: unknown;
+  };
+};
 
 export type ModeProfile = {
   id: string;

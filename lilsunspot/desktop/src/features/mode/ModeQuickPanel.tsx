@@ -1,28 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CurrentMode, ModeProfile } from "../../types";
-import { getCurrentMode, getModes, selectMode } from "../../api";
+import type { ModeProfile } from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
+import { useModeState } from "./ModeState";
 import { ModeSlider } from "./ModeSlider";
-
-type ModeQuickPanelProps = {
-  variant?: "compact" | "page";
-  onModeChanged?: (mode: CurrentMode) => void;
-};
 
 const PRESETS = [
   { id: "pragmatic", label: "务实", tagline: "先结论，再步骤" },
   { id: "balanced", label: "均衡", tagline: "有解释，但不啰嗦" },
-  { id: "emotional", label: "感性", tagline: "先承接，再建议" }
+  { id: "emotional", label: "感性", tagline: "先承接，再建议" },
+  { id: "custom", label: "自定义", tagline: "手动滑杆组合" }
 ];
 
 export function modeName(modeId?: string) {
   const names: Record<string, string> = {
-    default: "默认",
     pragmatic: "务实",
     balanced: "均衡",
-    emotional: "感性"
+    emotional: "感性",
+    custom: "自定义"
   };
-  return modeId ? names[modeId] || modeId : "默认";
+  return modeId ? names[modeId] || modeId : "均衡";
 }
 
 function previewCopy(modeId: string, styleAxis: number, detailLevel: number, autonomyLevel: number) {
@@ -43,7 +39,7 @@ function previewCopy(modeId: string, styleAxis: number, detailLevel: number, aut
   return [
     "先做最小闭环：本地 daemon、Provider 保存、桌面聊天。",
     "再把输出模式接入系统提示，让回答风格可控。",
-    detailLevel > 55 ? "最后补微信命令、安全审批和诊断导出，保证每个入口都能解释清楚当前状态。" : "最后补微信、审批和诊断。"
+    detailLevel > 55 ? "最后补微信、审批和诊断，保证每个入口都能解释清楚当前状态。" : "最后补微信、审批和诊断。"
   ];
 }
 
@@ -59,44 +55,19 @@ function sliderSummary(styleAxis: number, detailLevel: number, autonomyLevel: nu
   return `${style}；${detail}；${autonomy}。`;
 }
 
-export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPanelProps) {
-  const [modes, setModes] = useState<ModeProfile[]>([]);
-  const [current, setCurrent] = useState<CurrentMode | null>(null);
+export function ModeQuickPanel() {
+  const { modes, current, busy, status, saveMode, setStatus } = useModeState();
   const [selectedMode, setSelectedMode] = useState("balanced");
   const [styleAxis, setStyleAxis] = useState(45);
   const [detailLevel, setDetailLevel] = useState(60);
   const [autonomyLevel, setAutonomyLevel] = useState(60);
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
-    async function load() {
-      setBusy(true);
-      try {
-        const [modeList, mode] = await Promise.all([getModes(), getCurrentMode()]);
-        if (!mounted) {
-          return;
-        }
-        setModes(modeList);
-        applyMode(mode.profile, mode.current);
-        setCurrent(mode);
-        onModeChanged?.(mode);
-      } catch (error) {
-        if (mounted) {
-          setStatus(error instanceof Error ? error.message : "输出模式读取失败。");
-        }
-      } finally {
-        if (mounted) {
-          setBusy(false);
-        }
-      }
+    if (!current) {
+      return;
     }
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    applyMode(current.profile, current.current);
+  }, [current?.current, current?.profile.style_axis, current?.profile.detail_level, current?.profile.autonomy_level]);
 
   const selectedProfile = useMemo(
     () => modes.find((mode) => mode.id === selectedMode) || modes.find((mode) => mode.id === "balanced") || modes[0],
@@ -128,8 +99,11 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
     setAutonomyLevel(profile.autonomy_level);
   }
 
-  async function choosePreset(modeId: string) {
-    const profile = modes.find((item) => item.id === modeId);
+  function choosePreset(modeId: string) {
+    const profile =
+      modeId === "custom"
+        ? current?.profile || modes.find((item) => item.id === "custom") || modes.find((item) => item.id === "balanced")
+        : modes.find((item) => item.id === modeId);
     if (profile) {
       applyMode(profile, modeId);
     } else {
@@ -137,34 +111,40 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
     }
   }
 
+  function updateCustomSlider(key: "style_axis" | "detail_level" | "autonomy_level", value: number) {
+    setSelectedMode("custom");
+    if (key === "style_axis") {
+      setStyleAxis(value);
+    } else if (key === "detail_level") {
+      setDetailLevel(value);
+    } else {
+      setAutonomyLevel(value);
+    }
+  }
+
   async function save() {
-    setBusy(true);
     setStatus("");
     try {
-      const result = await selectMode(selectedMode, {
+      const result = await saveMode(selectedMode, {
         style_axis: styleAxis,
         detail_level: detailLevel,
         autonomy_level: autonomyLevel
       });
       applyMode(result.profile, result.current);
-      setCurrent(result);
-      onModeChanged?.(result);
       setStatus(`已保存为${modeName(result.current)}输出模式。`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "输出模式保存失败。");
-    } finally {
-      setBusy(false);
     }
   }
 
   return (
-    <section className={`modeQuickPanel ${variant === "compact" ? "modeQuickPanelCompact" : "modeQuickPanelPage"}`}>
+    <section className="modeQuickPanel modeQuickPanelCompact">
       <div className="settingsHeader modeHeader">
         <div>
-          <h3>{variant === "compact" ? "模式混音器" : "输出模式不是设置页，是回答风格的调音台"}</h3>
-          <p>{variant === "compact" ? "下一条消息会使用这个偏好。" : "拖动后立即看到预览；保存后下一条桌面聊天会使用这个偏好，微信私聊仍待接入。"}</p>
+          <h3>模式混音器</h3>
+          <p>下一条消息会使用这个偏好。</p>
         </div>
-        <StatusBadge tone="ok">{variant === "compact" ? modeName(current?.current) : `当前：${modeName(current?.current)}`}</StatusBadge>
+        <StatusBadge tone="ok">{modeName(current?.current)}</StatusBadge>
       </div>
       <div className="presetRow presetCards">
         {PRESETS.map((preset) => (
@@ -175,48 +155,66 @@ export function ModeQuickPanel({ variant = "page", onModeChanged }: ModeQuickPan
             onClick={() => void choosePreset(preset.id)}
           >
             <strong>{preset.label}</strong>
-            {variant === "page" && <span>{preset.tagline}</span>}
+            <span>{preset.tagline}</span>
             {current?.current === preset.id && <em>当前</em>}
           </button>
         ))}
       </div>
       <div className="modeMixerBody">
         <div className="sliderGrid">
-          <ModeSlider label="唱 / 表达" left="务实" right="感性" value={styleAxis} tone="cyan" onChange={setStyleAxis} />
-          <ModeSlider label="RAP / 细节" left="简短" right="详细" value={detailLevel} tone="yellow" onChange={setDetailLevel} />
-          <ModeSlider label="篮球 / 自主" left="确认" right="推进" value={autonomyLevel} tone="orange" onChange={setAutonomyLevel} />
+          <ModeSlider
+            label="风格 / 表达"
+            left="务实"
+            right="感性"
+            value={styleAxis}
+            tone="cyan"
+            onChange={(value) => updateCustomSlider("style_axis", value)}
+          />
+          <ModeSlider
+            label="长度 / 细节"
+            left="简短"
+            right="详细"
+            value={detailLevel}
+            tone="yellow"
+            onChange={(value) => updateCustomSlider("detail_level", value)}
+          />
+          <ModeSlider
+            label="确认 / 自主"
+            left="确认"
+            right="推进"
+            value={autonomyLevel}
+            tone="orange"
+            onChange={(value) => updateCustomSlider("autonomy_level", value)}
+          />
         </div>
-        {variant === "page" && (
-          <aside className="modePreviewPanel">
-            <h3>实时预览</h3>
-            <span>固定测试问题</span>
-            <strong>我想做一个个人 agent，第一步怎么做？</strong>
-            <div>
-              <em>{modeName(selectedMode)}模式输出示例</em>
-              {preview.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-            {promptLayers.length > 0 && (
-              <ul className="modePromptLayers" aria-label="Prompt 编译层">
-                {promptLayers.map((layer) => (
-                  <li key={layer.id}>
-                    <b>{layer.label}</b>
-                    <span>{layer.summary}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="modeSliderSummary">当前滑杆：{localSliderSummary}</p>
-          </aside>
+      </div>
+      <aside className="modePreviewPanel">
+        <h3>实时预览</h3>
+        <span>固定测试问题</span>
+        <strong>我想做一个个人 agent，第一步怎么做？</strong>
+        <div>
+          <em>{modeName(selectedMode)}模式输出示例</em>
+          {preview.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+        {promptLayers.length > 0 && (
+          <ul className="modePromptLayers" aria-label="Prompt 编译层">
+            {promptLayers.map((layer) => (
+              <li key={layer.id}>
+                <b>{layer.label}</b>
+                <span>{layer.summary}</span>
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
-      {selectedProfile && variant === "page" && <p className="mutedText">{selectedProfile.description}</p>}
-      <div className="actionRow">
-        <button type="button" onClick={save} disabled={busy || !selectedMode}>
-          {busy ? "保存中" : "保存输出模式"}
-        </button>
-      </div>
+        <p className="modeSliderSummary">当前滑杆：{localSliderSummary}</p>
+        <div className="actionRow modePreviewActions">
+          <button type="button" onClick={save} disabled={busy || !selectedMode}>
+            {busy ? "保存中" : "保存输出模式"}
+          </button>
+        </div>
+      </aside>
       {status && <p className="inlineStatus">{status}</p>}
     </section>
   );

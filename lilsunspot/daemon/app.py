@@ -6,14 +6,18 @@ import webbrowser
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from lilsunspot import __version__
 
+from . import conversations
+from .attachments import AttachmentError, is_safe_stored_attachment
 from .auth import load_or_create_token, require_token
-from .chat_client import current_runtime_model, send_chat_message
+from .agent_runner import delete_hermes_session, send_agent_message
+from .chat_client import current_runtime_model
 from .config_paths import ensure_runtime_dirs
 from .doctor import repair_placeholder, run_doctor_checks
 from .gateway import (
@@ -26,8 +30,10 @@ from .gateway import (
     weixin_commands,
     weixin_status,
 )
+from .hermes_compat import audit_hermes_compatibility
 from .hermes_runtime import HermesRuntimeError, save_provider_credentials
 from .logging_utils import configure_logging
+from .mode_intents import apply_mode_intent
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
 from .providers import load_provider_registry, provider_by_id
@@ -73,6 +79,7 @@ os.environ["HERMES_HOME"] = str(paths.hermes_home)
 logger = configure_logging(paths.logs_dir)
 load_or_create_token()
 runtime_descriptor = write_runtime_descriptor(BIND_HOST, BIND_PORT, paths)
+conversations.ensure_schema(paths)
 logger.info(
     "daemon runtime discovery written base_url=%s pid=%s",
     runtime_descriptor["base_url"],
@@ -107,7 +114,7 @@ app.add_middleware(
         "https://tauri.localhost",
     ],
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Lilsunspot-Token"],
+    allow_headers=["Content-Type", "X-Lilsunspot-Token", "Last-Event-ID"],
 )
 
 
@@ -139,6 +146,22 @@ class ChatSendRequest(BaseModel):
     conversation_id: str | None = None
 
 
+class ConversationMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str | None = None
+    kind: str = "desktop"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str | None = None
+    archived: bool | None = None
+    weixin_route_active: bool | None = None
+
+
 class SelectModeRequest(BaseModel):
     mode: str = Field(..., min_length=1)
     style_axis: int | None = None
@@ -168,6 +191,7 @@ class WeixinCommandRequest(BaseModel):
 class WeixinSendRequest(BaseModel):
     recipient: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class RepairRequest(BaseModel):
@@ -293,6 +317,7 @@ async def app_bootstrap() -> dict[str, Any]:
 async def runtime_info() -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
     runtime_model = current_runtime_model(runtime_paths)
+    compatibility = audit_hermes_compatibility()
     return {
         "data_dir": str(runtime_paths.data_dir),
         "hermes_home": str(runtime_paths.hermes_home),
@@ -307,6 +332,11 @@ async def runtime_info() -> dict[str, Any]:
         "configured": runtime_model["configured"],
         "provider": runtime_model["provider"],
         "model": runtime_model["model"],
+        "hermes_compatibility": {
+            "ok": compatibility["ok"],
+            "hermes_version": compatibility["hermes_version"],
+            "upstream_commit": compatibility["upstream_commit"],
+        },
     }
 
 
@@ -394,7 +424,211 @@ async def modes_select(payload: SelectModeRequest) -> dict[str, Any]:
 
 @app.post("/chat/send", dependencies=[Depends(require_token)])
 async def chat_send(payload: ChatSendRequest) -> dict[str, Any]:
-    return await send_chat_message(payload.message, payload.conversation_id)
+    result = await _send_conversation_message(
+        payload.message,
+        conversation_id=payload.conversation_id or conversations.PERSONAL_CONVERSATION_ID,
+        source="desktop",
+    )
+    return result["chat"]
+
+
+async def _send_conversation_message(
+    message: str,
+    *,
+    conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
+    source: str = "desktop",
+) -> dict[str, Any]:
+    runtime_paths = ensure_runtime_dirs()
+    user_message = conversations.create_message(
+        conversation_id=conversation_id,
+        source=source,
+        role="user",
+        text=message,
+        status="sent",
+        metadata={"entry": source},
+    )
+    mode_intent = await apply_mode_intent(message, runtime_paths)
+    if mode_intent is not None:
+        assistant_message = conversations.create_message(
+            conversation_id=conversation_id,
+            source="assistant",
+            role="assistant",
+            text=str(mode_intent.get("message") or ""),
+            status="sent",
+            metadata={
+                "kind": "mode_intent",
+                "changed": mode_intent.get("changed"),
+                "mode": (mode_intent.get("mode") or {}).get("current") if isinstance(mode_intent.get("mode"), dict) else None,
+            },
+        )
+        runtime_model = current_runtime_model(runtime_paths)
+        return {
+            "ok": True,
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "chat": {
+                "ok": True,
+                "reply": assistant_message["text"],
+                "engine": "lilsunspot_mode_router",
+                "provider": runtime_model.get("provider") or "",
+                "model": runtime_model.get("model") or "",
+                "conversation_id": None,
+                "conversation_id_supported": False,
+                "conversation_id_requested": bool(conversation_id),
+                "mode_intent": mode_intent.get("intent"),
+                "mode": mode_intent.get("mode"),
+            },
+        }
+    chat_result = await send_agent_message(
+        message,
+        conversation_id,
+        runtime_paths,
+        current_message_id=user_message["id"],
+    )
+    if chat_result.get("ok"):
+        assistant_message = conversations.create_message(
+            conversation_id=conversation_id,
+            source="assistant",
+            role="assistant",
+            text=str(chat_result.get("reply") or ""),
+            status="sent",
+            metadata={
+                "engine": chat_result.get("engine"),
+                "provider": chat_result.get("provider"),
+                "model": chat_result.get("model"),
+                "hermes_session_id": chat_result.get("hermes_session_id"),
+            },
+        )
+    else:
+        assistant_message = conversations.create_message(
+            conversation_id=conversation_id,
+            source="assistant",
+            role="assistant",
+            text=f"{chat_result.get('message', '聊天请求没有成功。')}\n{chat_result.get('suggestion', '')}".strip(),
+            status="error",
+            metadata={"error_code": chat_result.get("error_code")},
+        )
+    return {"ok": bool(chat_result.get("ok")), "user_message": user_message, "assistant_message": assistant_message, "chat": chat_result}
+
+
+@app.get("/conversations", dependencies=[Depends(require_token)])
+async def api_conversations(include_archived: bool = False) -> dict[str, Any]:
+    return {"conversations": conversations.list_conversations(include_archived=include_archived)}
+
+
+@app.post("/conversations", dependencies=[Depends(require_token)])
+async def api_conversation_create(payload: ConversationCreateRequest) -> dict[str, Any]:
+    metadata = payload.metadata if isinstance(payload.metadata, dict) else {}
+    kind = (payload.kind or "desktop").strip() or "desktop"
+    route = metadata.get("weixin_route") if isinstance(metadata.get("weixin_route"), dict) else None
+    if kind == "weixin" and route:
+        conversation = conversations.create_weixin_conversation(route, title=payload.title)
+    else:
+        conversation = conversations.create_conversation(title=payload.title, kind=kind, metadata=metadata)
+    return {"conversation": conversation}
+
+
+@app.get("/conversations/{conversation_id}/messages", dependencies=[Depends(require_token)])
+async def api_conversation_messages(
+    conversation_id: str,
+    after_id: str | None = None,
+    limit: int = conversations.DEFAULT_MESSAGE_LIMIT,
+) -> dict[str, Any]:
+    return {
+        "conversation_id": conversation_id,
+        "messages": conversations.list_messages(conversation_id, after_id=after_id, limit=limit),
+    }
+
+
+@app.post("/conversations/{conversation_id}/messages", dependencies=[Depends(require_token)])
+async def api_conversation_message_send(
+    conversation_id: str,
+    payload: ConversationMessageRequest,
+) -> dict[str, Any]:
+    return await _send_conversation_message(payload.message, conversation_id=conversation_id, source="desktop")
+
+
+@app.patch("/conversations/{conversation_id}", dependencies=[Depends(require_token)])
+async def api_conversation_update(
+    conversation_id: str,
+    payload: ConversationUpdateRequest,
+) -> dict[str, Any]:
+    if payload.weixin_route_active is True:
+        conversation = conversations.set_weixin_conversation_active(conversation_id)
+    else:
+        conversation = conversations.update_conversation(
+            conversation_id,
+            title=payload.title,
+            archived=payload.archived,
+        )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
+    return {"conversation": conversation}
+
+
+@app.delete("/conversations/{conversation_id}", dependencies=[Depends(require_token)])
+async def api_conversation_delete(conversation_id: str) -> dict[str, Any]:
+    conversation = conversations.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
+    session_id = conversations.hermes_session_id(conversation, conversation_id)
+    deleted = conversations.delete_conversation(conversation_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
+    hermes_deleted = delete_hermes_session(session_id)
+    return {
+        "ok": True,
+        "conversation_id": conversation_id,
+        "hermes_session_id": session_id,
+        "hermes_deleted": hermes_deleted,
+    }
+
+
+@app.get("/attachments/{attachment_id}", dependencies=[Depends(require_token)])
+async def api_attachment(attachment_id: str) -> dict[str, Any]:
+    attachment = conversations.get_attachment(attachment_id, include_safe_path=True)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="没有找到这个附件。")
+    try:
+        safe_path = is_safe_stored_attachment(str(attachment.get("safe_path") or ""))
+    except AttachmentError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    attachment["safe_path"] = str(safe_path)
+    return {"attachment": attachment}
+
+
+@app.get("/events/stream", dependencies=[Depends(require_token)])
+async def api_events_stream(
+    request: Request,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    try:
+        cursor = int(last_event_id or request.query_params.get("after_id") or "0")
+    except ValueError:
+        cursor = 0
+
+    async def event_stream():
+        nonlocal cursor
+        while True:
+            if await request.is_disconnected():
+                break
+            events = await conversations.wait_for_events_after(cursor, timeout_seconds=15.0)
+            if not events:
+                yield ": keepalive\n\n"
+                continue
+            for event in events:
+                cursor = int(event["id"])
+                yield conversations.format_sse_event(event)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/gateway/weixin/status", dependencies=[Depends(require_token)])
@@ -437,7 +671,7 @@ async def gateway_weixin_command_handle(payload: WeixinCommandRequest) -> dict[s
 @app.post("/gateway/weixin/send", dependencies=[Depends(require_token)])
 async def gateway_weixin_send(payload: WeixinSendRequest) -> dict[str, Any]:
     try:
-        return request_weixin_send_approval(payload.recipient, payload.message)
+        return request_weixin_send_approval(payload.recipient, payload.message, payload.attachment_ids)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -468,11 +702,20 @@ async def safety_approval_request(payload: ApprovalRequest) -> dict[str, Any]:
 @app.post("/safety/approvals/{approval_id}/decide", dependencies=[Depends(require_token)])
 async def safety_approval_decide(approval_id: str, payload: ApprovalDecisionRequest) -> dict[str, Any]:
     try:
-        return decide_approval(approval_id, payload.decision)
+        result = decide_approval(approval_id, payload.decision)
     except ApprovalNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result["approval"].get("status") == "approved" and result["approval"].get("operation") == "send_weixin_message":
+        from .weixin_runtime import send_approved_weixin_action
+
+        result["delivery"] = await send_approved_weixin_action(result["approval"])
+        conversations.append_event(
+            "approval.delivery_updated",
+            {"approval": result["approval"], "delivery": result["delivery"]},
+        )
+    return result
 
 
 @app.post("/safety/approvals/placeholder", dependencies=[Depends(require_token)])

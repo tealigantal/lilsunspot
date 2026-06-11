@@ -24,11 +24,13 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.hermes_runtime as hermes_runtime
     import lilsunspot.daemon.logging_utils as logging_utils
     import lilsunspot.daemon.mode_intents as mode_intents
+    import lilsunspot.daemon.product_features as product_features
     import lilsunspot.daemon.modes as modes
     import lilsunspot.daemon.provider_client as provider_client
     import lilsunspot.daemon.providers as providers
     import lilsunspot.daemon.runtime_discovery as runtime_discovery
     import lilsunspot.daemon.safety as safety
+    import lilsunspot.daemon.turn_coalescer as turn_coalescer
     import lilsunspot.daemon.weixin_runtime as weixin_runtime
     import lilsunspot.daemon.app as app_module
 
@@ -48,8 +50,12 @@ def daemon_client(tmp_path, monkeypatch):
     hermes_compat = importlib.reload(hermes_compat)
     gateway = importlib.reload(gateway)
     safety = importlib.reload(safety)
+    turn_coalescer = importlib.reload(turn_coalescer)
+    turn_coalescer.reset_for_tests()
+    turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.01
     weixin_runtime = importlib.reload(weixin_runtime)
     doctor = importlib.reload(doctor)
+    product_features = importlib.reload(product_features)
     app_module = importlib.reload(app_module)
 
     client = TestClient(app_module.app)
@@ -69,6 +75,8 @@ def daemon_client(tmp_path, monkeypatch):
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,
         mode_intents=mode_intents,
+        product_features=product_features,
         token=token,
+        turn_coalescer=turn_coalescer,
         weixin_runtime=weixin_runtime,
     )

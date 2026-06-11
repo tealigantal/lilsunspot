@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
@@ -20,6 +22,35 @@ def base_url_for(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
+def process_metadata() -> dict[str, Any]:
+    packaged = bool(getattr(sys, "frozen", False))
+    pyinstaller = packaged and hasattr(sys, "_MEIPASS")
+    packager = "pyinstaller" if pyinstaller else ""
+    process_model = "python_process"
+    note_cn = "开发环境本地服务通常只有一个 Python 进程。"
+    if pyinstaller:
+        executable_dir = Path(sys.executable).resolve().parent
+        bundle_dir = Path(str(getattr(sys, "_MEIPASS", ""))).resolve()
+        if bundle_dir == executable_dir or executable_dir in bundle_dir.parents:
+            process_model = "pyinstaller_onedir_single_process"
+            note_cn = "安装版本地服务使用 PyInstaller onedir 打包，任务管理器里通常只会看到一个 lilsunspotd.exe 服务进程。"
+        else:
+            process_model = "pyinstaller_onefile_parent_child"
+            note_cn = (
+                "安装版本地服务使用 PyInstaller onefile 打包，Windows 任务管理器里可能同时看到父进程和服务子进程；"
+                "runtime pid 是实际监听 127.0.0.1 端口的服务进程。"
+            )
+    return {
+        "pid": os.getpid(),
+        "parent_pid": os.getppid(),
+        "executable": sys.executable,
+        "packaged": packaged,
+        "packager": packager,
+        "process_model": process_model,
+        "note_cn": note_cn,
+    }
+
+
 def build_runtime_descriptor(
     host: str,
     port: int,
@@ -28,13 +59,17 @@ def build_runtime_descriptor(
     pid: int | None = None,
 ) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
+    process = process_metadata()
+    if pid is not None:
+        process = {**process, "pid": pid}
     return {
         "type": RUNTIME_DESCRIPTOR_TYPE,
         "version": RUNTIME_DESCRIPTOR_VERSION,
         "base_url": base_url_for(host, port),
         "host": host,
         "port": port,
-        "pid": pid if pid is not None else os.getpid(),
+        "pid": process["pid"],
+        "process": process,
         "data_dir": str(runtime_paths.data_dir),
         "token_file": str(runtime_paths.token_file),
         "started_at": datetime.now(timezone.utc).isoformat(),

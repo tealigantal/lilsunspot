@@ -23,6 +23,46 @@ MODE_LABELS = {
     "custom": "自定义",
 }
 
+MODE_STYLE_KEYWORDS = {
+    "务实",
+    "理性",
+    "冷静",
+    "均衡",
+    "平衡",
+    "感性",
+    "温柔",
+}
+
+MODE_CONTROL_KEYWORDS = {
+    "模式",
+    "风格",
+    "切到",
+    "切换",
+    "调成",
+    "调整",
+    "调到",
+    "调为",
+    "改成",
+    "换成",
+    "当前",
+    "现在",
+    "以后",
+    "接下来",
+    "回答再",
+    "回复再",
+    "回答详细",
+    "回复详细",
+    "更详细",
+    "再详细",
+    "回答简短",
+    "回复简短",
+    "更简短",
+    "再简短",
+    "短一点",
+    "主动",
+    "谨慎",
+}
+
 
 @dataclass(frozen=True)
 class ModeIntent:
@@ -39,6 +79,17 @@ def _is_short_router_candidate(text: str) -> bool:
     if "\n" in value or "\r" in value:
         return False
     return len(value) <= MODE_ROUTER_MAX_INPUT_CHARS
+
+
+def is_mode_intent_candidate(text: str) -> bool:
+    value = text.strip()
+    if not _is_short_router_candidate(value):
+        return False
+    if any(keyword in value for keyword in MODE_CONTROL_KEYWORDS):
+        return True
+    if "一点" in value and any(keyword in value for keyword in MODE_STYLE_KEYWORDS):
+        return True
+    return False
 
 
 def _router_prompt(modes: list[dict[str, Any]], current: dict[str, Any]) -> str:
@@ -216,6 +267,8 @@ async def _route_mode_intent_with_model(text: str, paths: RuntimePaths) -> ModeI
 
 
 async def detect_mode_intent(text: str, paths: RuntimePaths | None = None) -> ModeIntent | None:
+    if not is_mode_intent_candidate(text):
+        return None
     return await _route_mode_intent_with_model(text, paths or ensure_runtime_dirs())
 
 

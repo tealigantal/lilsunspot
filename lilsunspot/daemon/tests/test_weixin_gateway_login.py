@@ -30,11 +30,12 @@ def _patch_weixin_gateway(monkeypatch, responses):
 
 
 class FakeWeixinAdapter:
-    def __init__(self):
+    def __init__(self, *, connect_success: bool = True):
         self.handler = None
         self.fatal_handler = None
         self.is_connected = False
         self.disconnected = False
+        self.connect_success = connect_success
 
     def set_message_handler(self, handler):
         self.handler = handler
@@ -43,8 +44,8 @@ class FakeWeixinAdapter:
         self.fatal_handler = handler
 
     async def connect(self):
-        self.is_connected = True
-        return True
+        self.is_connected = self.connect_success
+        return self.connect_success
 
     async def disconnect(self):
         self.disconnected = True
@@ -131,6 +132,136 @@ def test_weixin_qr_login_confirm_saves_credentials_without_response_leak(daemon_
     assert status["status"] == "connected"
     assert status["capabilities"]["private_chat"] is True
     assert status["bot_profile"]["nickname"] == "小黑子"
+
+
+def test_weixin_confirm_rejects_incomplete_payload_as_fake_login(daemon_client, monkeypatch):
+    credential_value = "unit-test-incomplete-credential"
+    _patch_weixin_gateway(
+        monkeypatch,
+        [
+            {
+                "status": "confirmed",
+                "ilink_bot_id": "bot_account_incomplete",
+                "bot_token": credential_value,
+                "baseurl": "https://ilink-unit.example",
+            },
+        ],
+    )
+
+    client = daemon_client.client
+    headers = daemon_client.headers
+
+    start = client.post("/gateway/weixin/login/start", headers=headers)
+    assert start.status_code == 200
+
+    confirmed = client.get("/gateway/weixin/login/status", headers=headers)
+    assert confirmed.status_code == 200
+    body = confirmed.json()
+    assert body["connected"] is False
+    assert body["status"] == "error"
+    assert body["login_verification"]["state"] == "failed"
+    assert "fake_login_incomplete_credentials" in body["login_verification"]["risk_flags"]
+    assert "没有通过验证" in body["message"]
+    assert credential_value not in confirmed.text
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    assert not (paths.data_dir / "weixin-state.json").exists()
+    assert not (paths.hermes_home / "weixin" / "accounts" / "bot_account_incomplete.json").exists()
+
+
+def test_weixin_confirm_requires_runtime_connection_before_connected(daemon_client, monkeypatch):
+    credential_value = "unit-test-runtime-failed-credential"
+    fake_adapter = FakeWeixinAdapter(connect_success=False)
+
+    def make_adapter(credentials):
+        assert credentials["account_id"] == "bot_account_runtime_failed"
+        return fake_adapter
+
+    monkeypatch.setattr(daemon_client.weixin_runtime, "_make_weixin_adapter", make_adapter)
+    _patch_weixin_gateway(
+        monkeypatch,
+        [
+            {
+                "status": "confirmed",
+                "ilink_bot_id": "bot_account_runtime_failed",
+                "bot_token": credential_value,
+                "baseurl": "https://ilink-runtime-failed.example",
+                "ilink_user_id": "user_runtime_failed",
+            },
+        ],
+    )
+
+    client = daemon_client.client
+    headers = daemon_client.headers
+
+    start = client.post("/gateway/weixin/login/start", headers=headers)
+    assert start.status_code == 200
+    confirmed = client.get("/gateway/weixin/login/status", headers=headers)
+
+    assert confirmed.status_code == 200
+    body = confirmed.json()
+    assert body["connected"] is False
+    assert body["status"] == "error"
+    assert body["runtime"]["running"] is False
+    assert body["login_verification"]["state"] == "failed"
+    assert "fake_login_verification_failed" in body["login_verification"]["risk_flags"]
+    assert "微信运行时没有连接成功" in body["message"]
+    assert credential_value not in confirmed.text
+    assert fake_adapter.is_connected is False
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    assert not (paths.data_dir / "weixin-state.json").exists()
+    assert not (paths.hermes_home / "weixin" / "accounts" / "bot_account_runtime_failed.json").exists()
+
+
+def test_weixin_login_detects_user_scan_cancel_or_wrong_qr(daemon_client, monkeypatch):
+    _patch_weixin_gateway(monkeypatch, [{"status": "scaned"}, {"status": "wait"}])
+    client = daemon_client.client
+    headers = daemon_client.headers
+
+    start = client.post("/gateway/weixin/login/start", headers=headers)
+    assert start.status_code == 200
+    scanned = client.get("/gateway/weixin/login/status", headers=headers)
+    assert scanned.status_code == 200
+    assert scanned.json()["status"] == "scanned"
+
+    waiting_again = client.get("/gateway/weixin/login/status", headers=headers)
+    assert waiting_again.status_code == 200
+    body = waiting_again.json()
+    assert body["status"] == "qr_pending"
+    assert body["login_verification"]["state"] == "attention"
+    assert "user_scan_cancelled_or_wrong_qr" in body["login"]["risk_flags"]
+    assert "误点取消" in body["login"]["poll_warning"]
+    assert body["ok"] is True
+
+    still_waiting = client.get("/gateway/weixin/login/status", headers=headers)
+    assert still_waiting.status_code == 200
+    assert "user_scan_cancelled_or_wrong_qr" in still_waiting.json()["login"]["risk_flags"]
+    assert "误点取消" in still_waiting.json()["login"]["poll_warning"]
+
+
+def test_weixin_login_warns_when_scan_confirmation_takes_too_long(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    _patch_weixin_gateway(monkeypatch, [{"status": "scaned"}])
+    client = daemon_client.client
+    headers = daemon_client.headers
+
+    start = client.post("/gateway/weixin/login/start", headers=headers)
+    assert start.status_code == 200
+    scanned = client.get("/gateway/weixin/login/status", headers=headers)
+    assert scanned.status_code == 200
+    assert gateway._active_login is not None
+    gateway._active_login.scanned_at = time.time() - gateway.WEIXIN_SCANNED_CONFIRM_WARNING_SECONDS - 1
+
+    status = client.get("/gateway/weixin/status", headers=headers)
+    body = status.json()
+
+    assert status.status_code == 200
+    assert body["status"] == "scanned"
+    assert body["login_verification"]["state"] == "attention"
+    assert "user_confirmation_delayed" in body["login"]["risk_flags"]
+    assert "长时间没有确认" in body["login"]["poll_warning"]
 
 
 def test_weixin_qr_expiry_and_disconnect_clear_product_state(daemon_client, monkeypatch):
@@ -330,6 +461,71 @@ def test_weixin_login_status_does_not_save_credentials_after_disconnect(daemon_c
     account_file = paths.hermes_home / "weixin" / "accounts" / "bot_status_race.json"
     assert not state_path.exists()
     assert not account_file.exists()
+
+
+def test_weixin_login_status_transient_error_keeps_waiting(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    calls = 0
+
+    async def fake_api_get(*, base_url: str, endpoint: str) -> dict[str, object]:
+        nonlocal calls
+        if endpoint == gateway._weixin_login_qr_endpoint():
+            return {
+                "qrcode": "transient-error-qr",
+                "qrcode_img_content": "https://weixin.example/scan/transient-error-qr",
+            }
+        calls += 1
+        raise RuntimeError("temporary ilink failure")
+
+    monkeypatch.setattr(gateway, "_weixin_requirements_available", lambda: True)
+    monkeypatch.setattr(gateway, "_weixin_api_get", fake_api_get)
+    monkeypatch.setattr(gateway, "_make_qr_image_data_url", lambda qr_payload: "data:image/svg+xml;base64,transient")
+
+    started = daemon_client.client.post("/gateway/weixin/login/start", headers=daemon_client.headers)
+    assert started.status_code == 200
+
+    polled = daemon_client.client.get("/gateway/weixin/login/status", headers=daemon_client.headers)
+    assert polled.status_code == 200
+    body = polled.json()
+    assert body["status"] == "qr_pending"
+    assert body["ok"] is True
+    assert "自动重试" in body["login"]["poll_warning"]
+    assert "出错" not in body["message"]
+    assert calls == 1
+
+
+def test_weixin_status_connected_wins_over_stale_login_error(daemon_client, monkeypatch):
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    state_path = paths.data_dir / "weixin-state.json"
+    state_path.write_text(json.dumps({"account_id": "connected_unit", "connected_at": "now"}), encoding="utf-8")
+    account_dir = paths.hermes_home / "weixin" / "accounts"
+    account_dir.mkdir(parents=True, exist_ok=True)
+    (account_dir / "connected_unit.json").write_text(
+        json.dumps({"token": "stored-value", "user_id": "wx_user", "base_url": "https://ilink-unit.example"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gateway, "_weixin_requirements_available", lambda: True)
+    gateway._active_login = gateway.WeixinLoginSession(
+        qrcode="stale",
+        qr_payload="https://weixin.example/stale",
+        base_url="https://ilink-unit.example",
+        status="error",
+        generation=999,
+        started_at=time.time(),
+        expires_at=time.time() + 60,
+        message="旧状态错误",
+    )
+
+    status = gateway.weixin_status()
+
+    assert status["connected"] is True
+    assert status["status"] == "connected"
+    assert status["login"] is None
+    assert gateway._active_login is None
+    assert "stored-value" not in json.dumps(status, ensure_ascii=False)
 
 
 def test_weixin_runtime_fake_event_handles_command_and_chat(daemon_client, monkeypatch):

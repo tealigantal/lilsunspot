@@ -2,11 +2,13 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $SidecarDir = Join-Path $Root "lilsunspot\desktop\src-tauri\binaries"
+$SidecarBundleDir = Join-Path $SidecarDir "lilsunspotd"
 $WorkDir = Join-Path $Root "ignored\pyinstaller-lilsunspotd\build"
 $SpecDir = Join-Path $Root "ignored\pyinstaller-lilsunspotd\spec"
 $DistDir = Join-Path $Root "ignored\pyinstaller-lilsunspotd\dist"
 $SidecarName = "lilsunspotd-x86_64-pc-windows-msvc.exe"
 $SidecarPath = Join-Path $SidecarDir $SidecarName
+$SidecarExePath = Join-Path $SidecarBundleDir "lilsunspotd.exe"
 $ResourceSource = Join-Path $Root "lilsunspot\resources"
 $UpstreamCommitSource = Join-Path $Root "lilsunspot\UPSTREAM_COMMIT.txt"
 
@@ -15,6 +17,12 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 New-Item -ItemType Directory -Force -Path $SidecarDir, $WorkDir, $SpecDir, $DistDir | Out-Null
+if (Test-Path -LiteralPath $SidecarBundleDir) {
+    Remove-Item -LiteralPath $SidecarBundleDir -Recurse -Force
+}
+if (Test-Path -LiteralPath $SidecarPath) {
+    Remove-Item -LiteralPath $SidecarPath -Force
+}
 
 Push-Location $Root
 try {
@@ -28,7 +36,7 @@ try {
         "--with", "python-docx==1.2.0",
         "--with", "openpyxl==3.1.5",
         "pyinstaller",
-        "--onefile",
+        "--onedir",
         "--clean",
         "--noconsole",
         "--noconfirm",
@@ -72,13 +80,17 @@ try {
         throw "PyInstaller failed to build lilsunspotd. Exit code: $LASTEXITCODE."
     }
 
-    $BuiltExe = Join-Path $DistDir "lilsunspotd.exe"
+    $BuiltDir = Join-Path $DistDir "lilsunspotd"
+    $BuiltExe = Join-Path $BuiltDir "lilsunspotd.exe"
     if (-not (Test-Path $BuiltExe)) {
         throw "PyInstaller did not create $BuiltExe."
     }
 
-    Copy-Item -Force -LiteralPath $BuiltExe -Destination $SidecarPath
-    Write-Host "Built daemon sidecar: $SidecarPath"
+    Copy-Item -Force -Recurse -LiteralPath $BuiltDir -Destination $SidecarBundleDir
+    if (-not (Test-Path $SidecarExePath)) {
+        throw "Sidecar bundle copy did not create $SidecarExePath."
+    }
+    Write-Host "Built daemon sidecar directory: $SidecarBundleDir"
 }
 finally {
     Pop-Location

@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 from types import SimpleNamespace
+
+
+def _wait_until(predicate, timeout: float = 2.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    assert predicate()
 
 
 def test_conversation_crud_archive_and_delete_cascade(daemon_client, monkeypatch):
@@ -60,6 +70,7 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
         assert message == "你好"
         assert conversation_id == "personal"
         assert kwargs["current_message_id"]
+        assert kwargs["exclude_message_ids"] == [kwargs["current_message_id"]]
         return {
             "ok": True,
             "reply": "收到。",
@@ -71,7 +82,7 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
             "conversation_id_requested": True,
         }
 
-    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     assert daemon_client.client.get("/conversations").status_code == 403
     conversations = daemon_client.client.get("/conversations", headers=daemon_client.headers)
@@ -85,7 +96,16 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
     )
     assert sent.status_code == 200
     assert sent.json()["ok"] is True
-    assert sent.json()["assistant_message"]["text"] == "收到。"
+    assert sent.json()["accepted"] is True
+    assert sent.json()["turn_id"] == sent.json()["assistant_message"]["id"]
+    assert sent.json()["assistant_message"]["status"] == "generating"
+
+    _wait_until(
+        lambda: any(
+            item["text"] == "收到。" and item["status"] == "sent"
+            for item in daemon_client.conversations.list_messages("personal")
+        )
+    )
 
     messages = daemon_client.client.get("/conversations/personal/messages", headers=daemon_client.headers)
     assert messages.status_code == 200
@@ -98,6 +118,138 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
     assert "id:" in sse
     assert "event:" in sse
     assert "data:" in sse
+
+
+def test_desktop_slow_reply_returns_accepted_before_agent_finishes(daemon_client, monkeypatch):
+    daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.2
+
+    async def fail_mode_router(text, paths):
+        raise AssertionError("plain chat should not call the mode router before acceptance")
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        await asyncio.sleep(0.2)
+        return {
+            "ok": True,
+            "reply": "慢回复完成。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fail_mode_router)
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    started = time.time()
+    response = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={"message": "调试这个报错"},
+    )
+    elapsed = time.time() - started
+
+    assert response.status_code == 200
+    assert elapsed < 0.15
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["assistant_message"]["status"] == "generating"
+    assert body["assistant_message"]["text"] == "正在回复..."
+    _wait_until(
+        lambda: any(
+            item["text"] == "慢回复完成。" and item["status"] == "sent"
+            for item in daemon_client.conversations.list_messages("personal")
+        ),
+        timeout=3.0,
+    )
+
+
+def test_desktop_short_messages_coalesce_into_one_agent_turn(daemon_client, monkeypatch):
+    daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.2
+    seen_prompts = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_prompts.append(message)
+        return {
+            "ok": True,
+            "reply": "合并回复。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    responses = [
+        daemon_client.client.post(
+            "/conversations/personal/messages",
+            headers=daemon_client.headers,
+            json={"message": text},
+        ).json()
+        for text in ["第一条", "第二条", "第三条"]
+    ]
+
+    assert all(item["accepted"] is True for item in responses)
+    assert len({item["assistant_message"]["id"] for item in responses}) == 1
+    _wait_until(lambda: len(seen_prompts) == 1)
+    assert "1. 第一条" in seen_prompts[0]
+    assert "2. 第二条" in seen_prompts[0]
+    assert "3. 第三条" in seen_prompts[0]
+
+    messages = daemon_client.conversations.list_messages("personal")
+    assert [item["text"] for item in messages if item["role"] == "user"] == ["第一条", "第二条", "第三条"]
+    assistant_messages = [item for item in messages if item["role"] == "assistant"]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0]["text"] == "合并回复。"
+
+
+def test_desktop_running_turn_queues_next_batch_without_parallel_session(daemon_client, monkeypatch):
+    prompts = []
+    active = 0
+    max_active = 0
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        prompts.append(message)
+        if "第一批" in message:
+            await asyncio.sleep(0.05)
+        active -= 1
+        return {
+            "ok": True,
+            "reply": f"回复 {len(prompts)}",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    first = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={"message": "第一批"},
+    )
+    assert first.status_code == 200
+    time.sleep(0.03)
+    second = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={"message": "第二批"},
+    )
+    assert second.status_code == 200
+
+    _wait_until(lambda: len(prompts) == 2)
+    assert max_active == 1
+    assert prompts == ["第一批", "第二批"]
 
 
 def test_weixin_media_event_registers_attachment_summary_and_ai_prompt(daemon_client, monkeypatch):
@@ -326,6 +478,538 @@ def test_weixin_route_key_isolates_multiple_accounts(daemon_client, monkeypatch)
     assert second["metadata"]["weixin_route_key"] == "account_b:dm:wx_contact"
     assert first["metadata"]["weixin_route"]["account_id"] == "account_a"
     assert second["metadata"]["weixin_route"]["account_id"] == "account_b"
+
+
+def test_desktop_activate_legacy_weixin_route_promotes_account_route(daemon_client, monkeypatch):
+    seen_conversations = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_conversations.append(conversation_id)
+        return {
+            "ok": True,
+            "reply": "微信回复",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    account_source = SimpleNamespace(account_id="account_a", chat_id="wx_contact", user_id="wx_contact", chat_type="dm")
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 route 旧对话", media_urls=[], media_types=[], message_id="wx_account_route", source=account_source),
+            paths,
+        )
+    )
+    account_thread = seen_conversations[-1]
+
+    legacy = daemon_client.conversations.create_conversation(
+        title="旧版无账号微信对话",
+        kind="weixin",
+        metadata={
+            "weixin_route": {"chat_id": "wx_contact", "user_id": "wx_contact", "chat_type": "dm"},
+            "weixin_route_key": "dm:wx_contact",
+            "weixin_route_active": False,
+        },
+        paths=paths,
+    )
+
+    activated = daemon_client.client.patch(
+        f"/conversations/{legacy['id']}",
+        headers=daemon_client.headers,
+        json={"weixin_route_active": True},
+    )
+    assert activated.status_code == 200
+    activated_metadata = activated.json()["conversation"]["metadata"]
+    assert activated_metadata["weixin_route_key"] == "account_a:dm:wx_contact"
+    assert activated_metadata["weixin_route"]["account_id"] == "account_a"
+    assert daemon_client.conversations.get_conversation(account_thread, paths)["metadata"]["weixin_route_active"] is False
+
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="应该进入刚激活的旧版对话", media_urls=[], media_types=[], message_id="wx_after_activate", source=account_source),
+            paths,
+        )
+    )
+    assert seen_conversations[-1] == legacy["id"]
+
+
+def test_weixin_inbound_repairs_preexisting_legacy_active_route(daemon_client, monkeypatch):
+    seen_conversations = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_conversations.append(conversation_id)
+        return {
+            "ok": True,
+            "reply": "微信回复",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    account_source = SimpleNamespace(account_id="account_a", chat_id="wx_contact", user_id="wx_contact", chat_type="dm")
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 route 初始对话", media_urls=[], media_types=[], message_id="wx_preexisting_account", source=account_source),
+            paths,
+        )
+    )
+    account_thread = seen_conversations[-1]
+
+    legacy = daemon_client.conversations.create_conversation(
+        title="已经被旧代码激活的无账号对话",
+        kind="weixin",
+        metadata={
+            "weixin_route": {"chat_id": "wx_contact", "user_id": "wx_contact", "chat_type": "dm"},
+            "weixin_route_key": "dm:wx_contact",
+            "weixin_route_active": True,
+        },
+        paths=paths,
+    )
+
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="修复坏状态后的第一句", media_urls=[], media_types=[], message_id="wx_preexisting_repair", source=account_source),
+            paths,
+        )
+    )
+
+    assert seen_conversations[-1] == legacy["id"]
+    repaired = daemon_client.conversations.get_conversation(legacy["id"], paths)
+    assert repaired["metadata"]["weixin_route_key"] == "account_a:dm:wx_contact"
+    assert repaired["metadata"]["weixin_route"]["account_id"] == "account_a"
+    assert daemon_client.conversations.get_conversation(account_thread, paths)["metadata"]["weixin_route_active"] is False
+
+
+def test_desktop_activate_non_weixin_conversation_is_rejected(daemon_client):
+    desktop = daemon_client.client.post(
+        "/conversations",
+        headers=daemon_client.headers,
+        json={"title": "普通桌面对话"},
+    )
+    assert desktop.status_code == 200
+    conversation_id = desktop.json()["conversation"]["id"]
+
+    activated = daemon_client.client.patch(
+        f"/conversations/{conversation_id}",
+        headers=daemon_client.headers,
+        json={"weixin_route_active": True},
+    )
+
+    assert activated.status_code == 404
+    assert activated.json()["detail"] == "没有找到这个对话。"
+    stored = daemon_client.conversations.get_conversation(conversation_id)
+    assert "weixin_route_active" not in stored["metadata"]
+
+
+def test_legacy_route_with_multiple_accounts_waits_for_real_inbound_account(daemon_client, monkeypatch):
+    seen_conversations = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_conversations.append(conversation_id)
+        return {
+            "ok": True,
+            "reply": "微信回复",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    source_a = SimpleNamespace(account_id="account_a", chat_id="wx_contact", user_id="wx_contact", chat_type="dm")
+    source_b = SimpleNamespace(account_id="account_b", chat_id="wx_contact", user_id="wx_contact", chat_type="dm")
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 A 初始消息", media_urls=[], media_types=[], message_id="wx_multi_a_1", source=source_a),
+            paths,
+        )
+    )
+    account_a_thread = seen_conversations[-1]
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 B 初始消息", media_urls=[], media_types=[], message_id="wx_multi_b_1", source=source_b),
+            paths,
+        )
+    )
+    account_b_thread = seen_conversations[-1]
+
+    legacy = daemon_client.conversations.create_conversation(
+        title="旧版无账号微信对话",
+        kind="weixin",
+        metadata={
+            "weixin_route": {"chat_id": "wx_contact", "user_id": "wx_contact", "chat_type": "dm"},
+            "weixin_route_key": "dm:wx_contact",
+            "weixin_route_active": False,
+        },
+        paths=paths,
+    )
+
+    activated = daemon_client.client.patch(
+        f"/conversations/{legacy['id']}",
+        headers=daemon_client.headers,
+        json={"weixin_route_active": True},
+    )
+    assert activated.status_code == 200
+    activated_metadata = activated.json()["conversation"]["metadata"]
+    assert activated_metadata["weixin_route_key"] == "dm:wx_contact"
+    assert "account_id" not in activated_metadata["weixin_route"]
+    assert daemon_client.conversations.get_conversation(account_a_thread, paths)["metadata"]["weixin_route_active"] is True
+    assert daemon_client.conversations.get_conversation(account_b_thread, paths)["metadata"]["weixin_route_active"] is True
+
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 A 选择旧版对话", media_urls=[], media_types=[], message_id="wx_multi_a_2", source=source_a),
+            paths,
+        )
+    )
+    assert seen_conversations[-1] == legacy["id"]
+    repaired = daemon_client.conversations.get_conversation(legacy["id"], paths)
+    assert repaired["metadata"]["weixin_route_key"] == "account_a:dm:wx_contact"
+    assert repaired["metadata"]["weixin_route"]["account_id"] == "account_a"
+    assert daemon_client.conversations.get_conversation(account_a_thread, paths)["metadata"]["weixin_route_active"] is False
+    assert daemon_client.conversations.get_conversation(account_b_thread, paths)["metadata"]["weixin_route_active"] is True
+
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="账号 B 仍进账号 B 对话", media_urls=[], media_types=[], message_id="wx_multi_b_2", source=source_b),
+            paths,
+        )
+    )
+    assert seen_conversations[-1] == account_b_thread
+
+
+def test_weixin_switch_invalid_number_keeps_current_conversation(daemon_client, monkeypatch):
+    seen_chats = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_chats.append((message, conversation_id))
+        return {
+            "ok": True,
+            "reply": "微信回复",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    source = SimpleNamespace(chat_id="wx_bad_number", user_id="wx_bad_number", chat_type="dm")
+    first = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="第一句普通聊天", media_urls=[], media_types=[], message_id="wx_bad_number_1", source=source),
+            paths,
+        )
+    )
+    first_conversation = first["chat"]["conversation_id"]
+    second = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="新开一个对话", media_urls=[], media_types=[], message_id="wx_bad_number_new", source=source),
+            paths,
+        )
+    )
+    second_conversation = second["conversation"]["id"]
+
+    menu = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="切换对话", media_urls=[], media_types=[], message_id="wx_bad_number_menu", source=source),
+            paths,
+        )
+    )
+    assert "最近的微信对话" in menu["message"]
+    invalid = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="9", media_urls=[], media_types=[], message_id="wx_bad_number_invalid", source=source),
+            paths,
+        )
+    )
+
+    assert invalid["intent"]["kind"] == "conversation_switch_error"
+    assert "没有这个编号" in invalid["message"]
+    active = daemon_client.conversations.active_weixin_conversation(
+        {"chat_id": "wx_bad_number", "user_id": "wx_bad_number", "chat_type": "dm"},
+        paths=paths,
+    )
+    assert active["id"] == second_conversation
+    assert first_conversation != second_conversation
+    assert [item[0] for item in seen_chats] == ["第一句普通聊天"]
+
+
+def test_deleted_active_weixin_conversation_next_inbound_creates_new_thread(daemon_client, monkeypatch):
+    seen_conversations = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_conversations.append(conversation_id)
+        return {
+            "ok": True,
+            "reply": "微信回复",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    source = SimpleNamespace(chat_id="wx_delete_active", user_id="wx_delete_active", chat_type="dm")
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="第一句", media_urls=[], media_types=[], message_id="wx_delete_active_1", source=source),
+            paths,
+        )
+    )
+    deleted_id = seen_conversations[-1]
+    assert daemon_client.conversations.delete_conversation(deleted_id, paths=paths) is not None
+
+    asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="删除后再来", media_urls=[], media_types=[], message_id="wx_delete_active_2", source=source),
+            paths,
+        )
+    )
+
+    assert seen_conversations[-1] != deleted_id
+    assert daemon_client.conversations.get_conversation(deleted_id, paths) is None
+    created = daemon_client.conversations.get_conversation(seen_conversations[-1], paths)
+    assert created["kind"] == "weixin"
+    assert created["metadata"]["weixin_route_active"] is True
+
+
+def test_weixin_inbound_reply_uses_generating_placeholder_and_update(daemon_client, monkeypatch):
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        assert kwargs["require_existing_conversation"] is True
+        assert kwargs["exclude_message_ids"]
+        return {
+            "ok": True,
+            "reply": "占位已更新。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    source = SimpleNamespace(chat_id="wx_placeholder", user_id="wx_placeholder", chat_type="dm")
+    result = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="看看占位", media_urls=[], media_types=[], message_id="wx_placeholder_1", source=source),
+            daemon_client.config_paths.get_runtime_paths(),
+        )
+    )
+
+    assert result["ok"] is True
+    events = daemon_client.conversations.list_events_after(0)
+    assistant_created = [
+        event
+        for event in events
+        if event["event"] == "message.created"
+        and (event["data"].get("message") or {}).get("role") == "assistant"
+    ]
+    assistant_updated = [event for event in events if event["event"] == "message.updated"]
+    assert assistant_created
+    assert assistant_created[-1]["data"]["message"]["status"] == "generating"
+    assert assistant_updated
+    assert assistant_updated[-1]["data"]["message"]["id"] == assistant_created[-1]["data"]["message"]["id"]
+    assert assistant_updated[-1]["data"]["message"]["status"] == "sent"
+    assert assistant_updated[-1]["data"]["message"]["text"] == "占位已更新。"
+
+
+def test_weixin_same_route_short_texts_coalesce_into_one_reply(daemon_client, monkeypatch):
+    daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.2
+    prompts = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        prompts.append(message)
+        return {
+            "ok": True,
+            "reply": "微信合并回复。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    async def run_messages():
+        source = SimpleNamespace(chat_id="wx_coalesce", user_id="wx_coalesce", chat_type="dm")
+        tasks = [
+            asyncio.create_task(
+                gateway.handle_weixin_message_event(
+                    SimpleNamespace(text=text, media_urls=[], media_types=[], message_id=f"wx_coalesce_{index}", source=source),
+                    daemon_client.config_paths.get_runtime_paths(),
+                )
+            )
+            for index, text in enumerate(["第一条", "第二条", "第三条"], start=1)
+        ]
+        return await asyncio.gather(*tasks)
+
+    results = asyncio.run(run_messages())
+
+    assert len(prompts) == 1
+    assert "1. 第一条" in prompts[0]
+    assert "2. 第二条" in prompts[0]
+    assert "3. 第三条" in prompts[0]
+    assert sum(1 for item in results if item.get("chat", {}).get("reply") == "微信合并回复。") == 1
+    assert sum(1 for item in results if item.get("suppressed")) == 2
+    conversation_id = next(item["chat"]["conversation_id"] for item in results if item.get("chat"))
+    messages = daemon_client.conversations.list_messages(conversation_id)
+    assert len([item for item in messages if item["role"] == "assistant"]) == 1
+
+
+def test_weixin_inbound_deleted_conversation_does_not_resurrect_or_reply(daemon_client, monkeypatch):
+    deleted_conversations = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        deleted_conversations.append(conversation_id)
+        daemon_client.conversations.delete_conversation(conversation_id, paths=paths)
+        return {
+            "ok": True,
+            "reply": "这条回复不应该发送。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    source = SimpleNamespace(chat_id="wx_delete", user_id="wx_delete", chat_type="dm")
+    result = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="删除竞态", media_urls=[], media_types=[], message_id="wx_delete_1", source=source),
+            daemon_client.config_paths.get_runtime_paths(),
+        )
+    )
+
+    assert result["suppressed"] is True
+    assert deleted_conversations
+    assert daemon_client.conversations.get_conversation(deleted_conversations[0]) is None
+    assert daemon_client.conversations.list_messages(deleted_conversations[0]) == []
+    events = daemon_client.conversations.list_events_after(0)
+    assert not [
+        event
+        for event in events
+        if event["event"] == "message.updated"
+        and (event["data"].get("message") or {}).get("text") == "这条回复不应该发送。"
+    ]
+
+
+def test_weixin_natural_language_conversation_switching_stays_on_same_route(daemon_client, monkeypatch):
+    seen_chats = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_chats.append((message, conversation_id))
+        return {
+            "ok": True,
+            "reply": f"回复 {message}",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    paths = daemon_client.config_paths.get_runtime_paths()
+    source = SimpleNamespace(chat_id="wx_switch", user_id="wx_switch", chat_type="dm")
+    other_route = {"chat_id": "wx_other", "user_id": "wx_other", "chat_type": "dm"}
+    daemon_client.conversations.create_weixin_conversation(other_route, title="其他联系人", paths=paths)
+
+    first = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="第一句普通聊天", media_urls=[], media_types=[], message_id="wx_switch_1", source=source),
+            paths,
+        )
+    )
+    first_conversation = first["chat"]["conversation_id"]
+
+    created = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="新开一个对话", media_urls=[], media_types=[], message_id="wx_switch_new", source=source),
+            paths,
+        )
+    )
+    second_conversation = created["conversation"]["id"]
+    assert second_conversation != first_conversation
+    assert daemon_client.conversations.active_weixin_conversation(
+        {"chat_id": "wx_switch", "user_id": "wx_switch", "chat_type": "dm"},
+        paths=paths,
+    )["id"] == second_conversation
+
+    previous = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="切回上一个对话", media_urls=[], media_types=[], message_id="wx_switch_prev", source=source),
+            paths,
+        )
+    )
+    assert previous["conversation"]["id"] == first_conversation
+
+    menu = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="切换对话", media_urls=[], media_types=[], message_id="wx_switch_menu", source=source),
+            paths,
+        )
+    )
+    assert "最近的微信对话" in menu["message"]
+    assert "其他联系人" not in menu["message"]
+    selected = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(text="2", media_urls=[], media_types=[], message_id="wx_switch_select", source=source),
+            paths,
+        )
+    )
+    assert selected["conversation"]["id"] == second_conversation
+    assert [item[0] for item in seen_chats] == ["第一句普通聊天"]
 
 
 def _write_unit_png(path):
@@ -612,6 +1296,7 @@ def test_desktop_semantic_mode_router_switches_mode_without_chat_reply(daemon_cl
 
     monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
     monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fail_chat)
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fail_chat)
 
     result = daemon_client.client.post(
         "/conversations/personal/messages",
@@ -659,7 +1344,7 @@ def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemo
         }
 
     monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", chat_route)
-    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     result = daemon_client.client.post(
         "/conversations/personal/messages",
@@ -668,8 +1353,15 @@ def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemo
     )
 
     assert result.status_code == 200
-    assert result.json()["assistant_message"]["text"] == "文案草稿。"
-    assert seen_chat["message"] == "帮我写一个感性的文案"
+    assert result.json()["accepted"] is True
+    assert result.json()["assistant_message"]["status"] == "generating"
+    _wait_until(lambda: seen_chat.get("message") == "帮我写一个感性的文案")
+    _wait_until(
+        lambda: any(
+            item["text"] == "文案草稿。" and item["status"] == "sent"
+            for item in daemon_client.conversations.list_messages("personal")
+        )
+    )
     current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
     assert current["current"] == "balanced"
 

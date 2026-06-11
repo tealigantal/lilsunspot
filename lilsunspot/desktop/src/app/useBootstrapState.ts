@@ -31,13 +31,13 @@ const STARTING_BOOTSTRAP: AppBootstrapState = {
   user_visible_blockers: []
 };
 
-function failedBootstrap(message: string, suggestion = "请点击重新检查，或打开诊断。"): AppBootstrapState {
+function failedBootstrap(message: string, suggestion = "请点击重新检查。"): AppBootstrapState {
   return {
     stage: "daemon_failed",
     title: "本地服务没有成功启动",
     message,
     primary_action: { id: "retry", label: "重新检查" },
-    secondary_actions: [{ id: "open_doctor", label: "一键检查" }],
+    secondary_actions: [],
     checks: {
       daemon: "failed",
       model_config: "unknown",
@@ -95,7 +95,7 @@ export function useBootstrapState() {
       setBootstrap(
         failedBootstrap(
           devMode && message.includes("调试 Token") ? "开发者模式需要填写调试 Token。正式桌面版会自动连接。" : message,
-          devMode ? "在下方开发者模式里填写调试 Token 后重新检查。" : "请点击重新检查，或打开诊断。"
+          devMode ? "在下方开发者模式里填写调试 Token 后重新检查。" : "请点击重新检查。"
         )
       );
     } finally {

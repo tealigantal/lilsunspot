@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { AppBootstrapRuntime, Provider } from "../../types";
 import { getProviders } from "../../api";
 import { ModelSettings } from "../model/ModelSettings";
-import { DoctorSettings } from "./DoctorSettings";
-import { SafetySettings } from "./SafetySettings";
+import { ControlCenterSettings } from "./ControlCenterSettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "weixin" | "safety" | "doctor";
+export type SettingsTab = "model" | "weixin" | "control";
 
 type SettingsDrawerProps = {
   open: boolean;
@@ -19,8 +18,7 @@ type SettingsDrawerProps = {
 const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
   { id: "model", label: "模型服务" },
   { id: "weixin", label: "微信", badge: "未连接" },
-  { id: "safety", label: "安全审批", badge: "暂无待处理" },
-  { id: "doctor", label: "诊断", badge: "未检查" }
+  { id: "control", label: "控制台" }
 ];
 
 export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTab = "model" }: SettingsDrawerProps) {
@@ -77,7 +75,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
         <header>
           <div>
             <h2>设置</h2>
-            <p>模型、本地连接状态、审批和诊断都在这里调整。</p>
+            <p>模型服务、微信连接和本地控制台都在这里调整。</p>
           </div>
           <button type="button" className="iconButton" onClick={onClose} aria-label="关闭设置">
             ×
@@ -94,8 +92,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
         <div className="drawerBody">
           {active === "model" && <ModelSettings runtime={runtime} provider={currentProvider} onSetupModel={onSetupModel} />}
           {active === "weixin" && <WeixinSettings />}
-          {active === "safety" && <SafetySettings />}
-          {active === "doctor" && <DoctorSettings />}
+          {active === "control" && <ControlCenterSettings />}
         </div>
       </aside>
     </div>

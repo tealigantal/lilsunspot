@@ -397,13 +397,19 @@ def conversation_history_for_agent(
     conversation_id: str,
     *,
     exclude_message_id: str | None = None,
+    exclude_message_ids: list[str] | set[str] | tuple[str, ...] | None = None,
     paths: RuntimePaths | None = None,
     limit: int = MAX_MESSAGE_LIMIT,
 ) -> list[dict[str, str]]:
     messages = list_messages(conversation_id, limit=limit, paths=paths)
+    excluded = {str(item) for item in (exclude_message_ids or []) if str(item).strip()}
+    if exclude_message_id:
+        excluded.add(exclude_message_id)
     history: list[dict[str, str]] = []
     for message in messages:
-        if exclude_message_id and message.get("id") == exclude_message_id:
+        if message.get("id") in excluded:
+            continue
+        if str(message.get("status") or "") == "generating":
             continue
         role = str(message.get("role") or "")
         text = str(message.get("text") or "").strip()
@@ -578,6 +584,50 @@ def create_message(
                         conn.commit()
     if emit_event:
         append_event(event_type, {"conversation_id": conversation_id, "message": message}, paths=paths)
+    return message
+
+
+def update_message(
+    message_id: str,
+    *,
+    text: str | None = None,
+    status: str | None = None,
+    metadata_patch: dict[str, Any] | None = None,
+    emit_event: bool = True,
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any] | None:
+    message_id = message_id.strip()
+    if not message_id:
+        return None
+    with _DB_LOCK, _connect(paths) as conn:
+        row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if row is None:
+            return None
+        metadata = _json_loads(row["metadata"])
+        if metadata_patch:
+            metadata.update(metadata_patch)
+        next_text = str(row["text"]) if text is None else text
+        next_status = str(row["status"]) if status is None else (status.strip() or str(row["status"]))
+        now = _now_iso()
+        conn.execute(
+            "UPDATE messages SET text = ?, status = ?, metadata = ? WHERE id = ?",
+            (next_text, next_status, _json_dumps(metadata), message_id),
+        )
+        conn.execute(
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            (now, str(row["conversation_id"])),
+        )
+        conn.commit()
+        updated = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if updated is None:
+            return None
+        message = _message_from_row(conn, updated)
+    if emit_event:
+        append_event(
+            "message.updated",
+            {"conversation_id": message["conversation_id"], "message_id": message["id"], "message": message},
+            paths=paths,
+        )
     return message
 
 
@@ -775,6 +825,29 @@ def weixin_route_key(route: dict[str, Any] | None) -> str:
     return f"{chat_type}:{identity}"
 
 
+def _weixin_identity_key(route: dict[str, Any] | None) -> str:
+    route = route or {}
+    chat_type = str(route.get("chat_type") or "dm").strip() or "dm"
+    chat_id = str(route.get("chat_id") or "").strip()
+    user_id = str(route.get("user_id") or "").strip()
+    identity = chat_id or user_id
+    return f"{chat_type}:{identity}" if identity else ""
+
+
+def _weixin_route_without_account(route: dict[str, Any] | None) -> dict[str, Any]:
+    metadata_route = _weixin_route_metadata(route or {})
+    metadata_route.pop("account_id", None)
+    return metadata_route
+
+
+def _compatible_weixin_route_keys(route: dict[str, Any] | None) -> set[str]:
+    route_metadata = _weixin_route_metadata(route or {})
+    keys = {weixin_route_key(route_metadata)}
+    if str(route_metadata.get("account_id") or "").strip():
+        keys.add(weixin_route_key(_weixin_route_without_account(route_metadata)))
+    return {key for key in keys if key}
+
+
 def _weixin_route_metadata(route: dict[str, Any]) -> dict[str, Any]:
     metadata_route: dict[str, str] = {
         "chat_type": str(route.get("chat_type") or "dm").strip() or "dm",
@@ -791,12 +864,78 @@ def _weixin_route_metadata(route: dict[str, Any]) -> dict[str, Any]:
     return metadata_route
 
 
+def _merge_account_route(base_route: dict[str, Any], candidate_route: dict[str, Any]) -> dict[str, Any]:
+    merged = _weixin_route_metadata(base_route)
+    account_id = str(candidate_route.get("account_id") or "").strip()
+    if account_id:
+        merged["account_id"] = account_id
+    if not str(merged.get("chat_id") or "").strip() and str(candidate_route.get("chat_id") or "").strip():
+        merged["chat_id"] = str(candidate_route["chat_id"]).strip()
+    if not str(merged.get("user_id") or "").strip() and str(candidate_route.get("user_id") or "").strip():
+        merged["user_id"] = str(candidate_route["user_id"]).strip()
+    return merged
+
+
+def _resolve_weixin_account_route(conn: sqlite3.Connection, route: dict[str, Any]) -> dict[str, Any]:
+    route_metadata = _weixin_route_metadata(route)
+    if str(route_metadata.get("account_id") or "").strip():
+        return route_metadata
+    identity_key = _weixin_identity_key(route_metadata)
+    if not identity_key:
+        return route_metadata
+
+    candidates: dict[str, dict[str, Any]] = {}
+    conversation_rows = conn.execute(
+        "SELECT metadata FROM conversations WHERE kind = 'weixin' ORDER BY updated_at DESC, id ASC"
+    ).fetchall()
+    for row in conversation_rows:
+        metadata = _json_loads(row["metadata"])
+        candidate = metadata.get("weixin_route") if isinstance(metadata.get("weixin_route"), dict) else None
+        if not candidate or _weixin_identity_key(candidate) != identity_key:
+            continue
+        account_id = str(candidate.get("account_id") or "").strip()
+        if account_id:
+            candidates.setdefault(account_id, candidate)
+
+    message_rows = conn.execute(
+        """
+        SELECT metadata
+        FROM messages
+        WHERE source = 'weixin' AND role = 'user'
+        ORDER BY rowid DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in message_rows:
+        metadata = _json_loads(row["metadata"])
+        candidate = metadata.get("weixin_route") if isinstance(metadata.get("weixin_route"), dict) else None
+        if not candidate or _weixin_identity_key(candidate) != identity_key:
+            continue
+        account_id = str(candidate.get("account_id") or "").strip()
+        if account_id:
+            candidates.setdefault(account_id, candidate)
+
+    if len(candidates) != 1:
+        return route_metadata
+    return _merge_account_route(route_metadata, next(iter(candidates.values())))
+
+
 def _deactivate_weixin_route(
     conn: sqlite3.Connection,
     route_key: str,
     *,
     except_conversation_id: str | None = None,
 ) -> None:
+    _deactivate_weixin_route_keys(conn, {route_key}, except_conversation_id=except_conversation_id)
+
+
+def _deactivate_weixin_route_keys(
+    conn: sqlite3.Connection,
+    route_keys: set[str],
+    *,
+    except_conversation_id: str | None = None,
+) -> None:
+    route_keys = {key for key in route_keys if key}
     rows = conn.execute("SELECT * FROM conversations WHERE kind = 'weixin'").fetchall()
     now = _now_iso()
     for row in rows:
@@ -804,7 +943,7 @@ def _deactivate_weixin_route(
         if except_conversation_id and conversation_id == except_conversation_id:
             continue
         metadata = _json_loads(row["metadata"])
-        if metadata.get("weixin_route_key") != route_key:
+        if metadata.get("weixin_route_key") not in route_keys:
             continue
         if not metadata.get("weixin_route_active"):
             continue
@@ -828,16 +967,18 @@ def create_weixin_conversation(
         return create_conversation(title=title or "微信私聊", kind="weixin", paths=paths, emit_event=emit_event)
     conversation_id = _new_id("conv")
     now = _now_iso()
-    metadata = _metadata_with_session(
-        conversation_id,
-        {
-            "weixin_route": route_metadata,
-            "weixin_route_key": route_key,
-            "weixin_route_active": True,
-        },
-    )
     with _DB_LOCK, _connect(paths) as conn:
-        _deactivate_weixin_route(conn, route_key)
+        route_metadata = _resolve_weixin_account_route(conn, route_metadata)
+        route_key = weixin_route_key(route_metadata)
+        metadata = _metadata_with_session(
+            conversation_id,
+            {
+                "weixin_route": route_metadata,
+                "weixin_route_key": route_key,
+                "weixin_route_active": True,
+            },
+        )
+        _deactivate_weixin_route_keys(conn, _compatible_weixin_route_keys(route_metadata))
         conn.execute(
             """
             INSERT INTO conversations(id, title, kind, created_at, updated_at, metadata)
@@ -866,16 +1007,56 @@ def active_weixin_conversation(
     *,
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any] | None:
-    route_key = weixin_route_key(route)
-    if not route_key:
+    route_keys = _compatible_weixin_route_keys(route)
+    if not route_keys:
         return None
+    active_matches: list[dict[str, Any]] = []
     for conversation in list_conversations(paths, include_archived=True):
         if conversation.get("kind") != "weixin" or _is_archived(conversation):
             continue
         metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
-        if metadata.get("weixin_route_key") == route_key and metadata.get("weixin_route_active"):
+        if metadata.get("weixin_route_key") in route_keys and metadata.get("weixin_route_active"):
+            active_matches.append(conversation)
+    if not active_matches:
+        return None
+    route_metadata = _weixin_route_metadata(route or {})
+    if str(route_metadata.get("account_id") or "").strip():
+        legacy_key = weixin_route_key(_weixin_route_without_account(route_metadata))
+        for conversation in active_matches:
+            metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+            if metadata.get("weixin_route_key") == legacy_key:
+                return conversation
+    exact_key = weixin_route_key(route_metadata)
+    for conversation in active_matches:
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        if metadata.get("weixin_route_key") == exact_key:
             return conversation
-    return None
+    return active_matches[0]
+
+
+def recent_weixin_conversations(
+    route: dict[str, Any],
+    *,
+    paths: RuntimePaths | None = None,
+    limit: int = 5,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
+    route_keys = _compatible_weixin_route_keys(route)
+    if not route_keys:
+        return []
+    limit = max(1, min(int(limit or 5), 20))
+    matches: list[dict[str, Any]] = []
+    for conversation in list_conversations(paths, include_archived=True):
+        if conversation.get("kind") != "weixin":
+            continue
+        if not include_archived and _is_archived(conversation):
+            continue
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        if metadata.get("weixin_route_key") in route_keys:
+            matches.append(conversation)
+        if len(matches) >= limit:
+            break
+    return matches
 
 
 def ensure_active_weixin_conversation(
@@ -885,6 +1066,13 @@ def ensure_active_weixin_conversation(
 ) -> dict[str, Any]:
     active = active_weixin_conversation(route, paths=paths)
     if active is not None:
+        active_metadata = active.get("metadata") if isinstance(active.get("metadata"), dict) else {}
+        incoming_key = weixin_route_key(route)
+        active_key = str(active_metadata.get("weixin_route_key") or "").strip()
+        if incoming_key and active_key and incoming_key != active_key and str((route or {}).get("account_id") or "").strip():
+            promoted = set_weixin_conversation_active(active["id"], route=route, paths=paths)
+            if promoted is not None:
+                return promoted
         return active
     return create_weixin_conversation(route, paths=paths)
 
@@ -892,6 +1080,7 @@ def ensure_active_weixin_conversation(
 def set_weixin_conversation_active(
     conversation_id: str,
     *,
+    route: dict[str, Any] | None = None,
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any] | None:
     conversation_id = _normalize_conversation_id(conversation_id)
@@ -900,10 +1089,18 @@ def set_weixin_conversation_active(
         if row is None:
             return None
         metadata = _json_loads(row["metadata"])
-        route_key = str(metadata.get("weixin_route_key") or "").strip()
+        stored_route = metadata.get("weixin_route") if isinstance(metadata.get("weixin_route"), dict) else {}
+        route_metadata = _resolve_weixin_account_route(conn, route or stored_route)
+        route_key = weixin_route_key(route_metadata)
         if str(row["kind"]) != "weixin" or not route_key:
             return None
-        _deactivate_weixin_route(conn, route_key, except_conversation_id=conversation_id)
+        previous_key = str(metadata.get("weixin_route_key") or "").strip()
+        route_keys = _compatible_weixin_route_keys(route_metadata)
+        if previous_key:
+            route_keys.add(previous_key)
+        _deactivate_weixin_route_keys(conn, route_keys, except_conversation_id=conversation_id)
+        metadata["weixin_route"] = route_metadata
+        metadata["weixin_route_key"] = route_key
         metadata["weixin_route_active"] = True
         metadata.pop("archived_at", None)
         now = _now_iso()

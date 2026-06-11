@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import type { AppBootstrapState, Conversation, ConversationAttachment, LilsunspotEvent } from "../../types";
+import type { AppBootstrapState, Conversation, ConversationAttachment, ConversationSearchResult, LilsunspotEvent } from "../../types";
 import {
   createConversation,
   deleteConversation,
   getConversations,
   getConversationMessages,
   listenDaemonEvents,
+  searchConversations,
   sendConversationMessage,
   subscribeDaemonEvents,
   updateConversation
 } from "../../api";
+import type { SettingsTab } from "../settings/SettingsDrawer";
 import { ModeQuickPanel } from "../mode/ModeQuickPanel";
 import { useModeState } from "../mode/ModeState";
 import { displayProvider } from "../model/ProviderCard";
@@ -22,7 +24,7 @@ type ChatHomeProps = {
   initialMessages?: ChatMessage[];
   onSetupModel: () => void;
   onRefresh: () => void;
-  onOpenSettings: (tab?: "model" | "weixin" | "safety" | "doctor") => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
 };
 
 const EXAMPLE_PROMPTS = [
@@ -77,7 +79,7 @@ function hasWeixinRoute(
 
 function conversationKindLabel(conversation: Conversation) {
   if (conversation.kind === "weixin") {
-    return isWeixinActive(conversation) ? "微信 · 当前" : "微信";
+    return isWeixinActive(conversation) ? "微信消息进入这里" : "微信对话";
   }
   if (conversation.id === PERSONAL_CONVERSATION_ID) {
     return "默认";
@@ -85,15 +87,36 @@ function conversationKindLabel(conversation: Conversation) {
   return "桌面";
 }
 
+function weixinRecipientFromConversation(conversation: Conversation | undefined) {
+  const route = hasWeixinRoute(conversation) ? conversation.metadata.weixin_route : null;
+  if (!route) {
+    return "";
+  }
+  return String(route.chat_id || route.user_id || "").trim();
+}
+
 export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState(PERSONAL_CONVERSATION_ID);
   const [showArchived, setShowArchived] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const modeState = useModeState();
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
+  const activeWeixinRecipient = weixinRecipientFromConversation(activeConversation);
+  const weixinSendTarget = activeWeixinRecipient
+    ? { recipient: activeWeixinRecipient, label: activeConversation?.title || "当前微信对话" }
+    : null;
+  const headerHint =
+    activeConversation && hasWeixinRoute(activeConversation)
+      ? isWeixinActive(activeConversation)
+        ? `微信消息正在进入：${activeConversation.title}`
+        : "这个微信对话不会接收新消息，除非你让微信消息进入这里。"
+      : "桌面聊天和微信私聊按对话分开记录。";
 
   useEffect(() => {
     setMessages(initialMessages);
@@ -238,6 +261,28 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
     setMessages([]);
   }
 
+  async function runSearch() {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const results = await searchConversations(query, showArchived);
+      setSearchResults(results);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function openSearchResult(result: ConversationSearchResult) {
+    if (!conversations.some((item) => item.id === result.conversation_id)) {
+      await refreshConversations(result.conversation_id);
+    }
+    setActiveConversationId(result.conversation_id);
+  }
+
   async function createWeixinThread() {
     if (!hasWeixinRoute(activeConversation)) {
       return;
@@ -314,14 +359,17 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
       setMessages((current) => current.filter((item) => item.id !== userMessage.id));
       void refreshConversations(activeConversationId);
       if (result.ok) {
+        const assistantMessage = result.accepted
+          ? result.assistant_message
+          : {
+              ...result.assistant_message,
+              metadata: {
+                ...(result.assistant_message.metadata || {}),
+                engine: `${displayProvider(result.chat.ok ? result.chat.provider : "")} / ${result.chat.ok ? result.chat.model : ""}`
+              }
+            };
         setMessages((current) =>
-          mergeMessageList(mergeMessageList(current, result.user_message), {
-            ...result.assistant_message,
-            metadata: {
-              ...(result.assistant_message.metadata || {}),
-              engine: `${displayProvider(result.chat.ok ? result.chat.provider : "")} / ${result.chat.ok ? result.chat.model : ""}`
-            }
-          })
+          mergeMessageList(mergeMessageList(current, result.user_message), assistantMessage)
         );
         if (result.chat.ok && result.chat.mode_intent) {
           void modeState.reload();
@@ -354,13 +402,45 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
         <div className="conversationRailHeader">
           <strong>对话</strong>
           <button type="button" className="compactButton" onClick={() => void createDesktopConversation()}>
-            新建
+            新建桌面对话
           </button>
         </div>
         <label className="archiveToggle">
           <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
           <span>显示归档</span>
         </label>
+        <form
+          className="conversationSearch"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSearch();
+          }}
+        >
+          <input
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              if (!event.target.value.trim()) {
+                setSearchResults([]);
+              }
+            }}
+            placeholder="搜索聊天记录"
+            aria-label="搜索聊天记录"
+          />
+          <button type="submit" className="secondaryButton compactButton" disabled={searching}>
+            {searching ? "搜索中" : "搜索"}
+          </button>
+        </form>
+        {searchResults.length > 0 && (
+          <div className="conversationSearchResults" aria-label="搜索结果">
+            {searchResults.map((result) => (
+              <button key={`${result.type}-${result.message_id}-${result.attachment_id}`} type="button" onClick={() => void openSearchResult(result)}>
+                <strong>{result.conversation_title}</strong>
+                <span>{result.type === "attachment" ? "附件" : "消息"} · {result.snippet}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="conversationList">
           {conversations.map((conversation) => (
             <article
@@ -380,7 +460,7 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
                 </button>
                 {conversation.kind === "weixin" && !isWeixinActive(conversation) && (
                   <button type="button" className="secondaryButton compactButton" onClick={() => void activateWeixinConversation(conversation)}>
-                    设为当前
+                    让微信消息进入这里
                   </button>
                 )}
                 <button type="button" className="secondaryButton compactButton dangerMiniButton" onClick={() => void removeConversation(conversation)}>
@@ -395,12 +475,12 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
         <header className="panelHeader chatPanelHeader">
           <div>
             <h2>{activeConversation?.title || "今日任务台"}</h2>
-            <p>普通聊天和微信私聊按对话分开记录。</p>
+            <p>{headerHint}</p>
           </div>
           <div className="chatHeaderActions">
             {hasWeixinRoute(activeConversation) && (
               <button type="button" className="secondaryButton compactButton" onClick={() => void createWeixinThread()}>
-                新开此微信对话
+                为这个微信联系人开新对话
               </button>
             )}
             <button type="button" className="secondaryButton compactButton" onClick={() => onOpenSettings("model")}>
@@ -408,7 +488,7 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
             </button>
           </div>
         </header>
-        <ChatTranscript messages={messages} examples={EXAMPLE_PROMPTS} onExampleSelect={setInput} />
+        <ChatTranscript messages={messages} examples={EXAMPLE_PROMPTS} onExampleSelect={setInput} weixinSendTarget={weixinSendTarget} />
         <ChatComposer
           value={input}
           onChange={setInput}

@@ -72,7 +72,7 @@ def test_approval_decision_updates_pending_and_history(daemon_client):
     assert "已经处理过" in repeated.text
 
 
-def test_weixin_command_handle_mode_and_approval_decision(daemon_client):
+def test_weixin_command_help_hides_approval_commands_but_hidden_decision_still_works(daemon_client):
     client = daemon_client.client
     headers = daemon_client.headers
     approval_id = _create_weixin_approval(daemon_client).json()["approval"]["id"]
@@ -80,7 +80,12 @@ def test_weixin_command_handle_mode_and_approval_decision(daemon_client):
     help_response = client.post("/gateway/weixin/commands/handle", headers=headers, json={"text": "/help"})
     assert help_response.status_code == 200
     assert help_response.json()["ok"] is True
-    assert any(item["name"] == "/reject" for item in help_response.json()["commands"])
+    command_names = {item["name"] for item in help_response.json()["commands"]}
+    assert {"/help", "/mode"} <= command_names
+    assert "/approve" not in command_names
+    assert "/reject" not in command_names
+    assert "/approve" not in help_response.json()["message"]
+    assert "/reject" not in help_response.json()["message"]
 
     mode_response = client.post(
         "/gateway/weixin/commands/handle",

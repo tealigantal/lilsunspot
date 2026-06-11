@@ -36,7 +36,10 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     commands = client.get("/gateway/weixin/commands", headers=headers)
     assert commands.status_code == 200
     assert commands.json()["commands"]
-    assert any(item["name"] == "/approve" for item in commands.json()["commands"])
+    command_names = {item["name"] for item in commands.json()["commands"]}
+    assert {"/help", "/mode"} <= command_names
+    assert "/approve" not in command_names
+    assert "/reject" not in command_names
 
     policy = client.get("/safety/policy", headers=headers)
     assert policy.status_code == 200

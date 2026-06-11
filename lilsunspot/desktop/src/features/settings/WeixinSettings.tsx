@@ -92,6 +92,9 @@ function userStatusDetail(status: WeixinStatus | null) {
   if (status?.connected) {
     return "";
   }
+  if (status?.login?.poll_warning) {
+    return status.login.poll_warning;
+  }
   if (status?.status === "qr_pending") {
     return "用手机微信扫描二维码，然后在手机上确认登录。";
   }
@@ -111,6 +114,9 @@ function userStatusDetail(status: WeixinStatus | null) {
 }
 
 function qrPanelHint(status: WeixinStatus | null, hasQrImage: boolean) {
+  if (status?.login?.poll_warning) {
+    return status.login.poll_warning;
+  }
   if (hasQrImage) {
     return status?.login?.message || "请用手机微信扫码。";
   }
@@ -412,7 +418,7 @@ export function WeixinSettings() {
       <div className="settingsHeader">
         <div>
           <h3>扫码连接微信私聊</h3>
-          <p>微信文本和文件会同步到桌面；回答通过审批后可发回微信。</p>
+          <p>微信文本和文件会同步到桌面；可以直接用自然语言调整回答风格。</p>
         </div>
         <StatusBadge tone={badgeTone(status)}>{badgeLabel(status)}</StatusBadge>
       </div>

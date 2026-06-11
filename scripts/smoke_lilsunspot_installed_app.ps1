@@ -148,6 +148,26 @@ function Get-ProcessByExecutablePath {
         }
 }
 
+function Get-InstalledSidecarPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $InstallDir
+    )
+
+    $candidates = @(
+        (Join-Path $InstallDir "resources\binaries\lilsunspotd\lilsunspotd.exe"),
+        (Join-Path $InstallDir "binaries\lilsunspotd\lilsunspotd.exe"),
+        (Join-Path $InstallDir "resources\lilsunspotd\lilsunspotd.exe"),
+        (Join-Path $InstallDir "lilsunspotd.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-FullPath $candidate)
+        }
+    }
+    throw "仓库外 lilsunspotd.exe 不存在。"
+}
+
 function Wait-ForCondition {
     param(
         [Parameter(Mandatory = $true)]
@@ -196,7 +216,7 @@ if (-not $SkipInstall) {
 }
 
 $appPath = Join-Path $InstallDir "Lilsunspot.exe"
-$sidecarPath = Join-Path $InstallDir "lilsunspotd.exe"
+$sidecarPath = ""
 $runtimeFile = Join-Path $DataDir "daemon-runtime.json"
 $tokenFile = Join-Path $DataDir "runtime-token.json"
 $previousDataDir = [System.Environment]::GetEnvironmentVariable("LILSUNSPOT_DATA_DIR", "Process")
@@ -214,6 +234,7 @@ try {
     }
 
     Assert-Path $appPath "仓库外 Lilsunspot.exe"
+    $sidecarPath = Get-InstalledSidecarPath $InstallDir
     Assert-Path $sidecarPath "仓库外 lilsunspotd.exe"
 
     Remove-SmokeDirectory $DataDir "安装冒烟数据目录"

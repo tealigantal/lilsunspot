@@ -1,5 +1,6 @@
+import { useState } from "react";
 import lilsunspotIcon from "../../assets/lilsunspot-icon.png";
-import { openAttachment } from "../../api";
+import { decideSafetyApproval, openAttachment, sendWeixinMessage } from "../../api";
 import type { ConversationAttachment, ConversationMessage } from "../../types";
 
 export type ChatMessage = Partial<ConversationMessage> & {
@@ -14,6 +15,12 @@ type ChatTranscriptProps = {
   messages: ChatMessage[];
   examples?: { title: string; note: string }[];
   onExampleSelect?: (value: string) => void;
+  weixinSendTarget?: WeixinSendTarget | null;
+};
+
+export type WeixinSendTarget = {
+  recipient: string;
+  label: string;
 };
 
 const ASSISTANT_NAME = "小黑子";
@@ -80,7 +87,18 @@ function attachmentSummaryLabel(attachment: ConversationAttachment) {
   return "查看说明";
 }
 
-function AttachmentCard({ attachment }: { attachment: ConversationAttachment }) {
+function AttachmentCard({
+  attachment,
+  weixinSendTarget
+}: {
+  attachment: ConversationAttachment;
+  weixinSendTarget?: WeixinSendTarget | null;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [draftMessage, setDraftMessage] = useState("");
+  const [sendStatus, setSendStatus] = useState("");
+  const [sending, setSending] = useState(false);
+
   async function copySummary() {
     const text = attachment.summary_text || attachment.reason_cn || `${attachment.file_name} 已收到。`;
     await navigator.clipboard?.writeText(text);
@@ -88,6 +106,42 @@ function AttachmentCard({ attachment }: { attachment: ConversationAttachment }) 
 
   async function openStoredAttachment() {
     await openAttachment(attachment.id);
+  }
+
+  function openWeixinConfirm() {
+    setDraftMessage(`发你一个文件：${attachment.file_name}`);
+    setSendStatus("");
+    setConfirming(true);
+  }
+
+  async function confirmSendToWeixin() {
+    if (!weixinSendTarget?.recipient) {
+      setSendStatus("这个附件只能在微信对话里发回微信。");
+      return;
+    }
+    const message = draftMessage.trim() || `发你一个文件：${attachment.file_name}`;
+    setSending(true);
+    setSendStatus("正在创建发送审批。");
+    try {
+      const approvalResult = await sendWeixinMessage(weixinSendTarget.recipient, message, [attachment.id]);
+      const approvalId = approvalResult.approval?.id;
+      if (!approvalResult.approval_required || !approvalId) {
+        setSendStatus(approvalResult.message || "微信发送审批没有创建成功。");
+        return;
+      }
+      setSendStatus("正在确认发送。");
+      const decision = await decideSafetyApproval(approvalId, "approved");
+      if (decision.delivery && !decision.delivery.ok) {
+        setSendStatus(decision.delivery.message || "微信发送失败。");
+        return;
+      }
+      setConfirming(false);
+      setSendStatus(decision.delivery?.message || "已发到微信。");
+    } catch (error) {
+      setSendStatus(error instanceof Error ? error.message : "微信发送失败。");
+    } finally {
+      setSending(false);
+    }
   }
 
   const isImage = attachment.preview_data_url && attachment.mime_type.startsWith("image/");
@@ -118,12 +172,41 @@ function AttachmentCard({ attachment }: { attachment: ConversationAttachment }) 
         <button type="button" className="secondaryButton compactButton" onClick={() => void copySummary()}>
           复制摘要
         </button>
+        {weixinSendTarget?.recipient && (
+          <button type="button" className="secondaryButton compactButton" onClick={openWeixinConfirm}>
+            发到微信
+          </button>
+        )}
       </div>
+      {confirming && weixinSendTarget?.recipient && (
+        <div className="weixinSendConfirm">
+          <span>发给：{weixinSendTarget.label}</span>
+          <textarea
+            value={draftMessage}
+            onChange={(event) => setDraftMessage(event.target.value)}
+            rows={3}
+            aria-label="微信发送说明"
+          />
+          <div>
+            <button type="button" className="secondaryButton compactButton" onClick={() => setConfirming(false)} disabled={sending}>
+              取消
+            </button>
+            <button type="button" className="compactButton" onClick={() => void confirmSendToWeixin()} disabled={sending}>
+              {sending ? "发送中" : "确认发送"}
+            </button>
+          </div>
+        </div>
+      )}
+      {sendStatus && (
+        <p className="attachmentSendStatus" aria-live="polite">
+          {sendStatus}
+        </p>
+      )}
     </article>
   );
 }
 
-export function ChatTranscript({ messages, examples = [], onExampleSelect }: ChatTranscriptProps) {
+export function ChatTranscript({ messages, examples = [], onExampleSelect, weixinSendTarget = null }: ChatTranscriptProps) {
   return (
     <div className="chatTranscript" aria-live="polite">
       {messages.length === 0 ? (
@@ -149,7 +232,7 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect }: Cha
         messages.map((message) => (
           <article
             key={message.id}
-            className={`chatBubble ${message.role === "user" ? "userBubble" : message.role === "system" ? "systemBubble" : "assistantBubble"} ${message.status === "error" || message.error ? "errorBubble" : ""}`}
+            className={`chatBubble ${message.role === "user" ? "userBubble" : message.role === "system" ? "systemBubble" : "assistantBubble"} ${message.status === "error" || message.error ? "errorBubble" : ""} ${message.status === "generating" ? "generatingBubble" : ""}`}
           >
             {message.role === "assistant" && (
               <img className="assistantAvatar" src={lilsunspotIcon} alt={`${ASSISTANT_NAME}头像`} />
@@ -158,12 +241,13 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect }: Cha
               <span>
                 {roleLabel(message)} · {sourceLabel(message)}
                 {message.status === "error" ? " · 失败" : ""}
+                {message.status === "generating" ? " · 正在回复" : ""}
               </span>
               <p>{message.text}</p>
               {(message.attachments || []).length > 0 && (
                 <div className="attachmentList">
                   {(message.attachments || []).map((attachment) => (
-                    <AttachmentCard key={attachment.id} attachment={attachment} />
+                    <AttachmentCard key={attachment.id} attachment={attachment} weixinSendTarget={weixinSendTarget} />
                   ))}
                 </div>
               )}

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { AppBootstrapRuntime, Provider } from "../../types";
 import { getProviders } from "../../api";
 import { ModelSettings } from "../model/ModelSettings";
+import { CapabilitySettings } from "./CapabilitySettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { SafetySettings } from "./SafetySettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "weixin" | "safety" | "doctor";
+export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor";
 
 type SettingsDrawerProps = {
   open: boolean;
@@ -18,6 +19,7 @@ type SettingsDrawerProps = {
 
 const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
   { id: "model", label: "模型服务" },
+  { id: "capabilities", label: "能力", badge: "Hermes" },
   { id: "weixin", label: "微信", badge: "未连接" },
   { id: "safety", label: "安全审批", badge: "暂无待处理" },
   { id: "doctor", label: "诊断", badge: "未检查" }
@@ -93,6 +95,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
         </nav>
         <div className="drawerBody">
           {active === "model" && <ModelSettings runtime={runtime} provider={currentProvider} onSetupModel={onSetupModel} />}
+          {active === "capabilities" && <CapabilitySettings />}
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}

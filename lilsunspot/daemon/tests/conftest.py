@@ -13,12 +13,15 @@ def daemon_client(tmp_path, monkeypatch):
     monkeypatch.setenv("LILSUNSPOT_DATA_DIR", str(tmp_path / "data"))
 
     import lilsunspot.daemon.auth as auth
+    import lilsunspot.daemon.audit as audit
     import lilsunspot.daemon.agent_runner as agent_runner
     import lilsunspot.daemon.attachments as attachments
+    import lilsunspot.daemon.capabilities as capabilities
     import lilsunspot.daemon.chat_client as chat_client
     import lilsunspot.daemon.config_paths as config_paths
     import lilsunspot.daemon.conversations as conversations
     import lilsunspot.daemon.doctor as doctor
+    import lilsunspot.daemon.diagnostics as diagnostics
     import lilsunspot.daemon.gateway as gateway
     import lilsunspot.daemon.hermes_compat as hermes_compat
     import lilsunspot.daemon.hermes_runtime as hermes_runtime
@@ -35,9 +38,11 @@ def daemon_client(tmp_path, monkeypatch):
     config_paths = importlib.reload(config_paths)
     logging_utils = importlib.reload(logging_utils)
     auth = importlib.reload(auth)
+    audit = importlib.reload(audit)
     conversations = importlib.reload(conversations)
     agent_runner = importlib.reload(agent_runner)
     attachments = importlib.reload(attachments)
+    capabilities = importlib.reload(capabilities)
     providers = importlib.reload(providers)
     provider_client = importlib.reload(provider_client)
     hermes_runtime = importlib.reload(hermes_runtime)
@@ -50,6 +55,7 @@ def daemon_client(tmp_path, monkeypatch):
     safety = importlib.reload(safety)
     weixin_runtime = importlib.reload(weixin_runtime)
     doctor = importlib.reload(doctor)
+    diagnostics = importlib.reload(diagnostics)
     app_module = importlib.reload(app_module)
 
     client = TestClient(app_module.app)
@@ -59,8 +65,10 @@ def daemon_client(tmp_path, monkeypatch):
     return SimpleNamespace(
         app_module=app_module,
         agent_runner=agent_runner,
+        audit=audit,
         auth=auth,
         attachments=attachments,
+        capabilities=capabilities,
         chat_client=chat_client,
         client=client,
         config_paths=config_paths,
@@ -68,6 +76,7 @@ def daemon_client(tmp_path, monkeypatch):
         headers=headers,
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,
+        diagnostics=diagnostics,
         mode_intents=mode_intents,
         token=token,
         weixin_runtime=weixin_runtime,

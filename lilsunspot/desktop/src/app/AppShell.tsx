@@ -93,6 +93,7 @@ export function AppShell() {
   const runtime = bootstrapState.bootstrap.runtime;
   const chatConfigured = bootstrapState.bootstrap.stage === "chat_ready" && runtime.configured;
   const connectionLabel = chatConfigured ? "已连接" : runtime.configured ? "已配置" : "未配置";
+  const showDevPanel = bootstrapState.devMode && bootstrapState.bootstrap.stage === "daemon_failed";
   const activeCopy =
     activeView === "chat" && !chatConfigured
       ? { title: bootstrapState.bootstrap.stage === "starting" ? "正在准备小黑子" : "首启向导", subtitle: bootstrapState.bootstrap.message }
@@ -141,28 +142,29 @@ export function AppShell() {
           </div>
         </header>
 
-        {bootstrapState.devMode && (
-          <details className="devPanel">
-            <summary>开发者模式：浏览器调试连接</summary>
-            <p>这里仅用于浏览器开发调试，正式桌面版不会显示，也不会要求手动填写。</p>
-            <div className="formRow">
-              <label>
-                调试 Token
-                <input
-                  value={devToken}
-                  onChange={(event) => setDevToken(event.target.value)}
-                  type="password"
-                  placeholder="仅开发模式手动填写"
-                />
-              </label>
-              <button type="button" onClick={() => bootstrapState.applyDevToken(devToken)} disabled={!devToken.trim()}>
-                使用调试 Token
-              </button>
-            </div>
-          </details>
-        )}
-
-        <div className="consoleContent">{renderActiveView()}</div>
+        <div className="consoleContent">
+          {showDevPanel && (
+            <details className="devPanel">
+              <summary>开发者模式：浏览器调试连接</summary>
+              <p>这里仅用于浏览器开发调试，正式桌面版不会显示，也不会要求手动填写。</p>
+              <div className="formRow">
+                <label>
+                  调试 Token
+                  <input
+                    value={devToken}
+                    onChange={(event) => setDevToken(event.target.value)}
+                    type="password"
+                    placeholder="仅开发模式手动填写"
+                  />
+                </label>
+                <button type="button" onClick={() => bootstrapState.applyDevToken(devToken)} disabled={!devToken.trim()}>
+                  使用调试 Token
+                </button>
+              </div>
+            </details>
+          )}
+          {renderActiveView()}
+        </div>
       </section>
 
       <SettingsDrawer

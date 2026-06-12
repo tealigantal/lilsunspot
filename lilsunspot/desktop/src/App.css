@@ -474,18 +474,13 @@ pre {
 }
 
 .devPanel {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 30;
-  width: min(520px, calc(100vw - 36px));
+  width: 100%;
+  margin-bottom: 12px;
   padding: var(--space-4);
   backdrop-filter: blur(10px);
 }
 
 .devPanel:not([open]) {
-  width: auto;
-  min-width: 250px;
   border-radius: 999px;
   padding: 8px 14px;
   opacity: 0.58;
@@ -1964,6 +1959,138 @@ label {
   font-weight: 900;
 }
 
+.capabilityConsole {
+  gap: 18px;
+}
+
+.capabilityToolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.capabilityToolbar span {
+  color: var(--ikun-muted);
+  line-height: 1.45;
+}
+
+.capabilityGroups,
+.capabilityList,
+.auditList {
+  display: grid;
+  gap: 14px;
+}
+
+.capabilityGroup {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(99, 246, 218, 0.18);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: rgba(7, 17, 30, 0.36);
+}
+
+.capabilityGroup header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.capabilityGroup h4,
+.auditList h4 {
+  margin: 0;
+  color: var(--ikun-text);
+  font-size: 16px;
+}
+
+.capabilityGroup header span {
+  color: var(--ikun-muted-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.capabilityCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  border: 1px solid rgba(168, 182, 201, 0.16);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: rgba(26, 34, 48, 0.78);
+}
+
+.capabilityCardMain {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.capabilityTitleRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.capabilityTitleRow strong {
+  overflow: hidden;
+  color: var(--ikun-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capabilityCard p {
+  margin: 0;
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.capabilityMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capabilityMeta span {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ikun-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.capabilityActions {
+  display: grid;
+  gap: 8px;
+  min-width: 72px;
+}
+
+.auditEventCard {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(168, 182, 201, 0.16);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  background: rgba(26, 34, 48, 0.78);
+}
+
+.auditEventCard strong {
+  color: var(--ikun-text);
+  font-size: 13px;
+}
+
+.auditEventCard span {
+  color: var(--ikun-muted);
+  font-size: 12px;
+}
+
 .checkDot {
   width: 18px;
   height: 18px;
@@ -2547,6 +2674,19 @@ label {
   .chatSidePanel,
   .settingsSection {
     padding: 18px;
+  }
+
+  .capabilityCard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .capabilityActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .capabilityActions button {
+    width: 100%;
   }
 
   .chatBubble,

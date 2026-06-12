@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { runDoctor, runRepair } from "../../api";
+import { exportDiagnostics, runDoctor, runRepair } from "../../api";
 import type { DoctorCheck, DoctorResult } from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
 import { TechnicalDetails } from "../../shared/components/TechnicalDetails";
@@ -53,6 +53,19 @@ export function DoctorSettings() {
     }
   }
 
+  async function exportBundle() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await exportDiagnostics();
+      setMessage(`${result.message} 文件：${result.file_name}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "诊断包导出失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="settingsSection doctorConsole">
       <div className="settingsHeader">
@@ -84,7 +97,7 @@ export function DoctorSettings() {
         <button type="button" className="secondaryButton" onClick={repair} disabled={busy}>
           一键修复
         </button>
-        <button type="button" className="secondaryButton" disabled title="诊断包导出接口待接入">
+        <button type="button" className="secondaryButton" onClick={exportBundle} disabled={busy}>
           导出脱敏诊断包
         </button>
       </div>

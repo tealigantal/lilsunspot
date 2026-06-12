@@ -35,10 +35,14 @@ def _approvals_file() -> Path:
 def _redact_runtime_token_text(value: str) -> str:
     try:
         from .auth import load_or_create_token
+        from .audit import redact_text
 
         runtime_token = load_or_create_token()
     except Exception:
         runtime_token = ""
+        redact_text = None
+    if redact_text is not None:
+        return redact_text(value, runtime_token)
     if runtime_token:
         return value.replace(runtime_token, "[已隐藏]")
     return value
@@ -90,7 +94,12 @@ def _redact_detail_value(value: Any) -> Any:
                 redacted[key_text] = _redact_detail_value(child)
         return redacted
     if isinstance(value, list):
-        return [_redact_detail_value(item) for item in value]
+        try:
+            from .audit import redact_value
+
+            return redact_value(value)
+        except Exception:
+            return [_redact_detail_value(item) for item in value]
     if isinstance(value, str):
         return _redact_runtime_token_text(value)
     return value
@@ -147,8 +156,15 @@ def request_safety_approval(
     store["approvals"].append(approval)
     _write_store(store)
     from . import conversations
+    from .audit import record_audit_event
 
     conversations.record_approval_action(_public_approval(approval))
+    record_audit_event(
+        "approval_request",
+        "创建了安全审批。",
+        source=approval["source"],
+        details={"operation": operation_id, "approval_id": approval["id"], "details": approval.get("details") or {}},
+    )
     return {
         "ok": True,
         "approval_required": True,
@@ -183,8 +199,16 @@ def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
         approval["decided_at"] = _now_iso()
         _write_store(store)
         from . import conversations
+        from .audit import record_audit_event
 
         conversations.record_approval_action(_public_approval(approval))
+        record_audit_event(
+            "approval_decision",
+            "处理了安全审批。",
+            source="safety",
+            status=normalized_decision,
+            details={"operation": approval.get("operation"), "approval_id": approval.get("id")},
+        )
         hermes_resolved = _resolve_hermes_tool_approval(_public_approval(approval))
         return {
             "ok": True,

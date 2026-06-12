@@ -1,6 +1,9 @@
 import type {
   AppState,
   AppBootstrapState,
+  CapabilitiesResult,
+  Capability,
+  CapabilityTestResult,
   ChatSendResult,
   Conversation,
   ConversationMessage,
@@ -10,6 +13,7 @@ import type {
   DaemonDiscovery,
   DaemonHttpResponse,
   DoctorResult,
+  DiagnosticsExportResult,
   HealthStatus,
   LilsunspotEvent,
   ModeProfile,
@@ -19,13 +23,14 @@ import type {
   RuntimeInfo,
   SafetyApprovalDecision,
   SafetyApprovals,
+  AuditResult,
   SafetyPolicy,
   SaveProviderResult,
   WeixinCommand,
   WeixinStatus
 } from "./types";
 
-const DEFAULT_DAEMON_URL = "http://127.0.0.1:8765";
+const DEFAULT_DAEMON_URL = import.meta.env.VITE_LILSUNSPOT_DAEMON_URL || "http://127.0.0.1:8765";
 const TOKEN_HEADER = "X-Lilsunspot-Token";
 const WEIXIN_REQUEST_TIMEOUT_MS = 12_000;
 const WEIXIN_DISCONNECT_TIMEOUT_MS = 5_000;
@@ -323,6 +328,24 @@ export async function saveProvider(
   });
 }
 
+export async function getCapabilities(): Promise<CapabilitiesResult> {
+  return requestJson<CapabilitiesResult>("/capabilities");
+}
+
+export async function patchCapability(capabilityId: string, enabled: boolean): Promise<Capability> {
+  const body = await requestJson<{ ok: boolean; capability: Capability }>(`/capabilities/${encodeURIComponent(capabilityId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled })
+  });
+  return body.capability;
+}
+
+export async function testCapability(capabilityId: string): Promise<CapabilityTestResult> {
+  return requestJson<CapabilityTestResult>(`/capabilities/${encodeURIComponent(capabilityId)}/test`, {
+    method: "POST"
+  });
+}
+
 export async function sendChatMessage(message: string): Promise<ChatSendResult> {
   return requestJson<ChatSendResult>("/chat/send", {
     method: "POST",
@@ -464,6 +487,11 @@ export async function getSafetyApprovals(): Promise<SafetyApprovals> {
   return requestJson<SafetyApprovals>("/safety/approvals");
 }
 
+export async function getSafetyAudit(limit = 50): Promise<AuditResult> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return requestJson<AuditResult>(`/safety/audit?${params.toString()}`);
+}
+
 export async function decideSafetyApproval(approvalId: string, decision: "approved" | "rejected"): Promise<SafetyApprovalDecision> {
   return requestJson<SafetyApprovalDecision>(`/safety/approvals/${encodeURIComponent(approvalId)}/decide`, {
     method: "POST",
@@ -479,5 +507,11 @@ export async function runRepair(checkName = ""): Promise<RepairResult> {
   return requestJson<RepairResult>("/doctor/repair", {
     method: "POST",
     body: JSON.stringify({ check_name: checkName || null })
+  });
+}
+
+export async function exportDiagnostics(): Promise<DiagnosticsExportResult> {
+  return requestJson<DiagnosticsExportResult>("/doctor/diagnostics/export", {
+    method: "POST"
   });
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { decideSafetyApproval, getSafetyApprovals, getSafetyPolicy } from "../../api";
-import type { SafetyApproval, SafetyApprovals, SafetyPolicy } from "../../types";
+import { decideSafetyApproval, getSafetyApprovals, getSafetyAudit, getSafetyPolicy } from "../../api";
+import type { AuditEvent, SafetyApproval, SafetyApprovals, SafetyPolicy } from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
 import { TechnicalDetails } from "../../shared/components/TechnicalDetails";
 
@@ -38,6 +38,7 @@ function operationTitle(operation: string) {
 export function SafetySettings() {
   const [policy, setPolicy] = useState<SafetyPolicy | null>(null);
   const [approvals, setApprovals] = useState<SafetyApprovals | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -49,9 +50,10 @@ export function SafetySettings() {
     setBusy(true);
     setMessage("");
     try {
-      const [nextPolicy, nextApprovals] = await Promise.all([getSafetyPolicy(), getSafetyApprovals()]);
+      const [nextPolicy, nextApprovals, nextAudit] = await Promise.all([getSafetyPolicy(), getSafetyApprovals(), getSafetyAudit()]);
       setPolicy(nextPolicy);
       setApprovals(nextApprovals);
+      setAuditEvents(nextAudit.events);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "安全审批状态读取失败。");
     } finally {
@@ -117,6 +119,16 @@ export function SafetySettings() {
       <button type="button" className="secondaryButton" onClick={load} disabled={busy}>
         {busy ? "读取中" : "重新读取审批状态"}
       </button>
+      <div className="auditList">
+        <h4>最近审计</h4>
+        {auditEvents.slice(0, 8).map((event) => (
+          <article key={event.event_id} className="auditEventCard">
+            <strong>{event.summary}</strong>
+            <span>{event.event_type} · {event.status}</span>
+          </article>
+        ))}
+        {auditEvents.length === 0 && <p className="inlineNotice">还没有审计记录。</p>}
+      </div>
       {message && <p className="inlineStatus">{message}</p>}
       {(policy || approvals) && <TechnicalDetails data={{ policy, approvals }} />}
     </section>

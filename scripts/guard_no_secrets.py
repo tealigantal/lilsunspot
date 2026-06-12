@@ -23,6 +23,9 @@ EXCLUDED_DIRS = {
     "node_modules",
     "target",
 }
+EXCLUDED_RELATIVE_PREFIXES = {
+    ("lilsunspot", "desktop", "src-tauri", "binaries"),
+}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".exe", ".dll"}
 
 PATTERNS = [
@@ -43,8 +46,11 @@ def iter_files(path: Path):
     for child in path.rglob("*"):
         if child.is_dir():
             continue
-        relative_parts = set(child.relative_to(ROOT).parts)
+        relative_path = child.relative_to(ROOT)
+        relative_parts = set(relative_path.parts)
         if relative_parts & EXCLUDED_DIRS:
+            continue
+        if any(relative_path.parts[: len(prefix)] == prefix for prefix in EXCLUDED_RELATIVE_PREFIXES):
             continue
         if child.suffix.lower() in EXCLUDED_SUFFIXES:
             continue

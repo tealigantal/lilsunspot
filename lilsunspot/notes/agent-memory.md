@@ -1,5 +1,21 @@
 # Agent Memory
 
+## 2026-06-12 - LIL-HERMES-FULL-01 screenshot-level frontend QA retry
+
+- Task: rerun screenshot-level frontend acceptance for the integrated Hermes capability work and fix rendered UI bugs found during Browser IAB validation.
+- Files touched: `TASKS.md`, `lilsunspot/desktop/src/app/AppShell.tsx`, `lilsunspot/desktop/src/App.css`, `lilsunspot/desktop/src/api.ts`, `lilsunspot/desktop/src/features/settings/CapabilitySettings.tsx`, and this memory file.
+- Decision/result: fixed the capability center crash on partial/older capability payloads by normalizing optional string lists and fallback source labels; preserved capability test messages after reload; fixed duplicate dependency keys; allowed browser dev runs to target an isolated daemon URL without touching production Tauri discovery; hid the development token panel after successful dev connection; and changed mobile capability cards to stack action buttons below content.
+- Validation: Browser IAB covered 960x680 and 390x760 ability center, ability test, diagnostics export, and safety audit flows with 84 capability cards and 84 check buttons, no framework overlay, no current-run console errors or warnings, and no horizontal overflow. `npm run build --prefix lilsunspot/desktop`, `python -m pytest lilsunspot/daemon/tests -q`, `python scripts/guard_no_secrets.py`, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1`, `git diff --check`, and `npm run tauri:build --prefix lilsunspot/desktop` passed. Final NSIS setup artifact exists at 62,262,130 bytes.
+- Remaining risk: automated screenshot QA used the Vite dev UI against an isolated local daemon, not a freshly installed NSIS app click-through with real credentials or Weixin media. Screenshots were not committed or recorded in repository memory, and no API key, runtime token, Weixin credential, private message text, QR, or attachment content was recorded.
+
+## 2026-06-12 - LIL-HERMES-FULL-01 Hermes local capability integration
+
+- Task: expose local Hermes capabilities through lilsunspot as one integrated capability center, with config bridge, audit, diagnostics, and upstream sync strategy.
+- Files touched: `TASKS.md`, daemon capability/audit/diagnostics/runtime/API modules, desktop settings/API/types/CSS, focused daemon tests, safety approval tests, secret guard, GitHub upstream-sync workflow, PR template, and this memory file.
+- Decision/result: lilsunspot now has a product-layer capability registry over local Hermes `TOOLSETS`, configurable toolsets, and config surfaces; protected APIs for capability/model/toolset/MCP config; `audit.db`; diagnostics zip export; explicit agent-loop toolset/fallback loading; desktop capability UI; and a scheduled/manual upstream sync PR workflow. Audit, approval, diagnostics, and public config views share stronger redaction for sensitive fields and inline command/header/token argument forms. Hermes core was not rewritten.
+- Validation: focused capabilities/safety pytest 9 passed, daemon pytest 67 passed, product pytest 35 passed, secret guard passed, `pwsh -NoProfile -File scripts/check.ps1` passed, `git diff --check` returned only CRLF warnings, sidecar build passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced `Lilsunspot_0.1.0_x64-setup.exe` at 62,251,338 bytes.
+- Remaining risk: high-risk tool execution uses Hermes approval surfaces plus lilsunspot audit/approval bridges, but real external-provider/tool/manual installed-app acceptance still depends on configured credentials and local dependencies. GitHub Actions upstream-sync still needs a first remote `workflow_dispatch` run. No secrets, runtime token, Weixin credentials, private message text, screenshots, or attachment contents were recorded.
+
 ## 2026-06-10
 
 - Task: re-check code and prepare the Weixin multi-conversation work for PR.

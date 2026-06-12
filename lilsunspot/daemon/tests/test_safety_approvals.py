@@ -118,6 +118,7 @@ def test_safety_approval_request_redacts_sensitive_detail_fields(daemon_client):
                 "api_key": "placeholder-api-key",
                 "nested": {"secret": "placeholder-secret"},
                 "comment": daemon_client.token,
+                "command": "tool --token inline-approval-secret --mode dry-run",
                 "note": "普通说明",
             },
         },
@@ -131,10 +132,12 @@ def test_safety_approval_request_redacts_sensitive_detail_fields(daemon_client):
     assert body["approval"]["details"]["api_key"] == "[已隐藏]"
     assert body["approval"]["details"]["nested"]["secret"] == "[已隐藏]"
     assert body["approval"]["details"]["comment"] == "[已隐藏]"
+    assert "inline-approval-secret" not in body["approval"]["details"]["command"]
     assert body["approval"]["details"]["note"] == "普通说明"
     assert daemon_client.token not in response.text
     assert "placeholder-api-key" not in response.text
     assert "placeholder-secret" not in response.text
+    assert "inline-approval-secret" not in response.text
 
 
 def test_hermes_tool_approval_decision_resolves_gateway_queue(daemon_client, monkeypatch):

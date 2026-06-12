@@ -450,11 +450,71 @@ export type WeixinCommand = {
   description: string;
 };
 
+export type SafetyPolicy = Record<string, unknown>;
+
+export type CapabilityRisk = "low" | "medium" | "high" | string;
+
+export type Capability = {
+  id: string;
+  category: string;
+  category_label: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  available: boolean;
+  status: "enabled" | "blocked" | "unsupported" | "needs_config" | "disabled" | string;
+  status_text: string;
+  risk: CapabilityRisk;
+  dependencies: string[];
+  config_keys: string[];
+  tools: string[];
+  source: string;
+  configurable: boolean;
+};
+
+export type CapabilitiesResult = {
+  capabilities: Capability[];
+  platform: string;
+  enabled_toolsets: string[];
+  default_toolsets: string[];
+  config_keys: string[];
+};
+
+export type CapabilityTestResult = {
+  ok: boolean;
+  capability: Capability;
+  message: string;
+  actions?: string[];
+};
+
+export type AuditEvent = {
+  event_id: string;
+  event_type: string;
+  source: string;
+  status: string;
+  summary: string;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AuditResult = {
+  events: AuditEvent[];
+  audit_db: string;
+  limit: number;
+};
+
 export type SafetyApproval = {
   id: string;
   operation: string;
   status: string;
+  summary?: string;
   details?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SafetyApprovals = {
+  pending: SafetyApproval[];
+  policy?: SafetyPolicy;
   [key: string]: unknown;
 };
 
@@ -479,4 +539,32 @@ export type SafetyApprovalDecisionResult = {
     [key: string]: unknown;
   };
   [key: string]: unknown;
+};
+
+export type DoctorCheck = {
+  name: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type DoctorResult = {
+  ok: boolean;
+  daemon_version: string;
+  checks: DoctorCheck[];
+};
+
+export type RepairResult = {
+  ok: boolean;
+  check: string;
+  message: string;
+  suggestion: string;
+};
+
+export type DiagnosticsExportResult = {
+  ok: boolean;
+  diagnostic_id: string;
+  file_name: string;
+  size_bytes: number;
+  message: string;
+  audit_event?: AuditEvent;
 };

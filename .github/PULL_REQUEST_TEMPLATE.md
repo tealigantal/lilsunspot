@@ -40,6 +40,14 @@ Fixes #
 
 <!-- Complete these before requesting review. -->
 
+### Lilsunspot Product Boundary
+
+- [ ] If this touches lilsunspot, product code stays under `lilsunspot/` and Hermes core is not rewritten.
+- [ ] If this is an upstream sync, the PR lists recorded/latest upstream commits and updates `lilsunspot/UPSTREAM_COMMIT.txt`.
+- [ ] New Hermes toolsets, DEFAULT_CONFIG blocks, dashboard APIs, MCP/plugin surfaces, or model slots are represented in the lilsunspot capability registry.
+- [ ] Installed-app impact was checked; desktop/sidecar/installer changes ran the NSIS build or document the blocker.
+- [ ] No API key, runtime token, Weixin credential, private message body, or raw attachment content appears in logs, screenshots, fixtures, diagnostics, or PR text.
+
 ### Code
 
 - [ ] I've read the [Contributing Guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md)

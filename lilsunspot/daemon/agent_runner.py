@@ -9,6 +9,7 @@ from typing import Any
 
 from . import conversations
 from . import provider_client as provider_http
+from .capabilities import enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 
@@ -177,6 +178,8 @@ def _run_agent_turn(
             provider=settings["hermes_provider"],
             base_url=settings["base_url"],
             api_key=settings["api_key"],
+            enabled_toolsets=enabled_toolsets_for_agent(paths),
+            fallback_model=fallback_chain_for_agent(paths),
             quiet_mode=True,
             verbose_logging=False,
             session_id=session_id,

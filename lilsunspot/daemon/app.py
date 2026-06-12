@@ -14,11 +14,22 @@ from pydantic import BaseModel, Field
 from lilsunspot import __version__
 
 from . import conversations, product_features, turn_coalescer
+from .audit import ensure_audit_schema, list_audit_events, record_audit_event
 from .attachments import AttachmentError, is_safe_stored_attachment
 from .auth import load_or_create_token, require_token
 from .agent_runner import delete_hermes_session, send_agent_message
+from .capabilities import (
+    CapabilityError,
+    get_capability,
+    get_platform_toolsets,
+    list_capabilities,
+    save_platform_toolsets,
+    test_capability,
+    update_capability,
+)
 from .chat_client import current_runtime_model
 from .config_paths import ensure_runtime_dirs
+from .diagnostics import export_diagnostics
 from .doctor import repair_placeholder, run_doctor_checks
 from .gateway import (
     WeixinGatewayError,
@@ -32,7 +43,17 @@ from .gateway import (
     weixin_status,
 )
 from .hermes_compat import audit_hermes_compatibility
-from .hermes_runtime import HermesRuntimeError, save_provider_credentials
+from .hermes_runtime import (
+    HermesRuntimeError,
+    delete_mcp_server,
+    list_mcp_servers,
+    model_runtime_config,
+    save_auxiliary_model,
+    save_fallback_providers,
+    save_provider_credentials,
+    save_provider_routing,
+    upsert_mcp_server,
+)
 from .logging_utils import configure_logging
 from .mode_intents import apply_mode_intent
 from .modes import get_current_mode, load_mode_profiles, select_mode
@@ -81,6 +102,7 @@ logger = configure_logging(paths.logs_dir)
 load_or_create_token()
 runtime_descriptor = write_runtime_descriptor(BIND_HOST, BIND_PORT, paths)
 conversations.ensure_schema(paths)
+ensure_audit_schema(paths)
 product_features.ensure_schema(paths)
 logger.info(
     "daemon runtime discovery written base_url=%s pid=%s",
@@ -115,7 +137,7 @@ app.add_middleware(
         "tauri://localhost",
         "https://tauri.localhost",
     ],
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
     allow_headers=["Content-Type", "X-Lilsunspot-Token", "Last-Event-ID"],
 )
 
@@ -141,6 +163,38 @@ class ProviderTestRequest(BaseModel):
     model: str | None = None
     api_key: str = ""
     base_url_override: str | None = None
+
+
+class CapabilityPatchRequest(BaseModel):
+    enabled: bool | None = None
+
+
+class ModelFallbacksRequest(BaseModel):
+    fallbacks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ModelRoutingRequest(BaseModel):
+    routing: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelAuxiliaryRequest(BaseModel):
+    task: str = Field(..., min_length=1)
+    provider: str = ""
+    model: str = ""
+    base_url: str = ""
+
+
+class PlatformToolsetsRequest(BaseModel):
+    toolsets: list[str] = Field(default_factory=list)
+
+
+class McpServerCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpServerPatchRequest(BaseModel):
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatSendRequest(BaseModel):
@@ -431,12 +485,196 @@ async def save_provider(payload: SaveProviderRequest) -> dict[str, str | bool]:
     except HermesRuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("provider saved provider=%s model=%s", result["provider"], result["model"])
+    record_audit_event(
+        "config_change",
+        "更新了主模型配置。",
+        source="providers.save",
+        details={"provider": result["provider"], "model": result["model"]},
+        paths=paths,
+    )
     return {
         "ok": True,
         "provider": result["provider"],
         "model": result["model"],
         "hermes_home": str(ensure_runtime_dirs().hermes_home),
     }
+
+
+@app.get("/capabilities", dependencies=[Depends(require_token)])
+async def capabilities() -> dict[str, Any]:
+    return list_capabilities(paths)
+
+
+@app.get("/capabilities/{capability_id}", dependencies=[Depends(require_token)])
+async def capability_detail(capability_id: str) -> dict[str, Any]:
+    try:
+        return {"capability": get_capability(capability_id, paths)}
+    except CapabilityError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.patch("/capabilities/{capability_id}", dependencies=[Depends(require_token)])
+async def capability_update(capability_id: str, payload: CapabilityPatchRequest) -> dict[str, Any]:
+    try:
+        capability = update_capability(capability_id, enabled=payload.enabled, paths=paths)
+    except CapabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "capability_update",
+        "更新了能力开关。",
+        source="capabilities",
+        details={"capability_id": capability_id, "enabled": payload.enabled},
+        paths=paths,
+    )
+    return {"ok": True, "capability": capability}
+
+
+@app.post("/capabilities/{capability_id}/test", dependencies=[Depends(require_token)])
+async def capability_test(capability_id: str) -> dict[str, Any]:
+    try:
+        result = test_capability(capability_id, paths)
+    except CapabilityError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    record_audit_event(
+        "capability_test",
+        "检查了能力状态。",
+        source="capabilities",
+        details={"capability_id": capability_id, "ok": result.get("ok")},
+        paths=paths,
+    )
+    return result
+
+
+@app.get("/models/runtime", dependencies=[Depends(require_token)])
+async def models_runtime() -> dict[str, Any]:
+    return model_runtime_config(paths)
+
+
+@app.post("/models/main", dependencies=[Depends(require_token)])
+async def models_main(payload: SaveProviderRequest) -> dict[str, Any]:
+    return await save_provider(payload)
+
+
+@app.post("/models/fallbacks", dependencies=[Depends(require_token)])
+async def models_fallbacks(payload: ModelFallbacksRequest) -> dict[str, Any]:
+    try:
+        result = save_fallback_providers(payload.fallbacks, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "config_change",
+        "更新了备用模型链。",
+        source="models.fallbacks",
+        details={"count": len(payload.fallbacks)},
+        paths=paths,
+    )
+    return {"ok": True, "models": result}
+
+
+@app.post("/models/routing", dependencies=[Depends(require_token)])
+async def models_routing(payload: ModelRoutingRequest) -> dict[str, Any]:
+    try:
+        result = save_provider_routing(payload.routing, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "config_change",
+        "更新了模型路由配置。",
+        source="models.routing",
+        details={"keys": sorted(payload.routing.keys())},
+        paths=paths,
+    )
+    return {"ok": True, "models": result}
+
+
+@app.post("/models/auxiliary", dependencies=[Depends(require_token)])
+async def models_auxiliary(payload: ModelAuxiliaryRequest) -> dict[str, Any]:
+    try:
+        result = save_auxiliary_model(payload.task, payload.provider, payload.model, payload.base_url, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "config_change",
+        "更新了辅助模型配置。",
+        source="models.auxiliary",
+        details={"task": payload.task, "provider": payload.provider, "model": payload.model},
+        paths=paths,
+    )
+    return {"ok": True, "models": result}
+
+
+@app.get("/tools/platform/lilsunspot", dependencies=[Depends(require_token)])
+async def tools_platform_lilsunspot() -> dict[str, Any]:
+    return get_platform_toolsets(paths)
+
+
+@app.put("/tools/platform/lilsunspot", dependencies=[Depends(require_token)])
+async def tools_platform_lilsunspot_update(payload: PlatformToolsetsRequest) -> dict[str, Any]:
+    try:
+        result = save_platform_toolsets(payload.toolsets, paths)
+    except CapabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "config_change",
+        "更新了小黑子工具集。",
+        source="tools.platform",
+        details={"toolsets": payload.toolsets},
+        paths=paths,
+    )
+    return {"ok": True, **result}
+
+
+@app.get("/mcp/servers", dependencies=[Depends(require_token)])
+async def mcp_servers() -> dict[str, Any]:
+    return list_mcp_servers(paths)
+
+
+@app.post("/mcp/servers", dependencies=[Depends(require_token)])
+async def mcp_server_create(payload: McpServerCreateRequest) -> dict[str, Any]:
+    try:
+        result = upsert_mcp_server(payload.name, payload.config, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "mcp_config_change",
+        "新增或更新了 MCP 服务。",
+        source="mcp",
+        details={"name": payload.name, "config": payload.config},
+        paths=paths,
+    )
+    return {"ok": True, **result}
+
+
+@app.patch("/mcp/servers/{name}", dependencies=[Depends(require_token)])
+async def mcp_server_update(name: str, payload: McpServerPatchRequest) -> dict[str, Any]:
+    try:
+        result = upsert_mcp_server(name, payload.config, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "mcp_config_change",
+        "更新了 MCP 服务。",
+        source="mcp",
+        details={"name": name, "config": payload.config},
+        paths=paths,
+    )
+    return {"ok": True, **result}
+
+
+@app.delete("/mcp/servers/{name}", dependencies=[Depends(require_token)])
+async def mcp_server_delete(name: str) -> dict[str, Any]:
+    try:
+        result = delete_mcp_server(name, paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        "mcp_config_change",
+        "删除了 MCP 服务。",
+        source="mcp",
+        details={"name": name},
+        paths=paths,
+    )
+    return {"ok": True, **result}
 
 
 @app.get("/modes", dependencies=[Depends(require_token)])
@@ -890,13 +1128,13 @@ async def api_memory_delete(memory_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
-@app.get("/capabilities", dependencies=[Depends(require_token)])
-async def api_capabilities() -> dict[str, Any]:
+@app.get("/product/capabilities", dependencies=[Depends(require_token)])
+async def api_product_capabilities() -> dict[str, Any]:
     return {"capabilities": product_features.list_capabilities()}
 
 
-@app.patch("/capabilities/{capability_id}", dependencies=[Depends(require_token)])
-async def api_capability_update(capability_id: str, payload: CapabilityUpdateRequest) -> dict[str, Any]:
+@app.patch("/product/capabilities/{capability_id}", dependencies=[Depends(require_token)])
+async def api_product_capability_update(capability_id: str, payload: CapabilityUpdateRequest) -> dict[str, Any]:
     capability = product_features.update_capability(capability_id, enabled=payload.enabled)
     if capability is None:
         raise HTTPException(status_code=404, detail="没有找到这个能力。")
@@ -913,10 +1151,15 @@ async def safety_approvals() -> dict[str, Any]:
     return list_pending_approvals()
 
 
+@app.get("/safety/audit", dependencies=[Depends(require_token)])
+async def safety_audit(limit: int = 100) -> dict[str, Any]:
+    return list_audit_events(limit=limit, paths=paths)
+
+
 @app.post("/safety/approvals/request", dependencies=[Depends(require_token)])
 async def safety_approval_request(payload: ApprovalRequest) -> dict[str, Any]:
     try:
-        return request_safety_approval(
+        result = request_safety_approval(
             payload.operation,
             payload.summary or f"请求执行 {payload.operation}",
             payload.details,
@@ -924,6 +1167,7 @@ async def safety_approval_request(payload: ApprovalRequest) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
 
 
 @app.post("/safety/approvals/{approval_id}/decide", dependencies=[Depends(require_token)])
@@ -958,6 +1202,11 @@ async def doctor_run() -> dict[str, Any]:
 @app.post("/doctor/repair", dependencies=[Depends(require_token)])
 async def doctor_repair(payload: RepairRequest) -> dict[str, Any]:
     return repair_placeholder(payload.check_name)
+
+
+@app.post("/doctor/diagnostics/export", dependencies=[Depends(require_token)])
+async def doctor_diagnostics_export() -> dict[str, Any]:
+    return export_diagnostics(paths)
 
 
 def main() -> None:

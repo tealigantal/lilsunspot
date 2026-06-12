@@ -2,6 +2,15 @@
 
 ## Current
 
+- LIL-HERMES-FULL-01：Hermes 本地全能力一体化接入。
+  - 2026-06-12：新增小黑子能力中心后端 registry，按本地 Hermes `TOOLSETS`、`CONFIGURABLE_TOOLSETS`、`DEFAULT_CONFIG`、provider/runtime 状态生成能力清单；能力可发现、可测试，官方可配置 toolset 能写入 `platform_toolsets.lilsunspot`，非普通配置 toolset 也在能力中心显示状态/风险/依赖。默认 agent loop 显式读取 lilsunspot toolsets 和 fallback chain，避免未配置时暴露过宽工具面。
+  - 2026-06-12：新增模型配置桥 `/models/runtime`、`/models/fallbacks`、`/models/routing`、`/models/auxiliary`，新增 `/tools/platform/lilsunspot`、`/mcp/servers` CRUD，配置写入 Hermes `config.yaml`，响应脱敏。
+  - 2026-06-12：新增 `audit.db`、`/safety/audit` 和诊断包导出 `/doctor/diagnostics/export`；安全审批核心路径写审计，诊断包包含能力状态、Doctor、Hermes compat、模型运行态、审计摘要和配置形状，不包含 API Key、runtime token、微信凭据、私聊正文或附件原文。
+  - 2026-06-12：审计、审批详情、公开 MCP/模型配置视图统一脱敏敏感字段和命令行参数形态（如 `--token value`、`Authorization: Bearer ...`、URL token 参数）；真实配置仍可写入 Hermes config，但 API/诊断/审计不回显 secret。
+  - 2026-06-12：桌面设置新增“能力”页，诊断页接入脱敏诊断包导出，安全页展示最近审计；新增 GitHub Action `lilsunspot-upstream-sync.yml`，定时/手动检测官方 upstream，创建草稿 PR，不自动合并，并在 PR 模板加入 lilsunspot 产品边界检查。
+  - 2026-06-12 截图级前端复验：Browser IAB 覆盖 960x680 和 390x760 的能力中心、能力检查、诊断导出、安全审计；修复能力 payload 缺少 `dependencies/source` 时的崩溃和重复 key 警告，开发调试面板不再遮挡正常验收视图，移动能力卡操作按钮改为下排布局。
+  - 验证已跑：focused capabilities/safety pytest 9 passed、daemon pytest 67 passed、product pytest 35 passed、Browser IAB 当前轮 console 0 error/warn 且 960x680/390x760 无横向溢出、`python scripts/guard_no_secrets.py`、`pwsh -NoProfile -File scripts/check.ps1`、`git diff --check`、`pwsh -NoProfile -File scripts/build_lilsunspotd_sidecar.ps1`、`npm run tauri:build --prefix lilsunspot/desktop`；NSIS 产物确认存在：`lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`，大小 62,262,130 bytes，时间 2026-06-12 15:06:21 +08:00。
+
 - LIL-P2-02 + LIL-P2-03：微信私聊同步、文件附件、自然语言模式 UX 合并交付。
   - 2026-06-09：新增 lilsunspot SQLite 会话库、事件表、附件表和审批动作表；`/conversations`、`/conversations/{id}/messages`、`/events/stream`、`/attachments/{id}` 全部继续要求 `X-Lilsunspot-Token`，`/chat/send` 兼容路径改为写入稳定 `personal` 会话。
   - 2026-06-09：微信 `MessageEvent(media_urls/media_types)` 入站后登记附件、复制到 `data_dir/attachments/YYYYMM`、生成图片/PDF/txt/md/csv/docx/xlsx 摘要或中文不可读原因，并把附件摘要拼入 AI 回复 prompt；附件来源只允许 `data_dir/attachments` 和 Hermes 媒体缓存目录，不允许 Weixin credential 目录。
@@ -39,10 +48,10 @@
 
 ## Next
 
-1. LIL-P2-02/P2-03 安装版人工验收：真实微信发图片/PDF/docx/xlsx/csv 后桌面实时显示；生成文件经审批发送回微信；960x680 和 390x760 附件卡无重叠/横向溢出；关窗进托盘、托盘打开、托盘退出。
-2. LIL-P3-01：真实高危动作审批拦截和 audit.db。
-3. LIL-P4-01：诊断包导出和脱敏。
-4. LIL-UPSTREAM-01：Hermes 官方仓库同步自动化。基于已落地的只读 `scripts/hermes_upstream_check.ps1`，后续再配置 GitHub Action 定时/手动 `fetch upstream`，检测 `upstream/main` 新提交后创建同步 PR，不自动合并；PR 跑 `scripts/check.ps1`、secret guard、desktop build，涉及桌面/sidecar/installer 时跑 Tauri NSIS build；记录 upstream commit，冲突人工处理，暂不改 git submodule/subtree。
+1. LIL-HERMES-FULL-01 安装版人工验收：安装版 `Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> /capabilities -> chat/Weixin/tools` 主链路；真实微信发图片/PDF/docx/xlsx/csv 后桌面实时显示；生成文件经审批发送回微信；960x680 和 390x760 能力中心/附件卡无重叠/横向溢出；关窗进托盘、托盘打开、托盘退出。
+2. Credential-dependent 能力人工验收：用安全测试凭据验证 MCP server、browser、x_search、image/video/tts、Home Assistant、Spotify、Discord/Yuanbao 等外部账号能力的“需配置 -> 可用/失败原因”状态，不记录任何 secret。
+3. GitHub Actions 首次远程验收：触发 `lilsunspot-upstream-sync.yml` 的 `workflow_dispatch`，确认 upstream 变更时能创建草稿 PR，冲突时能创建 issue，PR 检查和能力覆盖测试按预期执行。
+4. 继续真实高危动作审批拦截/audit.db、诊断包导出脱敏、P2 微信媒体文件验收的安装版人工复核；这些已纳入 LIL-HERMES-FULL-01 主线，不再拆成独立渐进任务。
 
 ## Blocked / Unknown
 

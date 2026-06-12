@@ -23,6 +23,9 @@ EXCLUDED_DIRS = {
     "node_modules",
     "target",
 }
+EXCLUDED_RELATIVE_PREFIXES = {
+    ("lilsunspot", "desktop", "src-tauri", "binaries"),
+}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".exe", ".dll"}
 EXCLUDED_PREFIXES = {
     Path("lilsunspot/desktop/src-tauri/binaries/lilsunspotd/_internal"),
@@ -51,6 +54,8 @@ def iter_files(path: Path):
             continue
         relative_parts = set(relative_path.parts)
         if relative_parts & EXCLUDED_DIRS:
+            continue
+        if any(relative_path.parts[: len(prefix)] == prefix for prefix in EXCLUDED_RELATIVE_PREFIXES):
             continue
         if child.suffix.lower() in EXCLUDED_SUFFIXES:
             continue

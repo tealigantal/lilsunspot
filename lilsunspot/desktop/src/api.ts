@@ -1,6 +1,9 @@
 import type {
   AppState,
   AppBootstrapState,
+  CapabilitiesResult,
+  Capability,
+  CapabilityTestResult,
   ChatSendResult,
   Conversation,
   ConversationMessage,
@@ -10,6 +13,8 @@ import type {
   DaemonConnectStatus,
   DaemonDiscovery,
   DaemonHttpResponse,
+  DoctorResult,
+  DiagnosticsExportResult,
   DiagnosticsSummary,
   HealthStatus,
   LilsunspotEvent,
@@ -20,7 +25,11 @@ import type {
   ProductReminder,
   Provider,
   ProviderTestResult,
+  RepairResult,
   RuntimeInfo,
+  SafetyApprovals,
+  AuditResult,
+  SafetyPolicy,
   SafetyApprovalDecisionResult,
   SaveProviderResult,
   WeixinCommand,
@@ -28,7 +37,7 @@ import type {
   WeixinStatus
 } from "./types";
 
-const DEFAULT_DAEMON_URL = "http://127.0.0.1:8765";
+const DEFAULT_DAEMON_URL = import.meta.env.VITE_LILSUNSPOT_DAEMON_URL || "http://127.0.0.1:8765";
 const TOKEN_HEADER = "X-Lilsunspot-Token";
 const WEIXIN_REQUEST_TIMEOUT_MS = 12_000;
 const WEIXIN_DISCONNECT_TIMEOUT_MS = 5_000;
@@ -330,6 +339,24 @@ export async function saveProvider(
   });
 }
 
+export async function getCapabilities(): Promise<CapabilitiesResult> {
+  return requestJson<CapabilitiesResult>("/capabilities");
+}
+
+export async function patchCapability(capabilityId: string, enabled: boolean): Promise<Capability> {
+  const body = await requestJson<{ ok: boolean; capability: Capability }>(`/capabilities/${encodeURIComponent(capabilityId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled })
+  });
+  return body.capability;
+}
+
+export async function testCapability(capabilityId: string): Promise<CapabilityTestResult> {
+  return requestJson<CapabilityTestResult>(`/capabilities/${encodeURIComponent(capabilityId)}/test`, {
+    method: "POST"
+  });
+}
+
 export async function sendChatMessage(message: string): Promise<ChatSendResult> {
   return requestJson<ChatSendResult>("/chat/send", {
     method: "POST",
@@ -481,6 +508,20 @@ export async function sendWeixinMessage(
   });
 }
 
+export async function getSafetyApprovals(): Promise<SafetyApprovals> {
+  return requestJson<SafetyApprovals>("/safety/approvals");
+}
+
+export async function getSafetyAudit(limit = 50): Promise<AuditResult> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return requestJson<AuditResult>(`/safety/audit?${params.toString()}`);
+}
+
+export async function getSafetyPolicy(): Promise<SafetyPolicy> {
+  const body = await requestJson<{ policy: SafetyPolicy }>("/safety/policy");
+  return body.policy;
+}
+
 export async function decideSafetyApproval(
   approvalId: string,
   decision: "approved" | "rejected"
@@ -493,6 +534,17 @@ export async function decideSafetyApproval(
 
 export async function getDiagnosticsSummary(): Promise<DiagnosticsSummary> {
   return requestJson<DiagnosticsSummary>("/diagnostics/summary");
+}
+
+export async function runDoctor(): Promise<DoctorResult> {
+  return requestJson<DoctorResult>("/doctor/run");
+}
+
+export async function runRepair(checkName = ""): Promise<RepairResult> {
+  return requestJson<RepairResult>("/doctor/repair", {
+    method: "POST",
+    body: JSON.stringify({ check_name: checkName || null })
+  });
 }
 
 export async function getReminders(): Promise<ProductReminder[]> {
@@ -554,15 +606,21 @@ export async function deleteMemory(memoryId: string): Promise<boolean> {
   return body.ok;
 }
 
-export async function getCapabilities(): Promise<ProductCapability[]> {
-  const body = await requestJson<{ capabilities: ProductCapability[] }>("/capabilities");
+export async function getProductCapabilities(): Promise<ProductCapability[]> {
+  const body = await requestJson<{ capabilities: ProductCapability[] }>("/product/capabilities");
   return body.capabilities;
 }
 
-export async function updateCapability(capabilityId: string, enabled: boolean): Promise<ProductCapability> {
-  const body = await requestJson<{ capability: ProductCapability }>(`/capabilities/${encodeURIComponent(capabilityId)}`, {
+export async function updateProductCapability(capabilityId: string, enabled: boolean): Promise<ProductCapability> {
+  const body = await requestJson<{ capability: ProductCapability }>(`/product/capabilities/${encodeURIComponent(capabilityId)}`, {
     method: "PATCH",
     body: JSON.stringify({ enabled })
   });
   return body.capability;
+}
+
+export async function exportDiagnostics(): Promise<DiagnosticsExportResult> {
+  return requestJson<DiagnosticsExportResult>("/doctor/diagnostics/export", {
+    method: "POST"
+  });
 }

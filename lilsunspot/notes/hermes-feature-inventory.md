@@ -202,4 +202,3 @@ Hermes TUI 和 Dashboard 都有工具执行可视化、tool progress、tool resu
 4. 所有本地 API 继续遵守 `127.0.0.1`、`X-Lilsunspot-Token` 和 secret 脱敏规则。
 5. 用户可见错误继续使用普通中文。
 6. 每次把上游能力产品化时，都要同步考虑安装版、真实微信、错误使用和恢复路径。
-

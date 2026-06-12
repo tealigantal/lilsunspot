@@ -29,12 +29,12 @@ def test_diagnostics_model_capabilities_and_feature_switches(daemon_client):
     assert model.json()["configured"] is False
     assert any("还没有设置 AI 服务" in item for item in model.json()["limitations"])
 
-    capabilities = client.get("/capabilities", headers=headers)
+    capabilities = client.get("/product/capabilities", headers=headers)
     assert capabilities.status_code == 200
     capability_ids = {item["id"] for item in capabilities.json()["capabilities"]}
     assert {"web_search", "file_read", "reminders", "weixin_send"} <= capability_ids
 
-    toggled = client.patch("/capabilities/web_search", headers=headers, json={"enabled": True})
+    toggled = client.patch("/product/capabilities/web_search", headers=headers, json={"enabled": True})
     assert toggled.status_code == 200
     assert toggled.json()["capability"]["enabled"] is True
 

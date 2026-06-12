@@ -4,13 +4,13 @@ import {
   createReminder,
   deleteMemory,
   deleteReminder,
-  getCapabilities,
   getDiagnosticsSummary,
   getMemories,
+  getProductCapabilities,
   getProviderCapabilities,
   getReminders,
-  updateCapability,
   updateMemory,
+  updateProductCapability,
   updateReminder
 } from "../../api";
 import type { DiagnosticsSummary, ModelCapabilities, ProductCapability, ProductMemory, ProductReminder } from "../../types";
@@ -66,7 +66,7 @@ export function ControlCenterSettings() {
         getProviderCapabilities(),
         getReminders(),
         getMemories(),
-        getCapabilities()
+        getProductCapabilities()
       ]);
       setSummary(nextSummary);
       setModel(nextModel);
@@ -143,7 +143,7 @@ export function ControlCenterSettings() {
   }
 
   async function toggleCapability(capability: ProductCapability) {
-    const updated = await updateCapability(capability.id, !capability.enabled);
+    const updated = await updateProductCapability(capability.id, !capability.enabled);
     setCapabilities((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   }
 

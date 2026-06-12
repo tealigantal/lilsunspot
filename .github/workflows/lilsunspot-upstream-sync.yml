@@ -1,0 +1,148 @@
+name: Lilsunspot upstream sync
+
+on:
+  schedule:
+    - cron: "17 20 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync-upstream:
+    name: Detect and PR official Hermes updates
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure remotes
+        shell: pwsh
+        run: |
+          git remote remove upstream 2>$null
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch upstream main
+
+      - name: Detect upstream commit
+        id: detect
+        shell: pwsh
+        run: |
+          $recorded = ""
+          if (Test-Path "lilsunspot/UPSTREAM_COMMIT.txt") {
+            $recorded = (Get-Content "lilsunspot/UPSTREAM_COMMIT.txt" -Raw).Trim()
+          }
+          $latest = (git rev-parse upstream/main).Trim()
+          "recorded=$recorded" >> $env:GITHUB_OUTPUT
+          "latest=$latest" >> $env:GITHUB_OUTPUT
+          if ($recorded -eq $latest) {
+            "changed=false" >> $env:GITHUB_OUTPUT
+          }
+          else {
+            "changed=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Stop when already current
+        if: steps.detect.outputs.changed == 'false'
+        shell: pwsh
+        run: Write-Host "lilsunspot already records upstream ${{ steps.detect.outputs.latest }}"
+
+      - name: Merge upstream into sync branch
+        if: steps.detect.outputs.changed == 'true'
+        id: merge
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $date = Get-Date -Format "yyyyMMdd"
+          $branch = "codex/upstream-sync-$date"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B $branch
+          git merge --no-ff upstream/main -m "Merge official Hermes upstream ${{ steps.detect.outputs.latest }}"
+          Set-Content -Path "lilsunspot/UPSTREAM_COMMIT.txt" -Value "${{ steps.detect.outputs.latest }}" -NoNewline
+          git add "lilsunspot/UPSTREAM_COMMIT.txt"
+          git commit --amend --no-edit
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+
+      - name: Report merge conflict
+        if: steps.detect.outputs.changed == 'true' && steps.merge.outcome == 'failure'
+        shell: pwsh
+        run: |
+          git merge --abort 2>$null
+          $title = "Lilsunspot upstream sync conflict: ${{ steps.detect.outputs.latest }}"
+          $body = @"
+          Official Hermes has new commits after the recorded lilsunspot upstream commit.
+
+          Recorded: ${{ steps.detect.outputs.recorded }}
+          Latest: ${{ steps.detect.outputs.latest }}
+
+          Automatic merge failed. Resolve conflicts manually, keep product code under lilsunspot/, do not rewrite Hermes core, and update lilsunspot/UPSTREAM_COMMIT.txt after validation.
+          "@
+          gh issue create --title $title --body $body
+          exit 1
+
+      - name: Run lilsunspot checks
+        if: steps.detect.outputs.changed == 'true' && steps.merge.outcome == 'success'
+        shell: pwsh
+        run: |
+          python -m pytest lilsunspot/daemon/tests/test_hermes_compat.py lilsunspot/daemon/tests/test_capabilities.py
+          python scripts/guard_no_secrets.py
+          pwsh -NoProfile -File scripts/check.ps1
+
+      - name: Build installer when installed-app files changed
+        if: steps.detect.outputs.changed == 'true' && steps.merge.outcome == 'success'
+        shell: pwsh
+        run: |
+          $changed = git diff --name-only HEAD~1..HEAD
+          $patterns = @(
+            "lilsunspot/desktop/",
+            "lilsunspot/daemon/",
+            "scripts/build_lilsunspotd_sidecar.ps1",
+            "scripts/build_lilsunspot_desktop_nsis.ps1",
+            "lilsunspot/resources/"
+          )
+          $needsInstaller = $false
+          foreach ($path in $changed) {
+            foreach ($pattern in $patterns) {
+              if ($path.StartsWith($pattern)) {
+                $needsInstaller = $true
+              }
+            }
+          }
+          if ($needsInstaller) {
+            npm run tauri:build --prefix lilsunspot/desktop
+            $setup = Get-ChildItem "lilsunspot/desktop/src-tauri/target/release/bundle/nsis" -Filter "*setup.exe" -ErrorAction Stop | Select-Object -First 1
+            if (-not $setup) {
+              throw "NSIS setup.exe not found"
+            }
+            Write-Host "setup.exe: $($setup.FullName)"
+          }
+          else {
+            Write-Host "No installed-app paths changed by upstream merge."
+          }
+
+      - name: Push sync branch and create draft PR
+        if: steps.detect.outputs.changed == 'true' && steps.merge.outcome == 'success'
+        shell: pwsh
+        run: |
+          git push --force-with-lease origin "${{ steps.merge.outputs.branch }}"
+          $body = @"
+          ## Lilsunspot upstream sync
+
+          Recorded upstream: ${{ steps.detect.outputs.recorded }}
+          Latest upstream: ${{ steps.detect.outputs.latest }}
+
+          Checklist:
+          - [ ] Review Hermes core changes for product impact.
+          - [ ] Confirm lilsunspot product wrappers still own user-facing UX.
+          - [ ] Confirm capability registry covers any new configurable toolset, DEFAULT_CONFIG block, or dashboard API.
+          - [ ] Confirm secret guard and scripts/check.ps1 passed.
+          - [ ] If installer-impacting paths changed, confirm fresh NSIS setup.exe exists.
+          - [ ] Complete installed-app manual acceptance when desktop, sidecar, Weixin, or runtime delivery changed.
+          "@
+          gh pr create --draft --base develop --head "${{ steps.merge.outputs.branch }}" --title "Sync official Hermes upstream ${{ steps.detect.outputs.latest }}" --body $body

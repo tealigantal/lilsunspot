@@ -69,11 +69,13 @@ def _fallback_history_from_lilsunspot(
     conversation_id: str,
     *,
     current_message_id: str | None,
+    exclude_message_ids: list[str] | None = None,
     paths: RuntimePaths,
 ) -> list[dict[str, str]]:
     return conversations.conversation_history_for_agent(
         conversation_id,
         exclude_message_id=current_message_id,
+        exclude_message_ids=exclude_message_ids,
         paths=paths,
     )
 
@@ -125,20 +127,37 @@ def _run_agent_turn(
     message: str,
     conversation_id: str,
     current_message_id: str | None,
+    exclude_message_ids: list[str] | None,
     route: dict[str, str] | None,
     paths: RuntimePaths,
     settings: dict[str, Any],
+    require_existing_conversation: bool = False,
 ) -> dict[str, Any]:
     AIAgent, SessionDB = _load_hermes_classes(paths)
-    conversation = conversations.get_conversation(conversation_id, paths) or conversations.ensure_conversation(
-        conversation_id,
-        paths=paths,
-    )
+    conversation = conversations.get_conversation(conversation_id, paths)
+    if conversation is None:
+        if require_existing_conversation:
+            return {
+                "ok": False,
+                "error_code": "conversation_deleted",
+                "message": "这个对话已删除，本次回复已取消。",
+                "suggestion": "需要时请重新开始对话。",
+                "cancelled": True,
+            }
+        conversation = conversations.ensure_conversation(
+            conversation_id,
+            paths=paths,
+        )
     session_id = conversations.hermes_session_id(conversation, conversation_id)
     session_db = SessionDB()
     history = _history_from_hermes(session_db, session_id)
     if not history:
-        history = _fallback_history_from_lilsunspot(conversation_id, current_message_id=current_message_id, paths=paths)
+        history = _fallback_history_from_lilsunspot(
+            conversation_id,
+            current_message_id=current_message_id,
+            exclude_message_ids=exclude_message_ids,
+            paths=paths,
+        )
 
     from gateway.session_context import clear_session_vars, set_session_vars
     from tools.approval import register_gateway_notify, reset_current_session_key, set_current_session_key, unregister_gateway_notify
@@ -209,7 +228,9 @@ async def send_agent_message(
     paths: RuntimePaths | None = None,
     *,
     current_message_id: str | None = None,
+    exclude_message_ids: list[str] | None = None,
     route: dict[str, str] | None = None,
+    require_existing_conversation: bool = False,
 ) -> dict[str, Any]:
     conversation_id = (conversation_id or conversations.PERSONAL_CONVERSATION_ID).strip() or conversations.PERSONAL_CONVERSATION_ID
     message = message.strip()
@@ -226,9 +247,11 @@ async def send_agent_message(
             message=message,
             conversation_id=conversation_id,
             current_message_id=current_message_id,
+            exclude_message_ids=exclude_message_ids,
             route=route,
             paths=runtime_paths,
             settings=settings,
+            require_existing_conversation=require_existing_conversation,
         )
     except Exception as exc:
         logger.exception("Hermes agent loop failed conversation=%s error=%s", conversation_id, type(exc).__name__)

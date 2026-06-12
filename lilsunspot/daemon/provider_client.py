@@ -43,8 +43,8 @@ ERROR_MESSAGES: dict[str, tuple[str, str, list[str]]] = {
     ),
     "config_write_failed": (
         "保存设置失败",
-        "请点击一键修复，或打开诊断页查看问题。",
-        ["一键修复", "查看诊断", "查看技术详情"],
+        "请重新检查 AI 服务设置。",
+        ["重新选择模型服务", "查看技术详情"],
     ),
     "unknown": (
         "连接测试没有成功",

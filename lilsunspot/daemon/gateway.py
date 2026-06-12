@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 import base64
 
-from . import conversations
+from . import conversations, turn_coalescer
 from .attachments import (
     AttachmentError,
     attachment_summaries_for_prompt,
@@ -33,22 +33,11 @@ WEIXIN_COMMANDS: list[dict[str, Any]] = [
         "description": "查看或切换输出模式，例如 /mode pragmatic。",
         "approval_required": False,
     },
-    {
-        "name": "/approve",
-        "enabled": True,
-        "description": "批准安全审批请求，例如 /approve approval_xxx。",
-        "approval_required": False,
-    },
-    {
-        "name": "/reject",
-        "enabled": True,
-        "description": "拒绝安全审批请求，例如 /reject approval_xxx。",
-        "approval_required": False,
-    },
 ]
 
 WEIXIN_STATE_FILE_NAME = "weixin-state.json"
 WEIXIN_LOGIN_TIMEOUT_SECONDS = 480
+WEIXIN_SCANNED_CONFIRM_WARNING_SECONDS = 75
 WEIXIN_QR_REQUEST_TIMEOUT_MS = 9_000
 WEIXIN_ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 WEIXIN_QR_ENDPOINT = "ilink/bot/get_bot_qrcode"
@@ -67,10 +56,15 @@ class WeixinLoginSession:
     started_at: float
     expires_at: float
     message: str
+    scanned_at: float = 0.0
+    poll_warning: str = ""
+    risk_flags: list[str] = field(default_factory=list)
 
 
 _active_login: WeixinLoginSession | None = None
 _login_generation = 0
+_weixin_switch_menus: dict[str, dict[str, Any]] = {}
+WEIXIN_SWITCH_MENU_TTL_SECONDS = 300
 
 
 class WeixinGatewayError(RuntimeError):
@@ -83,6 +77,87 @@ def default_weixin_bot_profile() -> dict[str, str]:
         "avatar_asset": WEIXIN_DEFAULT_BOT_AVATAR_ASSET,
         "avatar_alt": "小黑子头像",
     }
+
+
+def _dedupe_flags(flags: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for flag in flags:
+        value = flag.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _login_risk_flags(session: WeixinLoginSession | None) -> list[str]:
+    if session is None:
+        return []
+    flags = list(session.risk_flags)
+    if (
+        session.status == "scanned"
+        and session.scanned_at > 0
+        and time.time() - session.scanned_at >= WEIXIN_SCANNED_CONFIRM_WARNING_SECONDS
+    ):
+        flags.append("user_confirmation_delayed")
+    return _dedupe_flags(flags)
+
+
+def _login_verification_payload(
+    *,
+    state: str,
+    message: str,
+    risk_flags: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "risk_flags": _dedupe_flags(risk_flags or []),
+        "message": message,
+    }
+
+
+def _weixin_login_verification_status(
+    *,
+    connected: bool,
+    status: str,
+    message: str,
+    active_login: WeixinLoginSession | None,
+) -> dict[str, Any]:
+    if connected:
+        return _login_verification_payload(
+            state="verified",
+            message="微信登录已通过同步验证。",
+        )
+    if active_login is not None and status in {"qr_pending", "scanned"}:
+        risks = _login_risk_flags(active_login)
+        if "user_confirmation_delayed" in risks:
+            return _login_verification_payload(
+                state="attention",
+                risk_flags=risks,
+                message="已扫码但长时间没有确认，可能是在手机上点了取消、扫错二维码，或确认页被切走。",
+            )
+        if "user_scan_cancelled_or_wrong_qr" in risks:
+            return _login_verification_payload(
+                state="attention",
+                risk_flags=risks,
+                message="刚才的扫码没有完成，可能是误扫、取消确认或扫了旧二维码。",
+            )
+        return _login_verification_payload(
+            state="pending",
+            risk_flags=risks,
+            message="正在等待手机微信完成确认。",
+        )
+    if status in {"error", "credential_expired"}:
+        return _login_verification_payload(
+            state="failed",
+            risk_flags=_login_risk_flags(active_login),
+            message=message,
+        )
+    return _login_verification_payload(
+        state="not_started",
+        message="微信尚未开始登录验证。",
+    )
 
 
 def _weixin_login_qr_endpoint(bot_type: str = "3") -> str:
@@ -264,6 +339,52 @@ def _save_weixin_credentials(credentials: dict[str, Any], paths: RuntimePaths | 
     )
 
 
+def _credentials_from_confirmed_status(status_resp: dict[str, Any]) -> dict[str, str]:
+    credentials = {
+        "account_id": str(status_resp.get("ilink_bot_id") or "").strip(),
+        "token": str(status_resp.get("bot_token") or "").strip(),
+        "base_url": str(status_resp.get("baseurl") or WEIXIN_ILINK_BASE_URL).strip(),
+        "user_id": str(status_resp.get("ilink_user_id") or "").strip(),
+    }
+    missing = [
+        label
+        for key, label in (
+            ("account_id", "账号标识"),
+            ("token", "登录凭据"),
+            ("base_url", "服务地址"),
+            ("user_id", "用户标识"),
+        )
+        if not credentials[key]
+    ]
+    if missing:
+        missing_text = "、".join(missing)
+        raise WeixinGatewayError(f"检测到这次微信登录没有通过验证，缺少{missing_text}，请刷新二维码后重新扫码。")
+    if not credentials["base_url"].startswith(("http://", "https://")):
+        raise WeixinGatewayError("检测到这次微信登录返回的服务地址异常，请刷新二维码后重新扫码。")
+    return credentials
+
+
+def fail_weixin_login_verification(message: str, paths: RuntimePaths | None = None) -> dict[str, Any]:
+    global _active_login
+
+    _bump_login_generation()
+    _clear_connection_state(paths)
+    now = time.time()
+    _active_login = WeixinLoginSession(
+        qrcode="",
+        qr_payload="",
+        base_url=WEIXIN_ILINK_BASE_URL,
+        status="error",
+        generation=_login_generation,
+        started_at=now,
+        expires_at=now,
+        message=message,
+        risk_flags=["fake_login_verification_failed"],
+    )
+    status = weixin_status()
+    return {"ok": False, **status, "message": message}
+
+
 def _make_qr_image_data_url(qr_payload: str) -> str:
     try:
         import qrcode
@@ -288,30 +409,39 @@ def _redacted_login_payload(session: WeixinLoginSession | None) -> dict[str, Any
     if session is None:
         return None
     qr_payload = session.qr_payload if session.status in {"qr_pending", "scanned"} else ""
+    risk_flags = _login_risk_flags(session)
+    if "user_confirmation_delayed" in risk_flags:
+        session.poll_warning = "已扫码但长时间没有确认，可能是误点取消、扫错二维码，或手机确认页被切走。"
     return {
         "status": session.status,
+        "display_status": session.status,
         "qr_payload": qr_payload,
         "qr_payload_kind": "url" if session.qr_payload.startswith(("http://", "https://")) else "text",
         "qr_image_data_url": _make_qr_image_data_url(qr_payload) if qr_payload else "",
         "expires_at": int(session.expires_at),
         "message": session.message,
+        "poll_warning": session.poll_warning,
+        "risk_flags": risk_flags,
     }
 
 
 def weixin_status() -> dict[str, Any]:
+    global _active_login
     connection = _load_connection_state()
     available = _weixin_requirements_available()
     active_login = _active_login
-    if active_login and active_login.status in {"qr_pending", "scanned", "qr_expired", "error"}:
+    if connection.get("configured"):
+        if active_login is not None:
+            _active_login = None
+        status = "connected"
+        connected = True
+        message = "微信已扫码连接；直接在微信私聊里发消息，或在桌面查看对应对话。"
+        login = None
+    elif active_login and active_login.status in {"qr_pending", "scanned", "qr_expired", "error"}:
         status = active_login.status
         connected = False
         message = active_login.message
         login = _redacted_login_payload(active_login)
-    elif connection.get("configured"):
-        status = "connected"
-        connected = True
-        message = "微信已扫码连接；请用真实私聊发送 /help 或 /mode 做人工验收。"
-        login = None
     elif connection.get("expired"):
         status = "credential_expired"
         connected = False
@@ -332,9 +462,16 @@ def weixin_status() -> dict[str, Any]:
         "available": available,
         "connected": connected,
         "status": status,
+        "display_status": status,
         "commands_available": True,
         "bot_profile": default_weixin_bot_profile(),
         "login": login,
+        "login_verification": _weixin_login_verification_status(
+            connected=connected,
+            status=status,
+            message=message,
+            active_login=active_login,
+        ),
         "capabilities": {
             "qr_login": available,
             "private_chat": connected,
@@ -353,7 +490,7 @@ def weixin_commands() -> dict[str, Any]:
     return {
         "gateway": "weixin",
         "commands": WEIXIN_COMMANDS,
-        "message": "这些命令可用于微信私聊入口；主动发送微信消息仍需要安全审批。",
+        "message": "这些命令可用于微信私聊入口。",
     }
 
 
@@ -417,42 +554,53 @@ async def poll_weixin_login_status() -> dict[str, Any]:
             endpoint=f"{WEIXIN_QR_STATUS_ENDPOINT}?qrcode={session.qrcode}",
         )
     except Exception:
-        session.status = "error"
-        session.message = "微信扫码状态读取失败，请稍后再试。"
+        if _active_login is not session or session.generation != _login_generation:
+            status = weixin_status()
+            return {"ok": False, **status, "message": "本次扫码状态已被新的操作取代。"}
+        if session.status not in {"qr_pending", "scanned"}:
+            session.status = "qr_pending"
+        session.poll_warning = "微信扫码状态读取失败，正在确认，稍后自动重试。"
+        session.message = "正在确认，稍后自动重试。"
         status = weixin_status()
-        return {"ok": False, **status}
+        return {"ok": True, **status}
     if _active_login is not session or session.generation != _login_generation:
         status = weixin_status()
         return {"ok": False, **status, "message": "本次扫码状态已被新的操作取代。"}
 
+    session.poll_warning = ""
     raw_status = str(status_resp.get("status") or "wait").strip()
     if raw_status == "wait":
+        if session.status == "scanned" or "user_scan_cancelled_or_wrong_qr" in session.risk_flags:
+            session.risk_flags = _dedupe_flags([*session.risk_flags, "user_scan_cancelled_or_wrong_qr"])
+            session.poll_warning = "刚才的扫码没有完成，可能是误点取消、扫错二维码，或扫了旧二维码。"
         session.status = "qr_pending"
-        session.message = "请使用手机微信扫码，并在手机上确认登录。"
+        session.message = session.poll_warning or "请使用手机微信扫码，并在手机上确认登录。"
     elif raw_status == "scaned":
+        session.risk_flags = [flag for flag in session.risk_flags if flag != "user_scan_cancelled_or_wrong_qr"]
+        if session.scanned_at <= 0:
+            session.scanned_at = time.time()
         session.status = "scanned"
         session.message = "已扫码，请在手机微信里确认登录。"
     elif raw_status == "scaned_but_redirect":
         redirect_host = str(status_resp.get("redirect_host") or "").strip()
         if redirect_host:
             session.base_url = f"https://{redirect_host}"
+        session.risk_flags = [flag for flag in session.risk_flags if flag != "user_scan_cancelled_or_wrong_qr"]
+        if session.scanned_at <= 0:
+            session.scanned_at = time.time()
         session.status = "scanned"
         session.message = "已扫码，正在等待微信确认。"
     elif raw_status == "expired":
         session.status = "qr_expired"
         session.message = "微信二维码已过期，请重新生成。"
     elif raw_status == "confirmed":
-        credentials = {
-            "account_id": status_resp.get("ilink_bot_id"),
-            "token": status_resp.get("bot_token"),
-            "base_url": status_resp.get("baseurl") or WEIXIN_ILINK_BASE_URL,
-            "user_id": status_resp.get("ilink_user_id"),
-        }
         try:
+            credentials = _credentials_from_confirmed_status(status_resp)
             _save_weixin_credentials(credentials)
         except WeixinGatewayError as exc:
             session.status = "error"
             session.message = str(exc)
+            session.risk_flags = _dedupe_flags([*session.risk_flags, "fake_login_incomplete_credentials"])
         else:
             _active_login = None
     else:
@@ -495,7 +643,7 @@ def parse_weixin_command(text: str) -> dict[str, Any]:
         return {
             "ok": True,
             "kind": "help",
-            "message": "可用命令：/help、/mode <模式>、/approve <审批编号>、/reject <审批编号>。",
+            "message": "可用命令：/help、/mode <模式>。也可以直接用自然语言告诉我想要的回答风格。",
         }
     if command == "/mode":
         if not argument:
@@ -554,6 +702,131 @@ def _weixin_route_from_event(event: Any) -> dict[str, str]:
     return route
 
 
+def _normalize_weixin_switch_text(text: str) -> str:
+    return "".join(ch for ch in text.strip() if not ch.isspace() and ch not in "。.!！?？，,；;：:")
+
+
+def _route_recent_conversations(
+    route: dict[str, str] | None,
+    paths: RuntimePaths,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    if not route:
+        return []
+    return conversations.recent_weixin_conversations(route, paths=paths, limit=limit)
+
+
+def _format_weixin_switch_menu(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "这个微信联系人还没有可切换的本地对话。"
+    lines = ["最近的微信对话："]
+    for index, conversation in enumerate(items, start=1):
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        marker = "（当前）" if metadata.get("weixin_route_active") else ""
+        lines.append(f"{index}. {conversation.get('title') or '微信私聊'}{marker}")
+    lines.append("回复编号即可切换。")
+    return "\n".join(lines)
+
+
+def _remember_weixin_switch_menu(route_key: str, items: list[dict[str, Any]]) -> None:
+    _weixin_switch_menus[route_key] = {
+        "conversation_ids": [str(item["id"]) for item in items],
+        "created_at": time.time(),
+    }
+
+
+def _pending_weixin_switch_menu(route_key: str) -> list[str]:
+    menu = _weixin_switch_menus.get(route_key)
+    if not menu:
+        return []
+    if time.time() - float(menu.get("created_at") or 0) > WEIXIN_SWITCH_MENU_TTL_SECONDS:
+        _weixin_switch_menus.pop(route_key, None)
+        return []
+    return [str(item) for item in menu.get("conversation_ids", []) if str(item).strip()]
+
+
+def _weixin_switch_result(
+    *,
+    kind: str,
+    message: str,
+    conversation: dict[str, Any] | None = None,
+    conversations_list: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "kind": kind,
+        "message": message,
+        "conversation": conversation,
+        "conversations": conversations_list or [],
+    }
+
+
+def _maybe_handle_weixin_conversation_switch(
+    text: str,
+    *,
+    route: dict[str, str] | None,
+    paths: RuntimePaths,
+) -> dict[str, Any] | None:
+    route_key = conversations.weixin_route_key(route)
+    if not route_key:
+        return None
+
+    normalized = _normalize_weixin_switch_text(text)
+    if not normalized:
+        return None
+
+    pending_ids = _pending_weixin_switch_menu(route_key)
+    if pending_ids and normalized.isdigit():
+        index = int(normalized) - 1
+        if index < 0 or index >= len(pending_ids):
+            return _weixin_switch_result(kind="conversation_switch_error", message="没有这个编号，请重新发送“切换对话”。")
+        conversation = conversations.set_weixin_conversation_active(pending_ids[index], paths=paths)
+        _weixin_switch_menus.pop(route_key, None)
+        if conversation is None:
+            return _weixin_switch_result(kind="conversation_switch_error", message="这个对话已经不存在，请重新发送“切换对话”。")
+        return _weixin_switch_result(
+            kind="conversation_switch_selected",
+            message=f"已切到：{conversation['title']}，之后微信消息会进入这个对话。",
+            conversation=conversation,
+        )
+
+    if normalized in {"新开一个对话", "新开对话", "开新对话", "新建微信对话", "新建对话"}:
+        conversation = conversations.create_weixin_conversation(route or {}, title="微信私聊 新对话", paths=paths)
+        _weixin_switch_menus.pop(route_key, None)
+        return _weixin_switch_result(
+            kind="conversation_switch_new",
+            message=f"已新开：{conversation['title']}，之后微信消息会进入这个对话。",
+            conversation=conversation,
+        )
+
+    if normalized in {"切回上一个对话", "回到上一个对话", "上一个对话"}:
+        active = conversations.active_weixin_conversation(route or {}, paths=paths)
+        for conversation in _route_recent_conversations(route, paths, limit=8):
+            if active and conversation["id"] == active["id"]:
+                continue
+            updated = conversations.set_weixin_conversation_active(conversation["id"], paths=paths)
+            if updated is not None:
+                _weixin_switch_menus.pop(route_key, None)
+                return _weixin_switch_result(
+                    kind="conversation_switch_previous",
+                    message=f"已切回：{updated['title']}，之后微信消息会进入这个对话。",
+                    conversation=updated,
+                )
+        return _weixin_switch_result(kind="conversation_switch_error", message="没有找到上一个可切换的微信对话。")
+
+    if normalized in {"切换对话", "最近对话", "切换本地对话", "选择对话"}:
+        items = _route_recent_conversations(route, paths, limit=5)
+        _remember_weixin_switch_menu(route_key, items)
+        return _weixin_switch_result(
+            kind="conversation_switch_menu",
+            message=_format_weixin_switch_menu(items),
+            conversations_list=items,
+        )
+
+    return None
+
+
 def _store_weixin_reply(
     text: str,
     metadata: dict[str, Any] | None = None,
@@ -572,6 +845,35 @@ def _store_weixin_reply(
     )
 
 
+def _finish_weixin_reply(
+    text: str,
+    metadata: dict[str, Any] | None = None,
+    paths: RuntimePaths | None = None,
+    *,
+    conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
+    reply_message_id: str | None = None,
+    status: str = "sent",
+) -> dict[str, Any] | None:
+    if reply_message_id:
+        return conversations.update_message(
+            reply_message_id,
+            text=text,
+            status=status,
+            metadata_patch=metadata or {},
+            paths=paths,
+        )
+    return _store_weixin_reply(text, metadata, paths, conversation_id=conversation_id)
+
+
+def _weixin_reply_cancelled() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "suppressed": True,
+        "message": "",
+        "error_code": "conversation_deleted",
+    }
+
+
 def _chat_prompt_with_attachments(text: str, attachments: list[dict[str, Any]]) -> str:
     base = text.strip() or "用户发来了附件，请根据附件处理结果回复。"
     summaries = attachment_summaries_for_prompt(attachments)
@@ -585,6 +887,7 @@ async def _handle_weixin_after_store(
     *,
     conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
     current_message_id: str | None = None,
+    reply_message_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
     route: dict[str, str] | None = None,
     paths: RuntimePaths | None = None,
@@ -595,50 +898,126 @@ async def _handle_weixin_after_store(
 
     runtime_paths = paths or ensure_runtime_dirs()
     attachments = attachments or []
+    switch_intent = _maybe_handle_weixin_conversation_switch(text, route=route, paths=runtime_paths)
+    if switch_intent is not None:
+        reply = _finish_weixin_reply(
+            switch_intent["message"],
+            {"kind": switch_intent["kind"]},
+            runtime_paths,
+            conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
+        )
+        if reply is None:
+            return _weixin_reply_cancelled()
+        return {
+            "ok": True,
+            "intent": {"kind": switch_intent["kind"]},
+            "message": switch_intent["message"],
+            "conversation": switch_intent.get("conversation"),
+            "conversations": switch_intent.get("conversations") or [],
+        }
+
     mode_intent = await apply_mode_intent(text, runtime_paths)
     if mode_intent is not None:
-        _store_weixin_reply(
+        reply = _finish_weixin_reply(
             mode_intent["message"],
             {"kind": "mode_intent", "changed": mode_intent["changed"]},
             runtime_paths,
             conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
         )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return mode_intent
 
     intent = {"ok": True, "kind": "chat_message", "message": "准备作为微信私聊消息处理。"} if attachments and not text.strip() else parse_weixin_command(text)
     if not intent.get("ok"):
-        _store_weixin_reply(
+        reply = _finish_weixin_reply(
             intent["message"],
             {"kind": intent.get("kind", "unknown_command")},
             runtime_paths,
             conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
         )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": False, "intent": intent, "message": intent["message"]}
 
     kind = intent.get("kind")
     if kind == "help":
-        _store_weixin_reply(intent["message"], {"kind": "help"}, runtime_paths, conversation_id=conversation_id)
+        reply = _finish_weixin_reply(
+            intent["message"],
+            {"kind": "help"},
+            runtime_paths,
+            conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
+        )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": intent["message"], "commands": weixin_commands()["commands"]}
     if kind == "list_modes":
-        _store_weixin_reply(intent["message"], {"kind": "list_modes"}, runtime_paths, conversation_id=conversation_id)
+        reply = _finish_weixin_reply(
+            intent["message"],
+            {"kind": "list_modes"},
+            runtime_paths,
+            conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
+        )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": intent["message"], "modes": load_mode_profiles()}
     if kind == "select_mode":
         try:
             result = select_mode(str(intent["mode"]), runtime_paths)
         except ValueError as exc:
-            _store_weixin_reply(str(exc), {"kind": "select_mode_error"}, runtime_paths, conversation_id=conversation_id)
+            reply = _finish_weixin_reply(
+                str(exc),
+                {"kind": "select_mode_error"},
+                runtime_paths,
+                conversation_id=conversation_id,
+                reply_message_id=reply_message_id,
+                status="error",
+            )
+            if reply is None:
+                return _weixin_reply_cancelled()
             return {"ok": False, "intent": intent, "message": str(exc)}
         message = "输出风格已切换。"
-        _store_weixin_reply(message, {"kind": "select_mode", "mode": result.get("current")}, runtime_paths, conversation_id=conversation_id)
+        reply = _finish_weixin_reply(
+            message,
+            {"kind": "select_mode", "mode": result.get("current")},
+            runtime_paths,
+            conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
+        )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": message, "mode": result}
     if kind == "approval_decision":
         try:
             result = decide_approval(str(intent["approval_id"]), str(intent["decision"]))
         except ApprovalNotFoundError as exc:
-            _store_weixin_reply(str(exc), {"kind": "approval_error"}, runtime_paths, conversation_id=conversation_id)
+            reply = _finish_weixin_reply(
+                str(exc),
+                {"kind": "approval_error"},
+                runtime_paths,
+                conversation_id=conversation_id,
+                reply_message_id=reply_message_id,
+                status="error",
+            )
+            if reply is None:
+                return _weixin_reply_cancelled()
             return {"ok": False, "intent": intent, "message": str(exc)}
         except ValueError as exc:
-            _store_weixin_reply(str(exc), {"kind": "approval_error"}, runtime_paths, conversation_id=conversation_id)
+            reply = _finish_weixin_reply(
+                str(exc),
+                {"kind": "approval_error"},
+                runtime_paths,
+                conversation_id=conversation_id,
+                reply_message_id=reply_message_id,
+                status="error",
+            )
+            if reply is None:
+                return _weixin_reply_cancelled()
             return {"ok": False, "intent": intent, "message": str(exc)}
         if result["approval"]["status"] == "approved":
             from .weixin_runtime import send_approved_weixin_action
@@ -647,14 +1026,48 @@ async def _handle_weixin_after_store(
             result["delivery"] = delivery
             if not delivery.get("ok"):
                 result["message"] = delivery.get("message") or result["message"]
-        _store_weixin_reply(
+        reply = _finish_weixin_reply(
             result["message"],
             {"kind": "approval_decision", "approval_id": intent["approval_id"]},
             runtime_paths,
             conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
+            status="sent" if result.get("ok", True) else "error",
         )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": result["message"], "approval": result["approval"]}
     if kind == "chat_message":
+        if not attachments:
+            result = await turn_coalescer.enqueue_text_turn(
+                key=turn_coalescer.key_for_weixin(route, conversation_id),
+                conversation_id=conversation_id,
+                text=text,
+                current_message_id=current_message_id,
+                assistant_source="weixin",
+                paths=runtime_paths,
+                route=route,
+                wait_for_reply=True,
+            )
+            if result.get("cancelled"):
+                return _weixin_reply_cancelled()
+            result["intent"] = intent
+            return result
+
+        assistant_placeholder = conversations.create_message(
+            conversation_id=conversation_id,
+            source="weixin",
+            role="assistant",
+            text="正在回复...",
+            status="generating",
+            metadata={
+                "kind": "weixin_reply_pending",
+                "in_reply_to": current_message_id,
+                "weixin_route": route,
+            },
+            paths=runtime_paths,
+        )
+        reply_message_id = assistant_placeholder["id"]
         prompt_text = _chat_prompt_with_attachments(text, attachments)
         result = await send_agent_message(
             prompt_text,
@@ -662,21 +1075,33 @@ async def _handle_weixin_after_store(
             runtime_paths,
             current_message_id=current_message_id,
             route=route,
+            require_existing_conversation=True,
         )
+        if result.get("cancelled"):
+            return _weixin_reply_cancelled()
         if not result.get("ok"):
-            _store_weixin_reply(
+            reply = _finish_weixin_reply(
                 result.get("message", "微信私聊暂时不能回复。"),
                 {"kind": "chat_error", "error_code": result.get("error_code")},
                 runtime_paths,
                 conversation_id=conversation_id,
+                reply_message_id=reply_message_id,
+                status="error",
             )
+            if reply is None:
+                return _weixin_reply_cancelled()
             return {"ok": False, "intent": intent, "message": result.get("message", "微信私聊暂时不能回复。"), "chat": result}
-        _store_weixin_reply(
+        if conversations.get_conversation(conversation_id, runtime_paths) is None:
+            return _weixin_reply_cancelled()
+        reply = _finish_weixin_reply(
             str(result.get("reply") or ""),
             {"kind": "chat_reply", "engine": result.get("engine"), "provider": result.get("provider")},
             runtime_paths,
             conversation_id=conversation_id,
+            reply_message_id=reply_message_id,
         )
+        if reply is None:
+            return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": "微信私聊回复已生成。", "chat": result}
 
     return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}
@@ -731,6 +1156,7 @@ async def handle_weixin_message_event(event: Any, paths: RuntimePaths | None = N
         text,
         conversation_id=conversation_id,
         current_message_id=user_message["id"],
+        reply_message_id=None,
         attachments=attachments,
         route=route,
         paths=runtime_paths,

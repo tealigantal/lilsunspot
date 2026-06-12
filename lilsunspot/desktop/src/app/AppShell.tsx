@@ -5,26 +5,20 @@ import type { ChatMessage } from "../features/chat/ChatTranscript";
 import { modeName } from "../features/mode/ModeQuickPanel";
 import { useModeState } from "../features/mode/ModeState";
 import { displayProvider } from "../features/model/ProviderCard";
-import { DoctorSettings } from "../features/settings/DoctorSettings";
-import { SafetySettings } from "../features/settings/SafetySettings";
 import { WeixinSettings } from "../features/settings/WeixinSettings";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
 
-type ConsoleView = "chat" | "weixin" | "safety" | "doctor";
+type ConsoleView = "chat" | "weixin";
 
 const NAV_ITEMS: { id: ConsoleView; short: string; label: string }[] = [
   { id: "chat", short: "CH", label: "聊天" },
-  { id: "weixin", short: "WX", label: "微信" },
-  { id: "safety", short: "OK", label: "审批" },
-  { id: "doctor", short: "DR", label: "诊断" }
+  { id: "weixin", short: "WX", label: "微信" }
 ];
 
 const VIEW_COPY: Record<ConsoleView, { title: string; subtitle: string }> = {
   chat: { title: "和小黑子聊天", subtitle: "桌面聊天、任务整理和本地 Agent 控制台" },
-  weixin: { title: "微信连接", subtitle: "私聊同步、文件接收和审批后发送" },
-  safety: { title: "安全审批", subtitle: "高危动作先确认，不展示原始工具 JSON" },
-  doctor: { title: "一键诊断", subtitle: "本地服务、Provider、模式文件和脱敏检查" }
+  weixin: { title: "微信连接", subtitle: "私聊同步、文件接收和自然语言调整风格" }
 };
 
 export function AppShell() {
@@ -68,12 +62,6 @@ export function AppShell() {
     if (activeView === "weixin") {
       return <WeixinSettings />;
     }
-    if (activeView === "safety") {
-      return <SafetySettings />;
-    }
-    if (activeView === "doctor") {
-      return <DoctorSettings />;
-    }
     return (
       <BootGate
         bootstrap={bootstrapState.bootstrap}
@@ -81,7 +69,6 @@ export function AppShell() {
         initialMessages={firstChatMessages}
         busy={bootstrapState.busy}
         onRefresh={refreshAndReturn}
-        onOpenDoctor={() => setActiveView("doctor")}
         onOpenSettings={openSettings}
         onSetupModel={setupModel}
         onBootstrapChanged={handleSaved}

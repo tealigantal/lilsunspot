@@ -6,10 +6,12 @@
 2. TASKS.md
 3. lilsunspot/notes/mvp-p0-status.md
 4. lilsunspot/notes/architecture.md
-5. lilsunspot/README-dev.md
-6. lilsunspot/notes/qa-checklist.md
-7. lilsunspot/notes/decision-log.md
-8. lilsunspot/notes/doc-inventory.md
+5. lilsunspot/notes/hermes-feature-inventory.md
+6. lilsunspot/notes/hermes-merge-plan.md
+7. lilsunspot/README-dev.md
+8. lilsunspot/notes/qa-checklist.md
+9. lilsunspot/notes/decision-log.md
+10. lilsunspot/notes/doc-inventory.md
 
 ## 主文档
 
@@ -17,6 +19,8 @@
 - `TASKS.md`：当前任务队列入口，Current/Next/Blocked/Done 以此为准。
 - `lilsunspot/notes/mvp-p0-status.md`：P0 主路径状态表，未运行或未确认的能力必须标记为未验证。
 - `lilsunspot/notes/architecture.md`：产品层边界、目录职责和运行时数据流说明。
+- `lilsunspot/notes/hermes-feature-inventory.md`：Hermes 现成功能盘点，记录 Web Dashboard、TUI、gateway、tools、cron、memory 等能力如何为小黑子复用或产品化。
+- `lilsunspot/notes/hermes-merge-plan.md`：Hermes 能力合并路线，包含微信/诊断/搜索/模型/cron/memory/toolsets 的阶段计划，以及后续自动同步官方更新的预留设计。
 - `lilsunspot/README-dev.md`：本地开发入口，记录 daemon、desktop、检查和构建命令。
 - `lilsunspot/notes/qa-checklist.md`：发布前 QA 清单，未实际通过的项目保持未勾选。
 - `lilsunspot/notes/decision-log.md`：关键产品和工程决策记录。
@@ -27,6 +31,7 @@
 - `lilsunspot/notes/agent-memory.md`：历史 agent 任务记录，可作为追溯参考，不直接代表当前主线状态。
 - `lilsunspot/notes/day1-status.md`：Day1 历史状态记录，部分内容已被后续任务覆盖。
 - `lilsunspot/notes/weixin-feasibility.md`：Weixin 可行性调查记录，真实私聊能力仍需人工扫码验收。
+- `lilsunspot/notes/upstream-sync-reports/`：Hermes upstream 只读检查报告目录；报告来自本地 git/ref 状态，不等同于已完成同步。
 - `TASKS.md` 的 Done 区：历史任务记录，当前状态以 `lilsunspot/notes/mvp-p0-status.md` 为准。
 
 ## 上游 Hermes 文档

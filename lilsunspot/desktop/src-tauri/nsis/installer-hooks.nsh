@@ -68,6 +68,8 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   Delete "$INSTDIR\lilsunspot_desktop.exe"
+  Delete "$INSTDIR\lilsunspotd.exe"
+  Delete "$INSTDIR\lilsunspotd-x86_64-pc-windows-msvc.exe"
   !insertmacro LILSUNSPOT_RECREATE_SHORTCUT "$DESKTOP\${PRODUCTNAME}.lnk"
   !if "${STARTMENUFOLDER}" != ""
     !insertmacro LILSUNSPOT_RECREATE_SHORTCUT "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"

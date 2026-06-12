@@ -1,5 +1,12 @@
 # Agent Memory
 
+## 2026-06-12 - PR prep merge conflict resolution
+
+- Task: prepare the local Hermes capability work for PR after `develop` was already in a merge with `origin/develop`.
+- Files touched: conflict resolution in `TASKS.md`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/tests/conftest.py`, `lilsunspot/desktop/src/App.css`, `lilsunspot/desktop/src/api.ts`, `SettingsDrawer.tsx`, `types.ts`, `scripts/guard_no_secrets.py`, and this memory file.
+- Decision/result: resolved conflicts with local Hermes full-capability behavior as the primary source. Kept `/capabilities` for the Hermes capability center and moved the lightweight product-control capability toggles to `/product/capabilities`; kept independent settings pages for Hermes capability center, safety audit/approval, diagnostics export, and the upstream control center.
+- Validation: focused capability/product/safety pytest 14 passed, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon pytest 93 passed plus secret guard and desktop build, product pytest 38 passed with `--timeout-method=thread`, Tauri Rust tests 2 passed, `cargo check` passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup artifact. No API key, runtime token, Weixin credential, private message text, QR, or attachment content was recorded.
+
 ## 2026-06-12 - LIL-HERMES-FULL-01 screenshot-level frontend QA retry
 
 - Task: rerun screenshot-level frontend acceptance for the integrated Hermes capability work and fix rendered UI bugs found during Browser IAB validation.

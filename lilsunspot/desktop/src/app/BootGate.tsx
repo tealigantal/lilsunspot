@@ -14,7 +14,6 @@ type BootGateProps = {
   initialMessages: ChatMessage[];
   busy?: boolean;
   onRefresh: () => void;
-  onOpenDoctor: () => void;
   onOpenSettings: (tab?: SettingsTab) => void;
   onSetupModel: () => void;
   onBootstrapChanged: () => Promise<void> | void;
@@ -27,7 +26,6 @@ export function BootGate({
   initialMessages,
   busy = false,
   onRefresh,
-  onOpenDoctor,
   onOpenSettings,
   onSetupModel,
   onBootstrapChanged,
@@ -61,7 +59,6 @@ export function BootGate({
       <OnboardingFlow
         onSaved={onBootstrapChanged}
         onFirstChatDone={onFirstChatDone}
-        onOpenDoctor={onOpenDoctor}
         initialProvider={bootstrap.runtime.provider}
         initialStep={reconfiguringExistingModel ? "api_key" : bootstrap.runtime.provider ? "choose" : undefined}
         completion={reconfiguringExistingModel ? "return_to_chat" : "first_chat"}
@@ -75,10 +72,9 @@ export function BootGate({
       <ErrorWithAction
         title={bootstrap.title || "本地服务没有成功启动"}
         message={blocker?.message || bootstrap.message}
-        suggestion={blocker?.suggestion || "请重新检查，或打开诊断查看问题。"}
-        primaryAction={{ label: bootstrap.primary_action.label || "重新检查", onClick: onRefresh }}
+        suggestion={blocker?.suggestion || "请重新检查；如果模型设置不正确，请重新设置 AI 服务。"}
+        primaryAction={{ label: "重新检查", onClick: onRefresh }}
         secondaryActions={[
-          { label: "一键检查", onClick: onOpenDoctor },
           { label: "重新设置 AI 服务", onClick: onSetupModel }
         ]}
         technicalDetails={{ stage: bootstrap.stage, checks: bootstrap.checks, runtime: bootstrap.runtime }}

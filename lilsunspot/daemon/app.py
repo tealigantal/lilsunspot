@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from lilsunspot import __version__
 
-from . import conversations
+from . import conversations, product_features, turn_coalescer
 from .audit import ensure_audit_schema, list_audit_events, record_audit_event
 from .attachments import AttachmentError, is_safe_stored_attachment
 from .auth import load_or_create_token, require_token
@@ -34,6 +34,7 @@ from .doctor import repair_placeholder, run_doctor_checks
 from .gateway import (
     WeixinGatewayError,
     disconnect_weixin,
+    fail_weixin_login_verification,
     handle_weixin_command_text,
     poll_weixin_login_status,
     request_weixin_send_approval,
@@ -58,7 +59,7 @@ from .mode_intents import apply_mode_intent
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
 from .providers import load_provider_registry, provider_by_id
-from .runtime_discovery import base_url_for, write_runtime_descriptor
+from .runtime_discovery import base_url_for, read_runtime_descriptor, write_runtime_descriptor
 from .safety import (
     ApprovalNotFoundError,
     decide_approval,
@@ -102,6 +103,7 @@ load_or_create_token()
 runtime_descriptor = write_runtime_descriptor(BIND_HOST, BIND_PORT, paths)
 conversations.ensure_schema(paths)
 ensure_audit_schema(paths)
+product_features.ensure_schema(paths)
 logger.info(
     "daemon runtime discovery written base_url=%s pid=%s",
     runtime_descriptor["base_url"],
@@ -140,8 +142,8 @@ app.add_middleware(
 )
 
 
-def _with_weixin_runtime_status(payload: dict[str, Any]) -> dict[str, Any]:
-    return {**payload, "runtime": weixin_runtime_status()}
+def _with_weixin_runtime_status(payload: dict[str, Any], runtime_status: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {**payload, "runtime": runtime_status or weixin_runtime_status()}
 
 
 class OpenKeyUrlRequest(BaseModel):
@@ -248,6 +250,36 @@ class WeixinSendRequest(BaseModel):
     attachment_ids: list[str] = Field(default_factory=list)
 
 
+class ConversationSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    include_archived: bool = False
+    limit: int = 20
+
+
+class ReminderCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1)
+    due_at: str = ""
+
+
+class ReminderUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    completed: bool | None = None
+
+
+class MemoryCreateRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    source: str = "manual"
+
+
+class MemoryUpdateRequest(BaseModel):
+    enabled: bool | None = None
+
+
+class CapabilityUpdateRequest(BaseModel):
+    enabled: bool
+
+
 class RepairRequest(BaseModel):
     check_name: str | None = None
 
@@ -332,7 +364,7 @@ def _app_bootstrap_state() -> dict[str, Any]:
             "title": "模型服务设置需要修复",
             "message": "已保存的 AI 服务不在当前支持列表里，请重新选择一个服务。",
             "primary_action": _action("setup_model", "重新设置"),
-            "secondary_actions": [_action("open_doctor", "一键检查")],
+            "secondary_actions": [_action("open_settings", "打开设置")],
             "checks": checks,
             "runtime": runtime,
             "user_visible_blockers": [
@@ -349,7 +381,7 @@ def _app_bootstrap_state() -> dict[str, Any]:
         "title": "还差一步：设置 AI 服务",
         "message": "先给小黑子设置一个 AI 服务，就能开始聊天。",
         "primary_action": _action("setup_model", "开始设置"),
-        "secondary_actions": [_action("open_doctor", "一键检查")],
+        "secondary_actions": [],
         "checks": checks,
         "runtime": runtime,
         "user_visible_blockers": [
@@ -372,6 +404,8 @@ async def runtime_info() -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
     runtime_model = current_runtime_model(runtime_paths)
     compatibility = audit_hermes_compatibility()
+    descriptor = read_runtime_descriptor(runtime_paths) or {}
+    process = descriptor.get("process") if isinstance(descriptor.get("process"), dict) else {}
     return {
         "data_dir": str(runtime_paths.data_dir),
         "hermes_home": str(runtime_paths.hermes_home),
@@ -382,6 +416,7 @@ async def runtime_info() -> dict[str, Any]:
         "bind_port": BIND_PORT,
         "base_url": base_url_for(BIND_HOST, BIND_PORT),
         "pid": os.getpid(),
+        "process": process,
         "runtime_file": str(runtime_paths.runtime_file),
         "configured": runtime_model["configured"],
         "provider": runtime_model["provider"],
@@ -397,6 +432,11 @@ async def runtime_info() -> dict[str, Any]:
 @app.get("/providers", dependencies=[Depends(require_token)])
 async def providers() -> dict[str, list[dict[str, Any]]]:
     return {"providers": load_provider_registry()}
+
+
+@app.get("/providers/capabilities", dependencies=[Depends(require_token)])
+async def provider_capabilities() -> dict[str, Any]:
+    return product_features.model_capabilities(ensure_runtime_dirs())
 
 
 @app.post("/providers/open-key-url", dependencies=[Depends(require_token)])
@@ -749,9 +789,106 @@ async def _send_conversation_message(
     return {"ok": bool(chat_result.get("ok")), "user_message": user_message, "assistant_message": assistant_message, "chat": chat_result}
 
 
+async def _accept_conversation_message(
+    message: str,
+    *,
+    conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
+    source: str = "desktop",
+) -> dict[str, Any]:
+    runtime_paths = ensure_runtime_dirs()
+    user_message = conversations.create_message(
+        conversation_id=conversation_id,
+        source=source,
+        role="user",
+        text=message,
+        status="sent",
+        metadata={"entry": source},
+        paths=runtime_paths,
+    )
+    mode_intent = await apply_mode_intent(message, runtime_paths)
+    if mode_intent is not None:
+        assistant_message = conversations.create_message(
+            conversation_id=conversation_id,
+            source="assistant",
+            role="assistant",
+            text=str(mode_intent.get("message") or ""),
+            status="sent",
+            metadata={
+                "kind": "mode_intent",
+                "changed": mode_intent.get("changed"),
+                "mode": (mode_intent.get("mode") or {}).get("current") if isinstance(mode_intent.get("mode"), dict) else None,
+            },
+            paths=runtime_paths,
+        )
+        runtime_model = current_runtime_model(runtime_paths)
+        return {
+            "ok": True,
+            "accepted": False,
+            "turn_id": assistant_message["id"],
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "chat": {
+                "ok": True,
+                "reply": assistant_message["text"],
+                "engine": "lilsunspot_mode_router",
+                "provider": runtime_model.get("provider") or "",
+                "model": runtime_model.get("model") or "",
+                "conversation_id": None,
+                "conversation_id_supported": False,
+                "conversation_id_requested": bool(conversation_id),
+                "mode_intent": mode_intent.get("intent"),
+                "mode": mode_intent.get("mode"),
+            },
+        }
+
+    accepted = await turn_coalescer.enqueue_text_turn(
+        key=turn_coalescer.key_for_desktop(conversation_id),
+        conversation_id=conversation_id,
+        text=message,
+        current_message_id=user_message["id"],
+        assistant_source="assistant",
+        paths=runtime_paths,
+        wait_for_reply=False,
+    )
+    if not accepted.get("accepted"):
+        raise HTTPException(status_code=404, detail="这个对话已删除，本次回复已取消。")
+
+    runtime_model = current_runtime_model(runtime_paths)
+    return {
+        "ok": True,
+        "accepted": True,
+        "turn_id": accepted.get("turn_id"),
+        "user_message": user_message,
+        "assistant_message": accepted["assistant_message"],
+        "chat": {
+            "ok": True,
+            "accepted": True,
+            "reply": "",
+            "engine": "lilsunspot_turn_coalescer",
+            "provider": runtime_model.get("provider") or "",
+            "model": runtime_model.get("model") or "",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+        },
+    }
+
+
 @app.get("/conversations", dependencies=[Depends(require_token)])
 async def api_conversations(include_archived: bool = False) -> dict[str, Any]:
     return {"conversations": conversations.list_conversations(include_archived=include_archived)}
+
+
+@app.post("/conversations/search", dependencies=[Depends(require_token)])
+async def api_conversation_search(payload: ConversationSearchRequest) -> dict[str, Any]:
+    return {
+        "query": payload.query,
+        "results": product_features.search_conversations(
+            payload.query,
+            include_archived=payload.include_archived,
+            limit=payload.limit,
+        ),
+    }
 
 
 @app.post("/conversations", dependencies=[Depends(require_token)])
@@ -783,7 +920,7 @@ async def api_conversation_message_send(
     conversation_id: str,
     payload: ConversationMessageRequest,
 ) -> dict[str, Any]:
-    return await _send_conversation_message(payload.message, conversation_id=conversation_id, source="desktop")
+    return await _accept_conversation_message(payload.message, conversation_id=conversation_id, source="desktop")
 
 
 @app.patch("/conversations/{conversation_id}", dependencies=[Depends(require_token)])
@@ -885,9 +1022,16 @@ async def gateway_weixin_login_start() -> dict[str, Any]:
 @app.get("/gateway/weixin/login/status", dependencies=[Depends(require_token)])
 async def gateway_weixin_login_status() -> dict[str, Any]:
     result = await poll_weixin_login_status()
+    runtime_status: dict[str, Any] | None = None
     if result.get("connected"):
-        await start_weixin_runtime(paths)
-    return _with_weixin_runtime_status(result)
+        runtime_status = await start_weixin_runtime(paths)
+        if not runtime_status.get("running"):
+            result = fail_weixin_login_verification(
+                runtime_status.get("last_error") or "检测到这次微信登录没有通过同步验证，请刷新二维码后重新扫码。",
+                paths,
+            )
+            runtime_status = weixin_runtime_status()
+    return _with_weixin_runtime_status(result, runtime_status)
 
 
 @app.post("/gateway/weixin/disconnect", dependencies=[Depends(require_token)])
@@ -917,6 +1061,89 @@ async def gateway_weixin_send(payload: WeixinSendRequest) -> dict[str, Any]:
 @app.get("/safety/policy", dependencies=[Depends(require_token)])
 async def safety_policy() -> dict[str, Any]:
     return {"policy": load_safety_policy()}
+
+
+@app.get("/diagnostics/summary", dependencies=[Depends(require_token)])
+async def diagnostics_summary() -> dict[str, Any]:
+    return product_features.diagnostics_summary(ensure_runtime_dirs())
+
+
+@app.get("/reminders", dependencies=[Depends(require_token)])
+async def api_reminders() -> dict[str, Any]:
+    return {"reminders": product_features.list_reminders()}
+
+
+@app.post("/reminders", dependencies=[Depends(require_token)])
+async def api_reminder_create(payload: ReminderCreateRequest) -> dict[str, Any]:
+    try:
+        reminder = product_features.create_reminder(title=payload.title, prompt=payload.prompt, due_at=payload.due_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"reminder": reminder}
+
+
+@app.patch("/reminders/{reminder_id}", dependencies=[Depends(require_token)])
+async def api_reminder_update(reminder_id: str, payload: ReminderUpdateRequest) -> dict[str, Any]:
+    reminder = product_features.update_reminder(reminder_id, enabled=payload.enabled, completed=payload.completed)
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="没有找到这个提醒。")
+    return {"reminder": reminder}
+
+
+@app.delete("/reminders/{reminder_id}", dependencies=[Depends(require_token)])
+async def api_reminder_delete(reminder_id: str) -> dict[str, Any]:
+    deleted = product_features.delete_reminder(reminder_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="没有找到这个提醒。")
+    return {"ok": True}
+
+
+@app.get("/memory", dependencies=[Depends(require_token)])
+async def api_memory() -> dict[str, Any]:
+    return {"memories": product_features.list_memories()}
+
+
+@app.post("/memory", dependencies=[Depends(require_token)])
+async def api_memory_create(payload: MemoryCreateRequest) -> dict[str, Any]:
+    try:
+        memory = product_features.create_memory(text=payload.text, source=payload.source)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"memory": memory}
+
+
+@app.patch("/memory/{memory_id}", dependencies=[Depends(require_token)])
+async def api_memory_update(memory_id: str, payload: MemoryUpdateRequest) -> dict[str, Any]:
+    memory = product_features.update_memory(memory_id, enabled=payload.enabled)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="没有找到这条记忆。")
+    return {"memory": memory}
+
+
+@app.delete("/memory/{memory_id}", dependencies=[Depends(require_token)])
+async def api_memory_delete(memory_id: str) -> dict[str, Any]:
+    deleted = product_features.delete_memory(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="没有找到这条记忆。")
+    return {"ok": True}
+
+
+@app.get("/product/capabilities", dependencies=[Depends(require_token)])
+async def api_product_capabilities() -> dict[str, Any]:
+    return {"capabilities": product_features.list_capabilities()}
+
+
+@app.patch("/product/capabilities/{capability_id}", dependencies=[Depends(require_token)])
+async def api_product_capability_update(capability_id: str, payload: CapabilityUpdateRequest) -> dict[str, Any]:
+    capability = product_features.update_capability(capability_id, enabled=payload.enabled)
+    if capability is None:
+        raise HTTPException(status_code=404, detail="没有找到这个能力。")
+    return {"capability": capability}
+
+
+@app.get("/upstream/status", dependencies=[Depends(require_token)])
+async def api_upstream_status() -> dict[str, Any]:
+    return product_features.upstream_status()
 
 
 @app.get("/safety/approvals", dependencies=[Depends(require_token)])

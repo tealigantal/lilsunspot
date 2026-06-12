@@ -3,11 +3,12 @@ import type { AppBootstrapRuntime, Provider } from "../../types";
 import { getProviders } from "../../api";
 import { ModelSettings } from "../model/ModelSettings";
 import { CapabilitySettings } from "./CapabilitySettings";
+import { ControlCenterSettings } from "./ControlCenterSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { SafetySettings } from "./SafetySettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor";
+export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor" | "control";
 
 type SettingsDrawerProps = {
   open: boolean;
@@ -22,7 +23,8 @@ const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
   { id: "capabilities", label: "能力", badge: "Hermes" },
   { id: "weixin", label: "微信", badge: "未连接" },
   { id: "safety", label: "安全审批", badge: "暂无待处理" },
-  { id: "doctor", label: "诊断", badge: "未检查" }
+  { id: "doctor", label: "诊断", badge: "未检查" },
+  { id: "control", label: "控制台" }
 ];
 
 export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTab = "model" }: SettingsDrawerProps) {
@@ -79,7 +81,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
         <header>
           <div>
             <h2>设置</h2>
-            <p>模型、本地连接状态、审批和诊断都在这里调整。</p>
+            <p>模型服务、微信连接和本地控制台都在这里调整。</p>
           </div>
           <button type="button" className="iconButton" onClick={onClose} aria-label="关闭设置">
             ×
@@ -99,6 +101,7 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}
+          {active === "control" && <ControlCenterSettings />}
         </div>
       </aside>
     </div>

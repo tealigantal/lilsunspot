@@ -27,6 +27,9 @@ EXCLUDED_RELATIVE_PREFIXES = {
     ("lilsunspot", "desktop", "src-tauri", "binaries"),
 }
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".exe", ".dll"}
+EXCLUDED_PREFIXES = {
+    Path("lilsunspot/desktop/src-tauri/binaries/lilsunspotd/_internal"),
+}
 
 PATTERNS = [
     ("openai_style_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
@@ -47,6 +50,8 @@ def iter_files(path: Path):
         if child.is_dir():
             continue
         relative_path = child.relative_to(ROOT)
+        if any(relative_path == prefix or prefix in relative_path.parents for prefix in EXCLUDED_PREFIXES):
+            continue
         relative_parts = set(relative_path.parts)
         if relative_parts & EXCLUDED_DIRS:
             continue

@@ -17,7 +17,6 @@ type OnboardingFlowProps = {
   completion?: "first_chat" | "return_to_chat";
   onSaved: () => Promise<void> | void;
   onFirstChatDone: (messages: ChatMessage[]) => void;
-  onOpenDoctor: () => void;
 };
 
 const STEPS = ["欢迎", "选择模型", "保存 Key", "第一句聊天"];
@@ -41,8 +40,7 @@ export function OnboardingFlow({
   initialStep,
   completion = "first_chat",
   onSaved,
-  onFirstChatDone,
-  onOpenDoctor
+  onFirstChatDone
 }: OnboardingFlowProps) {
   const [step, setStep] = useState<OnboardingStep>(initialStep || (initialProvider ? "choose" : "welcome"));
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -207,7 +205,6 @@ export function OnboardingFlow({
           message={error}
           suggestion="请按提示处理后再继续。"
           primaryAction={{ label: "重新加载", onClick: () => window.location.reload() }}
-          secondaryActions={[{ label: "一键检查", onClick: onOpenDoctor }]}
         />
       )}
       {step === "welcome" && <WelcomeStep onNext={() => setStep("choose")} />}

@@ -66,7 +66,7 @@ export function SafetySettings() {
     setMessage("");
     try {
       const result = await decideSafetyApproval(approvalId, decision);
-      setMessage(result.message);
+      setMessage(result.message || "审批已处理。");
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "审批处理失败。");

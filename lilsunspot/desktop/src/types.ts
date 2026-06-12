@@ -51,7 +51,7 @@ export type AppBootstrapStage =
   | "repair_required";
 
 export type AppBootstrapAction = {
-  id: "wait" | "repair" | "setup_model" | "test_model" | "open_chat" | "open_doctor" | "open_settings" | "retry";
+  id: "wait" | "repair" | "setup_model" | "test_model" | "open_chat" | "open_settings" | "retry";
   label: string;
 };
 
@@ -141,15 +141,123 @@ export type RuntimeInfo = {
   bind_port: number;
   base_url: string;
   pid: number;
+  process: RuntimeProcessInfo;
   runtime_file: string;
   configured: boolean;
   provider: string;
   model: string;
 };
 
+export type RuntimeProcessInfo = {
+  pid?: number;
+  parent_pid?: number;
+  executable?: string;
+  packaged?: boolean;
+  packager?: string;
+  process_model?: string;
+  note_cn?: string;
+};
+
+export type ModelCapabilities = {
+  configured: boolean;
+  provider: string;
+  provider_name: string;
+  model: string;
+  supports_image: boolean;
+  supports_files: boolean;
+  supports_weixin: boolean;
+  supports_reminders: boolean;
+  source: string;
+  limitations: string[];
+};
+
+export type DiagnosticsSummary = {
+  ok: boolean;
+  generated_at: string;
+  model: ModelCapabilities;
+  weixin: {
+    connected: boolean;
+    status: string;
+    message: string;
+    active_conversation_count: number;
+  };
+  local_service: {
+    doctor_ok: boolean;
+    runtime_process: RuntimeProcessInfo;
+    process_note: string;
+    failed_checks: Array<{ name: string; ok: boolean; detail: string }>;
+  };
+  counts: {
+    reminders: number;
+    active_reminders: number;
+    memories: number;
+    active_memories: number;
+    capabilities: number;
+    enabled_capabilities: number;
+  };
+  upstream: UpstreamStatus;
+};
+
+export type UpstreamStatus = {
+  available: boolean;
+  latest_report: string;
+  generated_at: string;
+  summary: string;
+  commits_since_base: number | null;
+  changed_files: number | null;
+  working_tree_dirty: boolean | null;
+};
+
+export type ConversationSearchResult = {
+  type: "message" | "attachment" | string;
+  conversation_id: string;
+  conversation_title: string;
+  conversation_kind: string;
+  message_id: string;
+  attachment_id: string;
+  source: string;
+  role: string;
+  snippet: string;
+  created_at: string;
+};
+
+export type ProductReminder = {
+  id: string;
+  title: string;
+  prompt: string;
+  due_at: string;
+  enabled: boolean;
+  completed_at: string;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProductMemory = {
+  id: string;
+  text: string;
+  source: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProductCapability = {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  requires_approval: boolean;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type ChatSendResult =
   | {
       ok: true;
+      accepted?: boolean;
       reply: string;
       engine: "lilsunspot_provider_adapter" | string;
       provider: string;
@@ -216,12 +324,14 @@ export type ConversationMessage = {
   text: string;
   attachments: ConversationAttachment[];
   created_at: string;
-  status: "sent" | "received" | "error" | string;
+  status: "sent" | "received" | "generating" | "error" | string;
   metadata?: Record<string, unknown>;
 };
 
 export type ConversationSendResult = {
   ok: boolean;
+  accepted?: boolean;
+  turn_id?: string;
   user_message: ConversationMessage;
   assistant_message: ConversationMessage;
   chat: ChatSendResult;
@@ -236,7 +346,7 @@ export type LilsunspotEvent = {
     message?: ConversationMessage;
     attachment?: ConversationAttachment;
     mode?: CurrentMode;
-    approval?: SafetyApproval;
+    approval?: Record<string, unknown>;
     [key: string]: unknown;
   };
 };
@@ -274,6 +384,7 @@ export type WeixinStatus = {
   gateway: "weixin";
   available: boolean;
   connected: boolean;
+  display_status?: string;
   status:
     | "not_configured"
     | "qr_pending"
@@ -286,13 +397,17 @@ export type WeixinStatus = {
   commands_available: boolean;
   bot_profile?: WeixinBotProfile;
   login?: WeixinLoginState | null;
+  login_verification?: WeixinLoginVerification;
   runtime?: WeixinRuntimeState;
   capabilities?: {
     qr_login: boolean;
     private_chat: boolean;
     commands: boolean;
+    attachments?: boolean;
+    attachment_send_requires_approval?: boolean;
     active_send_requires_approval: boolean;
     official_payment_or_materials_required: boolean;
+    official_adapter_media_methods?: string[];
   };
   message: string;
 };
@@ -305,10 +420,19 @@ export type WeixinBotProfile = {
 
 export type WeixinLoginState = {
   status: string;
+  display_status?: string;
   qr_payload: string;
   qr_payload_kind: "url" | "text" | string;
   qr_image_data_url?: string;
   expires_at: number;
+  message: string;
+  poll_warning?: string;
+  risk_flags?: string[];
+};
+
+export type WeixinLoginVerification = {
+  state: "not_started" | "pending" | "attention" | "verified" | "failed" | string;
+  risk_flags: string[];
   message: string;
 };
 
@@ -382,24 +506,39 @@ export type AuditResult = {
 export type SafetyApproval = {
   id: string;
   operation: string;
-  status: "pending" | "approved" | "rejected" | string;
-  summary: string;
-  source: string;
-  details: Record<string, unknown>;
-  created_at: string;
-  decided_at: string | null;
+  status: string;
+  summary?: string;
+  details?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type SafetyApprovals = {
   pending: SafetyApproval[];
-  history?: SafetyApproval[];
+  policy?: SafetyPolicy;
+  [key: string]: unknown;
+};
+
+export type WeixinSendApprovalResult = {
+  ok: boolean;
+  gateway: "weixin";
+  status: string;
+  approval_required: boolean;
+  approval?: SafetyApproval | null;
   message: string;
 };
 
-export type SafetyApprovalDecision = {
-  ok: boolean;
+export type SafetyApprovalDecisionResult = {
+  ok?: boolean;
+  message?: string;
   approval: SafetyApproval;
-  message: string;
+  delivery?: {
+    ok: boolean;
+    message?: string;
+    sent_text?: boolean;
+    sent_files?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 };
 
 export type DoctorCheck = {

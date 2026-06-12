@@ -29,6 +29,7 @@ const DAEMON_HTTP_MAX_TIMEOUT_MS: u64 = 30_000;
 
 static SSE_RUNNING: AtomicBool = AtomicBool::new(false);
 static EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+static DAEMON_CONNECTING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 struct DaemonEndpoint {
@@ -58,6 +59,23 @@ struct DaemonConnectStatus {
 struct DaemonHttpResponse {
     status: u16,
     body: String,
+}
+
+struct DaemonConnectGuard;
+
+impl DaemonConnectGuard {
+    fn enter() -> Option<Self> {
+        if DAEMON_CONNECTING.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        Some(Self)
+    }
+}
+
+impl Drop for DaemonConnectGuard {
+    fn drop(&mut self) {
+        DAEMON_CONNECTING.store(false, Ordering::SeqCst);
+    }
 }
 
 fn data_dir() -> Result<PathBuf, String> {
@@ -137,8 +155,8 @@ fn http_request(
     token: Option<&str>,
     read_timeout: Duration,
 ) -> Result<DaemonHttpResponse, String> {
-    if method != "GET" && method != "POST" {
-        return Err("只支持 GET 和 POST 请求。".to_string());
+    if !matches!(method, "GET" | "POST" | "PATCH" | "DELETE") {
+        return Err("只支持 GET、POST、PATCH 和 DELETE 请求。".to_string());
     }
     if !path.starts_with('/') || path.contains(' ') {
         return Err("请求路径不正确。".to_string());
@@ -406,6 +424,45 @@ fn healthy_endpoint(data_path: &Path) -> Option<DaemonEndpoint> {
     None
 }
 
+fn wait_for_healthy_endpoint(data_path: &Path, timeout: Duration) -> Option<DaemonEndpoint> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Some(endpoint) = healthy_endpoint(data_path) {
+            return Some(endpoint);
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    None
+}
+
+fn daemon_status_from_endpoint(
+    endpoint: DaemonEndpoint,
+    data_path: &Path,
+    runtime_file: &Path,
+    launch_attempted: bool,
+) -> DaemonConnectStatus {
+    let token_path = data_path.join(TOKEN_FILE_NAME);
+    if let Err(message) = read_runtime_token_from_path(token_path) {
+        return DaemonConnectStatus {
+            ok: false,
+            base_url: endpoint.base_url,
+            data_dir: data_path.to_string_lossy().to_string(),
+            runtime_file: runtime_file.to_string_lossy().to_string(),
+            launch_attempted,
+            message_cn: message,
+        };
+    }
+
+    DaemonConnectStatus {
+        ok: true,
+        base_url: endpoint.base_url,
+        data_dir: data_path.to_string_lossy().to_string(),
+        runtime_file: runtime_file.to_string_lossy().to_string(),
+        launch_attempted,
+        message_cn: "小黑子本地服务已连接。".to_string(),
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn hide_child_window(command: &mut Command) {
     use std::os::windows::process::CommandExt;
@@ -444,6 +501,13 @@ fn sidecar_file_names() -> &'static [&'static str] {
 
 fn add_sidecar_candidates_from_dir(candidates: &mut Vec<PathBuf>, dir: &Path) {
     for name in sidecar_file_names() {
+        candidates.push(dir.join("binaries").join("lilsunspotd").join(name));
+        candidates.push(
+            dir.join("resources")
+                .join("binaries")
+                .join("lilsunspotd")
+                .join(name),
+        );
         candidates.push(dir.join(name));
         candidates.push(dir.join("binaries").join(name));
         candidates.push(dir.join("resources").join(name));
@@ -513,6 +577,19 @@ fn connect_daemon() -> DaemonConnectStatus {
     };
     let runtime_file = data_path.join(RUNTIME_FILE_NAME);
     let mut launch_attempted = false;
+    let Some(_guard) = DaemonConnectGuard::enter() else {
+        return match wait_for_healthy_endpoint(&data_path, Duration::from_secs(10)) {
+            Some(endpoint) => daemon_status_from_endpoint(endpoint, &data_path, &runtime_file, false),
+            None => DaemonConnectStatus {
+                ok: false,
+                base_url: default_endpoint().base_url,
+                data_dir: data_path.to_string_lossy().to_string(),
+                runtime_file: runtime_file.to_string_lossy().to_string(),
+                launch_attempted: false,
+                message_cn: "小黑子本地服务正在启动，请稍后再试。".to_string(),
+            },
+        };
+    };
 
     let endpoint = match healthy_endpoint(&data_path) {
         Some(endpoint) => endpoint,
@@ -529,15 +606,7 @@ fn connect_daemon() -> DaemonConnectStatus {
                 };
             }
 
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut found = None;
-            while Instant::now() < deadline {
-                if let Some(endpoint) = healthy_endpoint(&data_path) {
-                    found = Some(endpoint);
-                    break;
-                }
-                thread::sleep(Duration::from_millis(250));
-            }
+            let found = wait_for_healthy_endpoint(&data_path, Duration::from_secs(10));
             match found {
                 Some(endpoint) => endpoint,
                 None => {
@@ -553,27 +622,7 @@ fn connect_daemon() -> DaemonConnectStatus {
             }
         }
     };
-
-    let token_path = data_path.join(TOKEN_FILE_NAME);
-    if let Err(message) = read_runtime_token_from_path(token_path) {
-        return DaemonConnectStatus {
-            ok: false,
-            base_url: endpoint.base_url,
-            data_dir: data_path.to_string_lossy().to_string(),
-            runtime_file: runtime_file.to_string_lossy().to_string(),
-            launch_attempted,
-            message_cn: message,
-        };
-    }
-
-    DaemonConnectStatus {
-        ok: true,
-        base_url: endpoint.base_url,
-        data_dir: data_path.to_string_lossy().to_string(),
-        runtime_file: runtime_file.to_string_lossy().to_string(),
-        launch_attempted,
-        message_cn: "小黑子本地服务已连接。".to_string(),
-    }
+    daemon_status_from_endpoint(endpoint, &data_path, &runtime_file, launch_attempted)
 }
 
 #[tauri::command]
@@ -727,4 +776,98 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running lilsunspot desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+        thread,
+    };
+
+    fn request_complete(bytes: &[u8]) -> bool {
+        let header_end = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n");
+        let Some(header_end) = header_end else {
+            return false;
+        };
+        let headers = String::from_utf8_lossy(&bytes[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("Content-Length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        bytes.len() >= header_end + 4 + content_length
+    }
+
+    fn read_request(stream: &mut TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set read timeout");
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        loop {
+            let size = stream.read(&mut buffer).expect("read request");
+            if size == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..size]);
+            if request_complete(&bytes) {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    fn capture_request(method: &str, body: Option<&str>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let port = listener.local_addr().expect("local addr").port();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            tx.send(read_request(&mut stream)).expect("send captured request");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}")
+                .expect("write response");
+        });
+
+        let endpoint = endpoint_from_parts(DEFAULT_HOST, port).expect("endpoint");
+        let response = http_request(
+            &endpoint,
+            method,
+            "/conversations/unit",
+            body,
+            Some("unit-token"),
+            Duration::from_secs(2),
+        )
+        .expect("http request");
+        assert_eq!(response.status, 200);
+        rx.recv().expect("captured request")
+    }
+
+    #[test]
+    fn http_request_allows_patch_with_token_and_body() {
+        let request = capture_request("PATCH", Some("{\"title\":\"新名称\"}"));
+        assert!(request.starts_with("PATCH /conversations/unit HTTP/1.1"));
+        assert!(request.contains("X-Lilsunspot-Token: unit-token"));
+        assert!(request.contains("Content-Type: application/json"));
+        assert!(request.ends_with("{\"title\":\"新名称\"}"));
+    }
+
+    #[test]
+    fn http_request_allows_delete_with_token() {
+        let request = capture_request("DELETE", None);
+        assert!(request.starts_with("DELETE /conversations/unit HTTP/1.1"));
+        assert!(request.contains("X-Lilsunspot-Token: unit-token"));
+    }
 }

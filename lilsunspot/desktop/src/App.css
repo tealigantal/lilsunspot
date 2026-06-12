@@ -812,12 +812,76 @@ label {
 
 .conversationRail {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   padding: 18px;
+}
+
+.conversationSearch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conversationSearch input {
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.conversationSearch button {
+  min-height: 36px;
+  padding-inline: 10px;
+  font-size: 12px;
+}
+
+.conversationSearchResults {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+  border: 1px solid rgba(99, 246, 218, 0.16);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(7, 17, 30, 0.46);
+}
+
+.conversationSearchResults button {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  border-color: rgba(168, 182, 201, 0.16);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(20, 38, 61, 0.62);
+  color: var(--ikun-text);
+  text-align: left;
+}
+
+.conversationSearchResults strong,
+.conversationSearchResults span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversationSearchResults strong {
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.conversationSearchResults span {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  line-height: 17px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .conversationRailHeader {
@@ -1193,6 +1257,57 @@ label {
   background: rgba(255, 90, 106, 0.14);
 }
 
+.generatingBubble {
+  border-color: rgba(99, 246, 218, 0.34);
+  background: rgba(31, 39, 53, 0.78);
+}
+
+.generatingBubble p {
+  color: var(--ikun-muted);
+}
+
+.weixinSendConfirm {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(247, 251, 255, 0.08);
+}
+
+.weixinSendConfirm span,
+.attachmentSendStatus {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.weixinSendConfirm textarea {
+  min-width: 0;
+  width: 100%;
+  resize: vertical;
+  border-color: rgba(99, 246, 218, 0.22);
+  border-radius: 8px;
+  padding: 8px;
+  background: #f7fbff;
+  color: #07111e;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.weixinSendConfirm div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.attachmentSendStatus {
+  margin: 0;
+}
+
 .chatComposer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 104px;
@@ -1510,6 +1625,138 @@ label {
 
 .settingsSummary {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.controlCenter {
+  gap: 18px;
+}
+
+.controlMetricGrid,
+.controlPanelGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.controlMetricGrid article,
+.controlPanelCard,
+.productList > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(99, 246, 218, 0.18);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: rgba(7, 17, 30, 0.48);
+}
+
+.controlMetricGrid span,
+.productList span,
+.compactStatusList,
+.capabilitySwitch small {
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.controlMetricGrid strong,
+.productList strong,
+.capabilitySwitch strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ikun-text);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.controlPanelCard h4 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.controlPanelCard p,
+.productList p {
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.compactStatusList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.controlFormGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.controlFormGrid textarea {
+  grid-column: 1 / 3;
+  min-height: 64px;
+}
+
+.controlFormGrid.single {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.controlFormGrid.single textarea {
+  grid-column: auto;
+}
+
+.productList {
+  display: grid;
+  gap: 10px;
+}
+
+.productList > div > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capabilitySwitchGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.capabilitySwitch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid rgba(168, 182, 201, 0.18);
+  border-radius: var(--radius-control);
+  padding: 12px;
+  background: rgba(20, 38, 61, 0.58);
+}
+
+.capabilitySwitch input {
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  padding: 0;
+  accent-color: var(--ikun-orange);
+}
+
+.capabilitySwitch span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.capabilitySwitch em {
+  width: fit-content;
+  border: 1px solid rgba(255, 213, 82, 0.24);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--ikun-yellow);
+  font-size: 12px;
+  font-style: normal;
 }
 
 .plainList {
@@ -2687,6 +2934,19 @@ label {
 
   .capabilityActions button {
     width: 100%;
+  }
+
+  .controlMetricGrid,
+  .controlPanelGrid,
+  .controlFormGrid,
+  .controlFormGrid.single,
+  .capabilitySwitchGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .controlFormGrid textarea,
+  .controlFormGrid.single textarea {
+    grid-column: auto;
   }
 
   .chatBubble,

@@ -9,7 +9,7 @@ from typing import Any
 
 from . import conversations
 from . import provider_client as provider_http
-from .capabilities import enabled_toolsets_for_agent, fallback_chain_for_agent
+from .capabilities import capability_prompt_snapshot, enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 
@@ -53,6 +53,16 @@ def _settings_for_agent(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         return _agent_error("provider_required"), None
     provider_config = settings["provider_config"]
     hermes_provider = str(provider_config.get("hermes_provider") or settings["provider"]).strip() or "custom"
+    capability_hint = capability_prompt_snapshot(paths)
+    system_hint = "\n\n".join(
+        part
+        for part in (
+            str(settings.get("system_hint") or "").strip(),
+            capability_hint,
+        )
+        if part
+    )
+    settings = {**settings, "system_hint": system_hint}
     return None, {**settings, "base_url": base_url, "hermes_provider": hermes_provider}
 
 
@@ -162,8 +172,9 @@ def _run_agent_turn(
     from gateway.session_context import clear_session_vars, set_session_vars
     from tools.approval import register_gateway_notify, reset_current_session_key, set_current_session_key, unregister_gateway_notify
 
+    platform_name = "weixin" if route else "lilsunspot"
     tokens = set_session_vars(
-        platform="lilsunspot",
+        platform=platform_name,
         chat_id=conversation_id,
         chat_name=str(conversation.get("title") or ""),
         user_id=str((route or {}).get("user_id") or ""),
@@ -184,7 +195,7 @@ def _run_agent_turn(
             verbose_logging=False,
             session_id=session_id,
             session_db=session_db,
-            platform="lilsunspot",
+            platform=platform_name,
             user_id=str((route or {}).get("user_id") or ""),
             chat_id=conversation_id,
             chat_name=str(conversation.get("title") or ""),

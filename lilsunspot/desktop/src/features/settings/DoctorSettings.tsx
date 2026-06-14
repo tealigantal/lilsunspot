@@ -13,7 +13,7 @@ const CHECK_NAMES: Record<string, string> = {
   daemon_bind_host: "本地服务绑定",
   runtime_token_exists: "运行令牌文件",
   data_dir_exists: "数据目录",
-  hermes_home_exists: "Hermes 工作目录",
+  hermes_home_exists: "本地能力工作目录",
   logs_dir_exists: "日志目录",
   weixin_gateway: "微信网关",
   diagnostics_redaction: "诊断包脱敏"

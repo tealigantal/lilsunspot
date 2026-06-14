@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from . import conversations
-from .chat_client import _model_supports_image_url, current_runtime_model
+from .capability_graph import build_capability_graph, graph_node
+from .chat_client import current_runtime_model, image_recognition_status
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .doctor import run_doctor_checks
 from .gateway import weixin_status
+from .hermes_runtime import read_hermes_config
 from .providers import provider_by_id
 from .runtime_discovery import read_runtime_descriptor
 
@@ -337,24 +339,39 @@ def update_capability(capability_id: str, *, enabled: bool, paths: RuntimePaths 
 
 
 def model_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
-    runtime_model = current_runtime_model(paths)
+    runtime_paths = paths or ensure_runtime_dirs()
+    runtime_model = current_runtime_model(runtime_paths)
     provider_id = str(runtime_model.get("provider") or "")
     model = str(runtime_model.get("model") or "")
     provider = provider_by_id(provider_id) if provider_id else None
-    supports_image = bool(runtime_model.get("configured") and _model_supports_image_url(provider_id, model))
+    config = read_hermes_config(runtime_paths)
+    image_status = image_recognition_status(provider_id, model, config=config, paths=runtime_paths)
+    graph = build_capability_graph(runtime_paths)
+    image_node = graph_node(graph, "image.read") or {}
+    image_details = image_node.get("details") if isinstance(image_node.get("details"), dict) else {}
+    image_capability_status = str(image_node.get("status") or "unknown")
+    supports_image = bool(runtime_model.get("configured") and image_capability_status in {"ready", "degraded"})
     supports_files = bool(runtime_model.get("configured"))
     supports_weixin = True
     limitations: list[str] = []
     if not runtime_model.get("configured"):
         limitations.append("还没有设置 AI 服务。")
     if runtime_model.get("configured") and not supports_image:
-        limitations.append("当前模型没有确认支持图片内容识别，图片仍可预览和作为文件保存。")
+        limitations.append(str(image_node.get("user_message_cn") or "当前模型和辅助视觉都没有确认支持图片识别，图片只能预览和作为文件保存。"))
+    if runtime_model.get("configured") and image_capability_status == "degraded":
+        limitations.append(str(image_node.get("user_message_cn") or "图片识别依赖辅助视觉模型，主聊天模型不会直接接收图片。"))
     return {
         "configured": bool(runtime_model.get("configured")),
         "provider": provider_id,
         "provider_name": str(provider.get("display_name") or provider_id) if provider else provider_id,
         "model": model,
         "supports_image": supports_image,
+        "main_supports_image": bool(runtime_model.get("configured") and image_details.get("main_supports_image", image_status["main_supports_image"])),
+        "auxiliary_configured": bool(image_details.get("auxiliary_configured", image_status["auxiliary_configured"])),
+        "image_backend": str(image_details.get("backend") or image_status["backend"]),
+        "image_input_mode": str(image_details.get("image_input_mode") or image_status["image_input_mode"]),
+        "image_capability_status": image_capability_status,
+        "capability_graph": graph,
         "supports_files": supports_files,
         "supports_weixin": supports_weixin,
         "supports_reminders": True,

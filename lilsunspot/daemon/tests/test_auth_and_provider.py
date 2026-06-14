@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 
 def test_health_is_public_and_providers_require_token(daemon_client):
     client = daemon_client.client
@@ -59,6 +61,57 @@ def test_provider_test_returns_validator_result(daemon_client, monkeypatch):
     body = response.json()
     assert body["ok"] is True
     assert "验证通过" in body["message"]
+
+
+def test_open_key_url_uses_key_url_without_detect_url_fallback(daemon_client, monkeypatch):
+    response = daemon_client.client.post(
+        "/providers/open-key-url",
+        headers=daemon_client.headers,
+        json={"provider": "qwen", "open_browser": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "qwen"
+    assert body["key_url"] == "https://bailian.console.aliyun.com/?apiKey=1"
+    assert body["opened"] is False
+
+    def fake_provider_by_id(provider_id):
+        return {"id": provider_id, "detect_url": "https://api.example.test/v1"}
+
+    monkeypatch.setattr(daemon_client.app_module, "provider_by_id", fake_provider_by_id)
+    missing_key_url = daemon_client.client.post(
+        "/providers/open-key-url",
+        headers=daemon_client.headers,
+        json={"provider": "fake", "open_browser": False},
+    )
+
+    assert missing_key_url.status_code == 400
+    assert "Key 获取地址" in missing_key_url.json()["detail"]
+    assert "api.example.test" not in missing_key_url.text
+
+
+@pytest.mark.parametrize(
+    ("provider", "key_url"),
+    [
+        ("deepseek", "https://platform.deepseek.com/api_keys"),
+        ("qwen", "https://bailian.console.aliyun.com/?apiKey=1"),
+        ("openai", "https://platform.openai.com/api-keys"),
+        ("ollama", "https://ollama.com/download"),
+    ],
+)
+def test_open_key_url_matches_selected_product_provider(daemon_client, provider, key_url):
+    response = daemon_client.client.post(
+        "/providers/open-key-url",
+        headers=daemon_client.headers,
+        json={"provider": provider, "open_browser": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == provider
+    assert body["key_url"] == key_url
+    assert body["opened"] is False
 
 
 def test_provider_test_error_is_user_facing_and_redacted(daemon_client):
@@ -129,3 +182,53 @@ def test_app_bootstrap_chat_ready_after_provider_save(daemon_client):
     assert body["runtime"] == {"configured": True, "provider": "deepseek", "model": "deepseek-chat"}
     assert secret not in bootstrap.text
     assert daemon_client.token not in bootstrap.text
+
+
+def test_provider_reset_local_clears_keys_and_returns_to_first_start(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    main_secret = "placeholder-reset-main-key"
+    vision_secret = "placeholder-reset-vision-key"
+
+    saved_main = daemon_client.client.post(
+        "/providers/save",
+        headers=daemon_client.headers,
+        json={"provider": "deepseek", "model": "deepseek-chat", "api_key": main_secret},
+    )
+    assert saved_main.status_code == 200
+    saved_vision = daemon_client.client.post(
+        "/models/auxiliary",
+        headers=daemon_client.headers,
+        json={"task": "vision", "provider": "qwen", "model": "qwen-vl-max", "api_key": vision_secret},
+    )
+    assert saved_vision.status_code == 200
+
+    before_reset = daemon_client.client.get("/app/bootstrap", headers=daemon_client.headers)
+    assert before_reset.status_code == 200
+    assert before_reset.json()["stage"] == "chat_ready"
+
+    response = daemon_client.client.post("/providers/reset-local", headers=daemon_client.headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["bootstrap"]["stage"] == "needs_model"
+    assert body["bootstrap"]["runtime"] == {"configured": False, "provider": "", "model": ""}
+    assert body["removed_env_keys"] >= 2
+    assert main_secret not in response.text
+    assert vision_secret not in response.text
+
+    config = daemon_client.hermes_runtime.read_hermes_config(paths)
+    assert "model" not in config
+    assert "auxiliary" not in config
+    assert "fallback_providers" not in config
+    assert "provider_routing" not in config
+    lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
+    assert not lilsunspot.get("provider")
+    assert not lilsunspot.get("model")
+    assert not lilsunspot.get("auxiliary")
+
+    env_text = (paths.hermes_home / ".env").read_text(encoding="utf-8") if (paths.hermes_home / ".env").exists() else ""
+    assert main_secret not in env_text
+    assert vision_secret not in env_text
+    assert "DEEPSEEK_API_KEY=" not in env_text
+    assert "DASHSCOPE_API_KEY=" not in env_text

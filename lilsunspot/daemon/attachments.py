@@ -19,6 +19,8 @@ ATTACHMENT_DIR_NAME = "attachments"
 IMAGE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 TEXT_READ_MAX_BYTES = 2 * 1024 * 1024
 SUMMARY_TOO_LARGE_BYTES = 25 * 1024 * 1024
+DESKTOP_UPLOAD_MAX_FILES = 5
+DESKTOP_UPLOAD_MAX_BYTES = SUMMARY_TOO_LARGE_BYTES
 SUMMARY_MAX_CHARS = 4000
 IMAGE_PREVIEW_ONLY_REASON = "图片已收到并可预览；当前还没有完成视觉识别。"
 
@@ -48,6 +50,14 @@ def _safe_name(name: str) -> str:
     base = re.sub(r"[\x00-\x1f<>:\"/\\|?*]+", "_", base)
     base = re.sub(r"\s+", " ", base).strip()
     return base[:160] or "attachment"
+
+
+def _display_name_from_source(source: Path) -> str:
+    name = _safe_name(source.name)
+    match = re.match(r"attachment_att_[0-9a-fA-F]+_(?P<name>.+)", name)
+    if match:
+        return _safe_name(match.group("name"))
+    return name
 
 
 def _resolve_file(path: str | Path) -> Path:
@@ -135,6 +145,18 @@ def _copy_to_attachment_dir(source: Path, attachment_id: str, paths: RuntimePath
     if not _is_within(resolved_target, target_root):
         raise AttachmentError("附件文件名不安全，已拒绝保存。")
     shutil.copy2(source, target)
+    return target
+
+
+def _write_upload_to_attachment_dir(data: bytes, file_name: str, attachment_id: str, paths: RuntimePaths) -> Path:
+    target_dir = attachment_storage_root(paths) / _now_yyyymm()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"attachment_{attachment_id}_{_safe_name(file_name)}"
+    target_root = attachment_storage_root(paths).resolve(strict=False)
+    resolved_target = target.resolve(strict=False)
+    if not _is_within(resolved_target, target_root):
+        raise AttachmentError("附件文件名不安全，已拒绝保存。")
+    target.write_bytes(data)
     return target
 
 
@@ -317,6 +339,14 @@ def _is_image_attachment(attachment: dict[str, Any]) -> bool:
     return mime_type.startswith("image/") or Path(file_name).suffix.lower() in IMAGE_EXTS
 
 
+def _image_recognition_metadata(result: dict[str, Any]) -> dict[str, str]:
+    return {
+        "recognition_backend": str(result.get("backend") or "none"),
+        "recognition_stage": str(result.get("stage") or ""),
+        "recognition_error_code": str(result.get("error_code") or ""),
+    }
+
+
 async def recognize_image_attachments(
     attachments: list[dict[str, Any]],
     *,
@@ -347,6 +377,7 @@ async def recognize_image_attachments(
                 summary_text=str(result.get("summary") or "").strip(),
                 preview_data_url=preview_data_url,
                 reason_cn="",
+                metadata_update=_image_recognition_metadata(result),
                 paths=runtime_paths,
             )
         else:
@@ -356,6 +387,7 @@ async def recognize_image_attachments(
                 summary_text="",
                 preview_data_url=preview_data_url,
                 reason_cn=str(result.get("message") or IMAGE_PREVIEW_ONLY_REASON),
+                metadata_update=_image_recognition_metadata(result),
                 paths=runtime_paths,
             )
         updated_attachments.append(next_attachment or attachment)
@@ -385,7 +417,7 @@ def register_message_attachments(
             message_id=message_id,
             conversation_id=conversation_id,
             safe_path=stored_path,
-            file_name=_safe_name(source_path.name),
+            file_name=_display_name_from_source(source_path),
             mime_type=mime_type,
             size_bytes=size_bytes,
             summary_status="pending",
@@ -393,6 +425,53 @@ def register_message_attachments(
             paths=runtime_paths,
         )
         status, summary, preview, reason = summarize_attachment_file(stored_path, mime_type, size_bytes)
+        updated = conversations.update_attachment_summary(
+            attachment["id"],
+            summary_status=status,
+            summary_text=summary,
+            preview_data_url=preview,
+            reason_cn=reason,
+            paths=runtime_paths,
+        )
+        attachments.append(updated or attachment)
+    return attachments
+
+
+def register_uploaded_attachments(
+    *,
+    message_id: str,
+    conversation_id: str,
+    files: list[dict[str, Any]],
+    source: str = "desktop",
+    paths: RuntimePaths | None = None,
+) -> list[dict[str, Any]]:
+    runtime_paths = paths or ensure_runtime_dirs()
+    if len(files) > DESKTOP_UPLOAD_MAX_FILES:
+        raise AttachmentError(f"一次最多上传 {DESKTOP_UPLOAD_MAX_FILES} 个附件。")
+    attachments: list[dict[str, Any]] = []
+    for raw_file in files:
+        file_name = _safe_name(str(raw_file.get("file_name") or "attachment"))
+        data = raw_file.get("data")
+        if not isinstance(data, bytes) or not data:
+            raise AttachmentError("附件内容为空，已拒绝保存。")
+        if len(data) > DESKTOP_UPLOAD_MAX_BYTES:
+            raise AttachmentError("单个附件不能超过 25 MB。")
+        mime_type = _guess_mime(Path(file_name), str(raw_file.get("mime_type") or ""))
+        attachment_id = f"att_{secrets.token_hex(8)}"
+        stored_path = _write_upload_to_attachment_dir(data, file_name, attachment_id, runtime_paths)
+        attachment = conversations.create_attachment_record(
+            attachment_id=attachment_id,
+            message_id=message_id,
+            conversation_id=conversation_id,
+            safe_path=stored_path,
+            file_name=file_name,
+            mime_type=mime_type,
+            size_bytes=len(data),
+            summary_status="pending",
+            metadata={"source": source, "original_ext": Path(file_name).suffix.lower()},
+            paths=runtime_paths,
+        )
+        status, summary, preview, reason = summarize_attachment_file(stored_path, mime_type, len(data))
         updated = conversations.update_attachment_summary(
             attachment["id"],
             summary_status=status,

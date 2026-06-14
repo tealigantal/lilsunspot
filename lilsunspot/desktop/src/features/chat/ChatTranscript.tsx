@@ -87,6 +87,24 @@ function attachmentSummaryLabel(attachment: ConversationAttachment) {
   return "查看说明";
 }
 
+function deliveryStatusText(metadata: Record<string, unknown> | undefined) {
+  const delivery = metadata?.delivery;
+  if (!delivery || typeof delivery !== "object") {
+    return "";
+  }
+  const value = delivery as Record<string, unknown>;
+  const status = String(value.status || "none");
+  const deliveredCount = Number(value.delivered_count || 0);
+  const rejectedCount = Number(value.rejected_count || 0);
+  if (status === "partial") {
+    return `已返还 ${deliveredCount} 个附件，${rejectedCount} 个附件未能返还。`;
+  }
+  if (status === "rejected") {
+    return "附件没有返还成功。";
+  }
+  return "";
+}
+
 function AttachmentCard({
   attachment,
   weixinSendTarget
@@ -251,7 +269,7 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect, weixi
                   ))}
                 </div>
               )}
-              {typeof message.metadata?.engine === "string" && <em>{message.metadata.engine}</em>}
+              {deliveryStatusText(message.metadata) && <em>{deliveryStatusText(message.metadata)}</em>}
             </div>
           </article>
         ))

@@ -7,24 +7,42 @@ import {
   getDiagnosticsSummary,
   getMemories,
   getProductCapabilities,
-  getProviderCapabilities,
   getReminders,
   updateMemory,
   updateProductCapability,
   updateReminder
 } from "../../api";
-import type { DiagnosticsSummary, ModelCapabilities, ProductCapability, ProductMemory, ProductReminder } from "../../types";
+import type {
+  CapabilityNode,
+  DiagnosticsSummary,
+  ModelCapabilities,
+  OperationNotice,
+  ProductCapability,
+  ProductMemory,
+  ProductReminder
+} from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
 
 function yesNo(value: boolean) {
   return value ? "可用" : "未启用";
 }
 
+function capabilityNode(model: ModelCapabilities | null, id: string): CapabilityNode | null {
+  const graph = model?.capability_graph;
+  return graph?.by_id?.[id] || graph?.nodes?.find((node) => node.id === id) || null;
+}
+
 function modelCapabilityText(model: ModelCapabilities | null) {
   if (!model?.configured) {
     return "未设置模型";
   }
-  const image = model.supports_image ? "可识别图片" : "仅预览图片";
+  const imageNode = capabilityNode(model, "image.read");
+  const image =
+    imageNode?.status === "ready"
+      ? "可直接识别图片"
+      : imageNode?.status === "degraded"
+        ? "图片识别需辅助模型"
+        : "仅预览图片";
   const files = model.supports_files ? "可读文件摘要" : "文件能力待设置";
   return `${model.provider_name} / ${model.model} · ${image} · ${files}`;
 }
@@ -39,9 +57,21 @@ function processModelText(summary: DiagnosticsSummary | null) {
   return `${packaged}服务 pid ${process.pid}${parent}`;
 }
 
-export function ControlCenterSettings() {
+type ControlCenterSettingsProps = {
+  modelCapabilities: ModelCapabilities | null;
+  capabilityNotice: OperationNotice | null;
+  onModelCapabilitiesRefresh: () => Promise<ModelCapabilities | null>;
+  onModelCapabilitiesChanged: (capabilities: ModelCapabilities | null) => void;
+};
+
+export function ControlCenterSettings({
+  modelCapabilities: sharedModelCapabilities,
+  capabilityNotice,
+  onModelCapabilitiesRefresh,
+  onModelCapabilitiesChanged
+}: ControlCenterSettingsProps) {
   const [summary, setSummary] = useState<DiagnosticsSummary | null>(null);
-  const [model, setModel] = useState<ModelCapabilities | null>(null);
+  const [model, setModel] = useState<ModelCapabilities | null>(sharedModelCapabilities);
   const [reminders, setReminders] = useState<ProductReminder[]>([]);
   const [memories, setMemories] = useState<ProductMemory[]>([]);
   const [capabilities, setCapabilities] = useState<ProductCapability[]>([]);
@@ -57,27 +87,60 @@ export function ControlCenterSettings() {
     [capabilities]
   );
 
+  useEffect(() => {
+    setModel(sharedModelCapabilities);
+  }, [sharedModelCapabilities]);
+
   async function load() {
     setBusy(true);
     setMessage("");
-    try {
-      const [nextSummary, nextModel, nextReminders, nextMemories, nextCapabilities] = await Promise.all([
-        getDiagnosticsSummary(),
-        getProviderCapabilities(),
-        getReminders(),
-        getMemories(),
-        getProductCapabilities()
-      ]);
+    const failures: string[] = [];
+    const results = await Promise.allSettled([
+      getDiagnosticsSummary(),
+      onModelCapabilitiesRefresh(),
+      getReminders(),
+      getMemories(),
+      getProductCapabilities()
+    ]);
+    const [summaryResult, modelResult, remindersResult, memoriesResult, capabilitiesResult] = results;
+    if (summaryResult.status === "fulfilled") {
+      const nextSummary = summaryResult.value;
       setSummary(nextSummary);
-      setModel(nextModel);
-      setReminders(nextReminders);
-      setMemories(nextMemories);
-      setCapabilities(nextCapabilities);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "控制台读取失败。");
-    } finally {
-      setBusy(false);
+      if (!sharedModelCapabilities) {
+        setModel(nextSummary.model);
+        onModelCapabilitiesChanged(nextSummary.model);
+      }
+    } else {
+      failures.push(summaryResult.reason instanceof Error ? summaryResult.reason.message : "诊断摘要读取失败。");
     }
+    if (modelResult.status === "fulfilled" && modelResult.value) {
+      setModel(modelResult.value);
+      onModelCapabilitiesChanged(modelResult.value);
+    } else if (modelResult.status === "rejected") {
+      failures.push(modelResult.reason instanceof Error ? modelResult.reason.message : "模型能力读取失败。");
+    }
+    if (remindersResult.status === "fulfilled") {
+      const nextReminders = remindersResult.value;
+      setReminders(nextReminders);
+    } else {
+      failures.push(remindersResult.reason instanceof Error ? remindersResult.reason.message : "提醒读取失败。");
+    }
+    if (memoriesResult.status === "fulfilled") {
+      const nextMemories = memoriesResult.value;
+      setMemories(nextMemories);
+    } else {
+      failures.push(memoriesResult.reason instanceof Error ? memoriesResult.reason.message : "记忆读取失败。");
+    }
+    if (capabilitiesResult.status === "fulfilled") {
+      const nextCapabilities = capabilitiesResult.value;
+      setCapabilities(nextCapabilities);
+    } else {
+      failures.push(capabilitiesResult.reason instanceof Error ? capabilitiesResult.reason.message : "能力开关读取失败。");
+    }
+    if (failures.length > 0) {
+      setMessage(failures.join(" "));
+    }
+    setBusy(false);
   }
 
   useEffect(() => {
@@ -190,8 +253,9 @@ export function ControlCenterSettings() {
 
         <article className="controlPanelCard">
           <h4>模型能力</h4>
+          {capabilityNode(model, "image.read")?.user_message_cn && <p>{capabilityNode(model, "image.read")?.user_message_cn}</p>}
           <ul className="compactStatusList">
-            <li>图片：{yesNo(Boolean(model?.supports_image))}</li>
+            <li>图片：{capabilityNode(model, "image.read")?.status || "未知"}</li>
             <li>文件：{yesNo(Boolean(model?.supports_files))}</li>
             <li>微信：{yesNo(Boolean(model?.supports_weixin))}</li>
           </ul>
@@ -277,6 +341,11 @@ export function ControlCenterSettings() {
       {message && (
         <p className="inlineStatus" aria-live="polite">
           {message}
+        </p>
+      )}
+      {capabilityNotice && (
+        <p className="inlineStatus" aria-live="polite">
+          {capabilityNotice.message}
         </p>
       )}
     </section>

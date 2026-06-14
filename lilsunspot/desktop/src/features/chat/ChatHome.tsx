@@ -11,6 +11,7 @@ import {
   subscribeDaemonEvents,
   updateConversation
 } from "../../api";
+import type { CapabilityNode, ModelCapabilities } from "../../types";
 import type { SettingsTab } from "../settings/SettingsDrawer";
 import { ModeQuickPanel } from "../mode/ModeQuickPanel";
 import { useModeState } from "../mode/ModeState";
@@ -22,6 +23,7 @@ import { ChatTranscript, type ChatMessage } from "./ChatTranscript";
 type ChatHomeProps = {
   bootstrap: AppBootstrapState;
   initialMessages?: ChatMessage[];
+  modelCapabilities: ModelCapabilities | null;
   onSetupModel: () => void;
   onRefresh: () => void;
   onOpenSettings: (tab?: SettingsTab) => void;
@@ -34,6 +36,8 @@ const EXAMPLE_PROMPTS = [
 ];
 
 const PERSONAL_CONVERSATION_ID = "personal";
+const MAX_UPLOAD_FILES = 5;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 function mergeMessageList(current: ChatMessage[], incoming: ChatMessage) {
   const index = current.findIndex((item) => item.id === incoming.id);
@@ -95,7 +99,12 @@ function weixinRecipientFromConversation(conversation: Conversation | undefined)
   return String(route.chat_id || route.user_id || "").trim();
 }
 
-export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
+function capabilityNode(capabilities: ModelCapabilities | null, id: string): CapabilityNode | null {
+  const graph = capabilities?.capability_graph;
+  return graph?.by_id?.[id] || graph?.nodes?.find((node) => node.id === id) || null;
+}
+
+export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState(PERSONAL_CONVERSATION_ID);
@@ -104,6 +113,8 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [input, setInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
+  const [sendError, setSendError] = useState("");
   const [busy, setBusy] = useState(false);
   const modeState = useModeState();
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
@@ -120,6 +131,7 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
 
   useEffect(() => {
     setMessages(initialMessages);
+    setSendError("");
   }, [initialMessages]);
 
   useEffect(() => {
@@ -203,6 +215,7 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
       const eventConversationId = typeof payload.conversation_id === "string" ? payload.conversation_id : "";
       if (payload.message) {
         if (eventConversationId === activeConversationId) {
+          setSendError("");
           setMessages((current) => mergeMessageList(current, payload.message as ChatMessage));
         }
         void refreshList();
@@ -338,25 +351,34 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
 
   async function send() {
     const message = input.trim();
-    if (!message) {
+    const attachments = pendingAttachments;
+    if (!message && attachments.length === 0) {
       return;
     }
+    const oversized = attachments.find((file) => file.size > MAX_UPLOAD_BYTES);
+    if (oversized) {
+      setSendError(`附件 ${oversized.name} 超过 25 MB，请换一个更小的文件。`);
+      return;
+    }
+    setSendError("");
     const userMessage: ChatMessage = {
       id: `pending-${Date.now()}-user`,
       conversation_id: activeConversationId,
       source: "desktop",
       role: "user",
-      text: message,
+      text: message || `上传了 ${attachments.length} 个附件。`,
       attachments: [],
       created_at: new Date().toISOString(),
       status: "sent"
     };
     setMessages((current) => [...current, userMessage]);
     setInput("");
+    setPendingAttachments([]);
     setBusy(true);
     try {
-      const result = await sendConversationMessage(activeConversationId, message);
+      const result = await sendConversationMessage(activeConversationId, message, attachments);
       setMessages((current) => current.filter((item) => item.id !== userMessage.id));
+      setSendError("");
       void refreshConversations(activeConversationId);
       if (result.ok) {
         const assistantMessage = result.accepted
@@ -378,22 +400,33 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
         setMessages((current) => mergeMessageList(mergeMessageList(current, result.user_message), result.assistant_message));
       }
     } catch (error) {
-      setMessages((current) => [
-        ...current.filter((item) => item.id !== userMessage.id),
-        {
-          id: `${Date.now()}-assistant-error`,
-          conversation_id: activeConversationId,
-          source: "assistant",
-          role: "assistant",
-          text: `${error instanceof Error ? error.message : "发送失败。"}\n请重新检查 AI 服务设置。`,
-          attachments: [],
-          created_at: new Date().toISOString(),
-          status: "error"
-        }
-      ]);
+      setPendingAttachments(attachments);
+      setMessages((current) => current.filter((item) => item.id !== userMessage.id));
+      setSendError(`${error instanceof Error ? error.message : "发送失败。"}\n这次发送结果还没有被本地界面确认；如果稍后出现回复，此提示会自动消失。`);
     } finally {
       setBusy(false);
     }
+  }
+
+  function addPendingFiles(files: FileList) {
+    const incoming = Array.from(files);
+    setPendingAttachments((current) => {
+      const next = [...current];
+      for (const file of incoming) {
+        if (next.length >= MAX_UPLOAD_FILES) {
+          break;
+        }
+        const duplicate = next.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
+        if (!duplicate) {
+          next.push(file);
+        }
+      }
+      return next;
+    });
+  }
+
+  function removePendingAttachment(index: number) {
+    setPendingAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   return (
@@ -489,10 +522,20 @@ export function ChatHome({ bootstrap, initialMessages = [], onSetupModel, onRefr
           </div>
         </header>
         <ChatTranscript messages={messages} examples={EXAMPLE_PROMPTS} onExampleSelect={setInput} weixinSendTarget={weixinSendTarget} />
+        {sendError && (
+          <div className="composerError" role="alert">
+            {sendError}
+          </div>
+        )}
         <ChatComposer
           value={input}
           onChange={setInput}
           onSend={send}
+          attachments={pendingAttachments}
+          onAddFiles={addPendingFiles}
+          onRemoveAttachment={removePendingAttachment}
+          imageCapability={capabilityNode(modelCapabilities, "image.read")}
+          onOpenVisionSettings={() => onOpenSettings("model")}
           busy={busy}
           placeholder="输入你想问的内容，Ctrl+Enter 发送"
         />

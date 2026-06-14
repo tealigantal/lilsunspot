@@ -8,10 +8,11 @@
 4. lilsunspot/notes/architecture.md
 5. lilsunspot/notes/hermes-feature-inventory.md
 6. lilsunspot/notes/hermes-merge-plan.md
-7. lilsunspot/README-dev.md
-8. lilsunspot/notes/qa-checklist.md
-9. lilsunspot/notes/decision-log.md
-10. lilsunspot/notes/doc-inventory.md
+7. lilsunspot/notes/model-capability-ux-plan.md
+8. lilsunspot/README-dev.md
+9. lilsunspot/notes/qa-checklist.md
+10. lilsunspot/notes/decision-log.md
+11. lilsunspot/notes/doc-inventory.md
 
 ## 主文档
 
@@ -21,6 +22,7 @@
 - `lilsunspot/notes/architecture.md`：产品层边界、目录职责和运行时数据流说明。
 - `lilsunspot/notes/hermes-feature-inventory.md`：Hermes 现成功能盘点，记录 Web Dashboard、TUI、gateway、tools、cron、memory 等能力如何为小黑子复用或产品化。
 - `lilsunspot/notes/hermes-merge-plan.md`：Hermes 能力合并路线，包含微信/诊断/搜索/模型/cron/memory/toolsets 的阶段计划，以及后续自动同步官方更新的预留设计。
+- `lilsunspot/notes/model-capability-ux-plan.md`：模型能力、用户意图、辅助模型、错误解释和全链路验收的产品级规划；后续不要再用单点关键词或局部补丁替代能力编排。
 - `lilsunspot/README-dev.md`：本地开发入口，记录 daemon、desktop、检查和构建命令。
 - `lilsunspot/notes/qa-checklist.md`：发布前 QA 清单，未实际通过的项目保持未勾选。
 - `lilsunspot/notes/decision-log.md`：关键产品和工程决策记录。

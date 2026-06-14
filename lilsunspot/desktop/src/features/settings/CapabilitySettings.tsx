@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCapabilities, patchCapability, testCapability } from "../../api";
-import type { Capability, CapabilitiesResult } from "../../types";
+import type { Capability, CapabilitiesResult, CapabilityNode, ModelCapabilities, OperationNotice } from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
 import { TechnicalDetails } from "../../shared/components/TechnicalDetails";
 
@@ -47,10 +47,40 @@ function safeStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item)) : [];
 }
 
-export function CapabilitySettings() {
+function graphTone(node: CapabilityNode): "ok" | "warning" | "danger" | "neutral" {
+  if (node.status === "ready") {
+    return "ok";
+  }
+  if (node.status === "blocked") {
+    return "danger";
+  }
+  if (node.status === "needs_setup" || node.status === "degraded") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+type CapabilitySettingsProps = {
+  modelCapabilities: ModelCapabilities | null;
+  capabilityNotice: OperationNotice | null;
+  onModelCapabilitiesRefresh: () => Promise<ModelCapabilities | null>;
+  onModelCapabilitiesChanged: (capabilities: ModelCapabilities | null) => void;
+};
+
+export function CapabilitySettings({
+  modelCapabilities: sharedModelCapabilities,
+  capabilityNotice,
+  onModelCapabilitiesRefresh,
+  onModelCapabilitiesChanged
+}: CapabilitySettingsProps) {
   const [data, setData] = useState<CapabilitiesResult | null>(null);
+  const [modelCapabilities, setModelCapabilities] = useState<ModelCapabilities | null>(sharedModelCapabilities);
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setModelCapabilities(sharedModelCapabilities);
+  }, [sharedModelCapabilities]);
 
   useEffect(() => {
     void load();
@@ -58,8 +88,30 @@ export function CapabilitySettings() {
 
   async function load() {
     setMessage("");
+    const failures: string[] = [];
+    const nextDataResult = await Promise.allSettled([getCapabilities(), onModelCapabilitiesRefresh()]);
+    const nextData = nextDataResult[0];
+    const nextModelCapabilities = nextDataResult[1];
+    if (nextData.status === "fulfilled") {
+      setData(nextData.value);
+    } else {
+      failures.push(nextData.reason instanceof Error ? nextData.reason.message : "能力列表读取失败。");
+    }
+    if (nextModelCapabilities.status === "fulfilled" && nextModelCapabilities.value) {
+      setModelCapabilities(nextModelCapabilities.value);
+      onModelCapabilitiesChanged(nextModelCapabilities.value);
+    } else if (nextModelCapabilities.status === "rejected") {
+      failures.push(nextModelCapabilities.reason instanceof Error ? nextModelCapabilities.reason.message : "模型能力读取失败。");
+    }
+    if (failures.length > 0) {
+      setMessage(failures.join(" "));
+    }
+  }
+
+  async function reloadCapabilitiesOnly() {
     try {
-      setData(await getCapabilities());
+      const nextData = await getCapabilities();
+      setData(nextData);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "能力列表读取失败。");
     }
@@ -70,7 +122,7 @@ export function CapabilitySettings() {
     setMessage("");
     try {
       await patchCapability(capability.id, !capability.enabled);
-      await load();
+      await reloadCapabilitiesOnly();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "能力开关保存失败。");
     } finally {
@@ -83,7 +135,7 @@ export function CapabilitySettings() {
     setMessage("");
     try {
       const result = await testCapability(capability.id);
-      await load();
+      await reloadCapabilitiesOnly();
       setMessage(result.message);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "能力检查失败。");
@@ -108,7 +160,7 @@ export function CapabilitySettings() {
     <section className="settingsSection capabilityConsole">
       <div className="settingsHeader">
         <div>
-          <h3>Hermes 能力中心</h3>
+          <h3>能力中心</h3>
           <p>本地已有能力统一显示、配置、检查，并纳入审批和审计。</p>
         </div>
         <StatusBadge tone={enabledCount > 0 ? "ok" : "neutral"}>
@@ -121,6 +173,21 @@ export function CapabilitySettings() {
         </button>
         <span>高风险能力启用后仍需要安全审批，缺账号或缺依赖会显示为不可用。</span>
       </div>
+      {modelCapabilities?.capability_graph?.nodes?.length ? (
+        <div className="capabilityGraphStrip" aria-label="产品能力状态">
+          {modelCapabilities.capability_graph.nodes.map((node) => (
+            <article key={node.id}>
+              <div>
+                <strong>{node.label}</strong>
+                <span>{node.source}</span>
+              </div>
+              <StatusBadge tone={graphTone(node)}>{node.status}</StatusBadge>
+              <p>{node.user_message_cn}</p>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {capabilityNotice && <p className="inlineStatus">{capabilityNotice.message}</p>}
       {message && <p className="inlineStatus">{message}</p>}
       <div className="capabilityGroups">
         {grouped.map(([group, capabilities]) => (

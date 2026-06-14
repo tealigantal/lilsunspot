@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .capability_graph import build_capability_graph
+from .chat_client import current_runtime_model
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .hermes_runtime import read_hermes_config, write_hermes_config
 
@@ -51,6 +53,7 @@ MEDIUM_RISK_TOOLSETS = {
 }
 WINDOWS_UNSUPPORTED_TOOLSETS = {"computer_use"}
 THIRD_PARTY_ENV_HINTS = {
+    "vision": ["Hermes vision backend：主模型原生视觉，或 auxiliary.vision 辅助视觉 provider"],
     "x_search": ["XAI_API_KEY 或 xAI OAuth"],
     "image_gen": ["图像生成 provider 凭据"],
     "video_gen": ["视频生成 provider 凭据"],
@@ -99,6 +102,7 @@ CATEGORY_NAMES = {
     "runtime": "运行",
     "security": "安全",
 }
+_CAPABILITY_PROMPT_CACHE: dict[tuple[Any, ...], str] = {}
 
 
 class CapabilityError(ValueError):
@@ -124,6 +128,20 @@ def _default_config() -> dict[str, Any]:
         return DEFAULT_CONFIG if isinstance(DEFAULT_CONFIG, dict) else {}
     except Exception:
         return {}
+
+
+def _prepare_hermes_runtime_env(paths: RuntimePaths) -> None:
+    paths.hermes_home.mkdir(parents=True, exist_ok=True)
+    os.environ["HERMES_HOME"] = str(paths.hermes_home)
+    try:
+        from hermes_cli.env_loader import load_hermes_dotenv
+
+        load_hermes_dotenv(
+            hermes_home=paths.hermes_home,
+            project_env=Path(__file__).resolve().parents[2] / ".env",
+        )
+    except Exception:
+        pass
 
 
 def _now_platform_is_windows() -> bool:
@@ -165,6 +183,8 @@ def _status(enabled: bool, available: bool, reason: str) -> str:
         return "unsupported"
     if reason == "needs_config":
         return "needs_config"
+    if reason == "not_implemented":
+        return "disabled"
     return "disabled"
 
 
@@ -177,6 +197,8 @@ def _status_text(enabled: bool, available: bool, reason: str) -> str:
         return "当前 Windows 安装版暂不支持。"
     if reason == "needs_config":
         return "能力已接入，需要先配置第三方账号或依赖。"
+    if reason == "not_implemented":
+        return "当前安装版还没有接入这个入口。"
     return "已接入，当前未启用。"
 
 
@@ -205,10 +227,18 @@ def fallback_chain_for_agent(paths: RuntimePaths | None = None) -> list[dict[str
     ]
 
 
-def _toolset_available(toolset: str, repo_root: Path) -> tuple[bool, str, list[str]]:
+def _toolset_available(toolset: str, repo_root: Path, config: dict[str, Any]) -> tuple[bool, str, list[str]]:
     dependencies = list(THIRD_PARTY_ENV_HINTS.get(toolset, []))
     if _now_platform_is_windows() and toolset in WINDOWS_UNSUPPORTED_TOOLSETS:
         return False, "unsupported", dependencies
+    try:
+        from hermes_cli.tools_config import _toolset_needs_configuration_prompt
+
+        if _toolset_needs_configuration_prompt(toolset, config):
+            return False, "needs_config", dependencies
+        return True, "", dependencies
+    except Exception:
+        pass
     if toolset == "browser":
         if (repo_root / "node_modules" / "agent-browser").exists() or shutil.which("agent-browser") or os.getenv("BROWSERBASE_API_KEY"):
             return True, "", dependencies
@@ -280,6 +310,7 @@ def _capability(
 def list_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
     repo_root = Path(__file__).resolve().parents[2]
+    _prepare_hermes_runtime_env(runtime_paths)
     config = read_hermes_config(runtime_paths)
     default_config = _default_config()
     enabled_toolsets = set(_platform_toolsets(config))
@@ -363,7 +394,7 @@ def list_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
         toolset_id = str(toolset)
         seen_toolsets.add(toolset_id)
         tools = _toolset_tools(toolsets, toolset_id)
-        available, reason, dependencies = _toolset_available(toolset_id, repo_root)
+        available, reason, dependencies = _toolset_available(toolset_id, repo_root, config)
         capabilities.append(
             _capability(
                 capability_id=f"toolset.{toolset_id}",
@@ -382,7 +413,7 @@ def list_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
         )
 
     for toolset_id in sorted(str(item) for item in toolsets if str(item) not in seen_toolsets):
-        available, reason, dependencies = _toolset_available(toolset_id, repo_root)
+        available, reason, dependencies = _toolset_available(toolset_id, repo_root, config)
         capabilities.append(
             _capability(
                 capability_id=f"toolset.{toolset_id}",
@@ -487,6 +518,17 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             source="hermes_runtime",
         ),
         _capability(
+            capability_id="runtime.desktop_image_upload",
+            category="runtime",
+            name="桌面聊天图片上传",
+            description="桌面聊天输入框的本地附件上传和发送入口；图片可预览，是否识别取决于当前视觉后端。",
+            enabled=True,
+            risk="medium",
+            config_keys=["desktop.chat.attachments"],
+            source="lilsunspot_desktop",
+            configurable=False,
+        ),
+        _capability(
             capability_id="runtime.diagnostics",
             category="runtime",
             name="诊断包导出",
@@ -511,6 +553,57 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
 
 def _strip_emoji(value: str) -> str:
     return re.sub(r"^[^\w\u4e00-\u9fff]+", "", value).strip()
+
+
+def _file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def capability_prompt_snapshot(paths: RuntimePaths | None = None) -> str:
+    runtime_paths = paths or ensure_runtime_dirs()
+    cache_key = (
+        str(runtime_paths.hermes_home.resolve(strict=False)),
+        _file_signature(runtime_paths.hermes_home / "config.yaml"),
+        _file_signature(runtime_paths.hermes_home / ".env"),
+        _file_signature(runtime_paths.data_dir / "weixin-state.json"),
+    )
+    cached = _CAPABILITY_PROMPT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    payload = list_capabilities(runtime_paths)
+    current_model = current_runtime_model(runtime_paths)
+    provider = str(current_model.get("provider") or "未配置")
+    model = str(current_model.get("model") or "未配置")
+    configured = "true" if current_model.get("configured") else "false"
+    lines = [
+        "当前 lilsunspot 能力状态快照（来源：Hermes toolset/model 配置与 /capabilities registry）。",
+        f"当前主模型：provider={provider}；model={model}；configured={configured}。",
+        "回答能力问题时只依据这份快照：status=enabled 才能直接承诺可用；blocked/needs_config/unsupported/disabled 必须说明限制或下一步；不要根据模型通用知识自行承诺未启用能力。",
+    ]
+    graph = build_capability_graph(runtime_paths)
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        lines.append(
+            f"- product.{node.get('id')} / {node.get('label')}: status={node.get('status')}；"
+            f"source={node.get('source')}；{node.get('user_message_cn')}"
+        )
+    for item in payload["capabilities"]:
+        capability_id = str(item.get("id") or "")
+        name = str(item.get("name") or capability_id)
+        status = str(item.get("status") or "disabled")
+        status_text = " ".join(str(item.get("status_text") or "").split())
+        deps = [str(dep) for dep in item.get("dependencies") or [] if str(dep).strip()]
+        dep_text = f" 依赖：{'；'.join(deps[:3])}。" if deps else ""
+        lines.append(f"- {capability_id} / {name}: status={status}；{status_text}{dep_text}")
+    snapshot = "\n".join(lines)
+    _CAPABILITY_PROMPT_CACHE.clear()
+    _CAPABILITY_PROMPT_CACHE[cache_key] = snapshot
+    return snapshot
 
 
 def get_capability(capability_id: str, paths: RuntimePaths | None = None) -> dict[str, Any]:

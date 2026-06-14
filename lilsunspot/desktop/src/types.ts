@@ -94,6 +94,8 @@ export type Provider = {
   key_url?: string;
   detect_url?: string;
   default_model: string;
+  vision_default_model?: string;
+  auxiliary_vision?: "recommended" | "optional" | string;
   env_key?: string;
   hermes_provider?: string;
   base_url?: string;
@@ -131,6 +133,59 @@ export type SaveProviderResult = {
   hermes_home: string;
 };
 
+export type LocalProviderResetResult = {
+  ok: boolean;
+  message: string;
+  removed_env_keys: number;
+  bootstrap: AppBootstrapState;
+};
+
+export type CapabilityNodeStatus = "ready" | "needs_setup" | "degraded" | "blocked" | "unknown" | string;
+
+export type CapabilityNextAction = {
+  id: "open_model_settings" | "open_vision_settings" | "open_provider_key_url" | "continue_text_chat" | "retry" | string;
+  label: string;
+};
+
+export type CapabilityNode = {
+  id: string;
+  label: string;
+  status: CapabilityNodeStatus;
+  source: "main_model" | "auxiliary_vision" | "none" | string;
+  blocking_reason: string;
+  user_message_cn: string;
+  next_actions: CapabilityNextAction[];
+  last_verified_at: string;
+  details: Record<string, unknown>;
+};
+
+export type CapabilityGraph = {
+  version: number;
+  generated_at: string;
+  nodes: CapabilityNode[];
+  by_id?: Record<string, CapabilityNode>;
+};
+
+export type AuxiliaryModelConfig = {
+  provider?: string;
+  model?: string;
+  base_url?: string;
+  updated_at?: string;
+};
+
+export type ModelRuntimeConfig = {
+  main: {
+    provider: string;
+    model: string;
+    base_url: string;
+  };
+  fallback_providers: Array<Record<string, unknown>>;
+  provider_routing: Record<string, unknown>;
+  auxiliary: Record<string, AuxiliaryModelConfig>;
+  lilsunspot_auxiliary: Record<string, AuxiliaryModelConfig>;
+  compression: Record<string, unknown>;
+};
+
 export type RuntimeInfo = {
   data_dir: string;
   hermes_home: string;
@@ -164,11 +219,26 @@ export type ModelCapabilities = {
   provider_name: string;
   model: string;
   supports_image: boolean;
+  main_supports_image: boolean;
+  auxiliary_configured: boolean;
+  image_backend: "main_model" | "auxiliary_vision" | "none" | string;
+  image_input_mode: "native" | "text" | string;
+  image_capability_status?: CapabilityNodeStatus;
+  capability_graph?: CapabilityGraph;
   supports_files: boolean;
   supports_weixin: boolean;
   supports_reminders: boolean;
   source: string;
   limitations: string[];
+};
+
+export type OperationState = "idle" | "running" | "succeeded" | "succeeded_with_warning" | "failed";
+
+export type OperationNotice = {
+  tone: "neutral" | "success" | "warning" | "danger";
+  message: string;
+  blocking: boolean;
+  source: string;
 };
 
 export type DiagnosticsSummary = {

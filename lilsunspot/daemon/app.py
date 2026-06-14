@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import platform
 import os
 import webbrowser
@@ -15,7 +17,16 @@ from lilsunspot import __version__
 
 from . import conversations, product_features, turn_coalescer
 from .audit import ensure_audit_schema, list_audit_events, record_audit_event
-from .attachments import AttachmentError, is_safe_stored_attachment
+from .capability_graph import build_capability_graph
+from .attachments import (
+    AttachmentError,
+    DESKTOP_UPLOAD_MAX_BYTES,
+    DESKTOP_UPLOAD_MAX_FILES,
+    attachment_summaries_for_prompt,
+    is_safe_stored_attachment,
+    recognize_image_attachments,
+    register_uploaded_attachments,
+)
 from .auth import load_or_create_token, require_token
 from .agent_runner import delete_hermes_session, send_agent_message
 from .capabilities import (
@@ -45,6 +56,7 @@ from .gateway import (
 from .hermes_compat import audit_hermes_compatibility
 from .hermes_runtime import (
     HermesRuntimeError,
+    clear_local_model_credentials,
     delete_mcp_server,
     list_mcp_servers,
     model_runtime_config,
@@ -55,6 +67,7 @@ from .hermes_runtime import (
     upsert_mcp_server,
 )
 from .logging_utils import configure_logging
+from .media_delivery import add_delivery_context_to_prompt, prepare_assistant_delivery, register_prepared_delivery
 from .mode_intents import apply_mode_intent
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
@@ -182,6 +195,7 @@ class ModelAuxiliaryRequest(BaseModel):
     provider: str = ""
     model: str = ""
     base_url: str = ""
+    api_key: str = ""
 
 
 class PlatformToolsetsRequest(BaseModel):
@@ -202,8 +216,15 @@ class ChatSendRequest(BaseModel):
     conversation_id: str | None = None
 
 
+class ConversationUploadAttachmentRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    mime_type: str = ""
+    data_base64: str = Field(..., min_length=1)
+
+
 class ConversationMessageRequest(BaseModel):
-    message: str = Field(..., min_length=1)
+    message: str = ""
+    attachments: list[ConversationUploadAttachmentRequest] = Field(default_factory=list)
 
 
 class ConversationCreateRequest(BaseModel):
@@ -439,12 +460,17 @@ async def provider_capabilities() -> dict[str, Any]:
     return product_features.model_capabilities(ensure_runtime_dirs())
 
 
+@app.get("/capability-graph", dependencies=[Depends(require_token)])
+async def capability_graph() -> dict[str, Any]:
+    return build_capability_graph(ensure_runtime_dirs())
+
+
 @app.post("/providers/open-key-url", dependencies=[Depends(require_token)])
 async def open_key_url(payload: OpenKeyUrlRequest) -> dict[str, str | bool]:
     provider = provider_by_id(payload.provider)
     if provider is None:
         raise HTTPException(status_code=404, detail="没有找到这个模型服务商。")
-    key_url = str(provider.get("key_url") or provider.get("detect_url") or "").strip()
+    key_url = str(provider.get("key_url") or "").strip()
     if not key_url:
         raise HTTPException(status_code=400, detail="这个服务商没有配置 Key 获取地址。")
     opened = False
@@ -497,6 +523,31 @@ async def save_provider(payload: SaveProviderRequest) -> dict[str, str | bool]:
         "provider": result["provider"],
         "model": result["model"],
         "hermes_home": str(ensure_runtime_dirs().hermes_home),
+    }
+
+
+@app.post("/providers/reset-local", dependencies=[Depends(require_token)])
+async def providers_reset_local() -> dict[str, Any]:
+    try:
+        result = clear_local_model_credentials(paths)
+    except HermesRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("provider local credentials reset removed_env_keys=%s", result["removed_env_keys"])
+    record_audit_event(
+        "config_change",
+        "清除了本机 AI 服务设置。",
+        source="providers.reset_local",
+        details={
+            "removed_env_keys": result["removed_env_keys"],
+            "cleared_config_keys": result["cleared_config_keys"],
+        },
+        paths=paths,
+    )
+    return {
+        "ok": True,
+        "message": "已清除本机 AI 服务设置，请重新完成首次配置。",
+        "removed_env_keys": result["removed_env_keys"],
+        "bootstrap": _app_bootstrap_state(),
     }
 
 
@@ -590,7 +641,7 @@ async def models_routing(payload: ModelRoutingRequest) -> dict[str, Any]:
 @app.post("/models/auxiliary", dependencies=[Depends(require_token)])
 async def models_auxiliary(payload: ModelAuxiliaryRequest) -> dict[str, Any]:
     try:
-        result = save_auxiliary_model(payload.task, payload.provider, payload.model, payload.base_url, paths)
+        result = save_auxiliary_model(payload.task, payload.provider, payload.model, payload.base_url, payload.api_key, paths)
     except HermesRuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     record_audit_event(
@@ -710,6 +761,61 @@ async def chat_send(payload: ChatSendRequest) -> dict[str, Any]:
     return result["chat"]
 
 
+def _assistant_message_from_chat_result(
+    chat_result: dict[str, Any],
+    *,
+    conversation_id: str,
+    source: str,
+    paths: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    prepared = prepare_assistant_delivery(
+        str(chat_result.get("reply") or ""),
+        conversation_id=conversation_id,
+        paths=paths,
+        include_outbound_media=False,
+    )
+    metadata = {
+        "engine": chat_result.get("engine"),
+        "provider": chat_result.get("provider"),
+        "model": chat_result.get("model"),
+        "hermes_session_id": chat_result.get("hermes_session_id"),
+        "delivery": prepared.metadata(),
+    }
+    assistant_message = conversations.create_message(
+        conversation_id=conversation_id,
+        source=source,
+        role="assistant",
+        text=prepared.visible_text,
+        status="sent",
+        metadata=metadata,
+        paths=paths,
+    )
+    try:
+        register_prepared_delivery(
+            prepared,
+            message_id=assistant_message["id"],
+            conversation_id=conversation_id,
+            source="assistant_delivery",
+            paths=paths,
+        )
+    except AttachmentError:
+        assistant_message = conversations.update_message(
+            assistant_message["id"],
+            metadata_patch={
+                "delivery": {
+                    "status": "rejected",
+                    "delivered_count": 0,
+                    "rejected_count": max(1, prepared.rejected_count),
+                    "reason_code": "unsafe_path",
+                }
+            },
+            paths=paths,
+        ) or assistant_message
+    assistant_message = conversations.get_message(assistant_message["id"], paths=paths) or assistant_message
+    next_chat = {**chat_result, "reply": prepared.visible_text}
+    return assistant_message, next_chat
+
+
 async def _send_conversation_message(
     message: str,
     *,
@@ -757,25 +863,19 @@ async def _send_conversation_message(
                 "mode": mode_intent.get("mode"),
             },
         }
+    prompt_text = add_delivery_context_to_prompt(message, conversation_id=conversation_id, paths=runtime_paths)
     chat_result = await send_agent_message(
-        message,
+        prompt_text,
         conversation_id,
         runtime_paths,
         current_message_id=user_message["id"],
     )
     if chat_result.get("ok"):
-        assistant_message = conversations.create_message(
+        assistant_message, chat_result = _assistant_message_from_chat_result(
+            chat_result,
             conversation_id=conversation_id,
             source="assistant",
-            role="assistant",
-            text=str(chat_result.get("reply") or ""),
-            status="sent",
-            metadata={
-                "engine": chat_result.get("engine"),
-                "provider": chat_result.get("provider"),
-                "model": chat_result.get("model"),
-                "hermes_session_id": chat_result.get("hermes_session_id"),
-            },
+            paths=runtime_paths,
         )
     else:
         assistant_message = conversations.create_message(
@@ -789,27 +889,84 @@ async def _send_conversation_message(
     return {"ok": bool(chat_result.get("ok")), "user_message": user_message, "assistant_message": assistant_message, "chat": chat_result}
 
 
+def _turn_context_for_conversation(conversation_id: str, runtime_paths: Any) -> dict[str, Any]:
+    conversation = conversations.get_conversation(conversation_id, runtime_paths)
+    metadata = conversation.get("metadata") if conversation and isinstance(conversation.get("metadata"), dict) else {}
+    route = metadata.get("weixin_route") if isinstance(metadata.get("weixin_route"), dict) else None
+    if conversation and conversation.get("kind") == "weixin" and route:
+        return {
+            "assistant_source": "weixin",
+            "route": route,
+            "turn_key": turn_coalescer.key_for_weixin(route, conversation_id),
+        }
+    return {
+        "assistant_source": "assistant",
+        "route": None,
+        "turn_key": turn_coalescer.key_for_desktop(conversation_id),
+    }
+
+
 async def _accept_conversation_message(
     message: str,
     *,
     conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
     source: str = "desktop",
+    attachments_payload: list[ConversationUploadAttachmentRequest] | None = None,
 ) -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
+    attachments_payload = attachments_payload or []
+    message = message.strip()
+    if not message and not attachments_payload:
+        raise HTTPException(status_code=400, detail="请先输入内容或选择附件。")
+    decoded_files: list[dict[str, Any]] = []
+    for item in attachments_payload:
+        try:
+            data = base64.b64decode(item.data_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="附件内容格式不正确。") from exc
+        decoded_files.append(
+            {
+                "file_name": item.file_name,
+                "mime_type": item.mime_type,
+                "data": data,
+            }
+        )
+    if len(decoded_files) > DESKTOP_UPLOAD_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"一次最多上传 {DESKTOP_UPLOAD_MAX_FILES} 个附件。")
+    if any(len(item["data"]) > DESKTOP_UPLOAD_MAX_BYTES for item in decoded_files):
+        raise HTTPException(status_code=400, detail="单个附件不能超过 25 MB。")
+    turn_context = _turn_context_for_conversation(conversation_id, runtime_paths)
+    assistant_source = str(turn_context["assistant_source"])
+    route = turn_context.get("route") if isinstance(turn_context.get("route"), dict) else None
     user_message = conversations.create_message(
         conversation_id=conversation_id,
         source=source,
         role="user",
-        text=message,
+        text=message or f"上传了 {len(attachments_payload)} 个附件。",
         status="sent",
         metadata={"entry": source},
         paths=runtime_paths,
     )
-    mode_intent = await apply_mode_intent(message, runtime_paths)
+    attachments: list[dict[str, Any]] = []
+    if decoded_files:
+        try:
+            attachments = register_uploaded_attachments(
+                message_id=user_message["id"],
+                conversation_id=conversation_id,
+                files=decoded_files,
+                source=source,
+                paths=runtime_paths,
+            )
+            attachments = await recognize_image_attachments(attachments, paths=runtime_paths)
+        except AttachmentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        user_message = conversations.get_message(user_message["id"], paths=runtime_paths) or user_message
+
+    mode_intent = None if attachments else await apply_mode_intent(message, runtime_paths)
     if mode_intent is not None:
         assistant_message = conversations.create_message(
             conversation_id=conversation_id,
-            source="assistant",
+            source=assistant_source,
             role="assistant",
             text=str(mode_intent.get("message") or ""),
             status="sent",
@@ -841,13 +998,57 @@ async def _accept_conversation_message(
             },
         }
 
+    if attachments:
+        base_text = message or "用户发来了附件，请根据附件处理结果回复。"
+        summaries = attachment_summaries_for_prompt(attachments)
+        prompt_text = f"{base_text}\n\n以下是用户发来的附件处理结果：\n{summaries}" if summaries else base_text
+        prompt_text = add_delivery_context_to_prompt(
+            prompt_text,
+            attachments=attachments,
+            conversation_id=conversation_id,
+            paths=runtime_paths,
+        )
+        chat_result = await send_agent_message(
+            prompt_text,
+            conversation_id,
+            runtime_paths,
+            current_message_id=user_message["id"],
+            route=route,
+        )
+        if chat_result.get("ok"):
+            assistant_message, chat_result = _assistant_message_from_chat_result(
+                chat_result,
+                conversation_id=conversation_id,
+                source=assistant_source,
+                paths=runtime_paths,
+            )
+        else:
+            assistant_message = conversations.create_message(
+                conversation_id=conversation_id,
+                source=assistant_source,
+                role="assistant",
+                text=f"{chat_result.get('message', '聊天请求没有成功。')}\n{chat_result.get('suggestion', '')}".strip(),
+                status="error",
+                metadata={"error_code": chat_result.get("error_code")},
+                paths=runtime_paths,
+            )
+        return {
+            "ok": bool(chat_result.get("ok")),
+            "accepted": False,
+            "turn_id": assistant_message["id"],
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "chat": chat_result,
+        }
+
     accepted = await turn_coalescer.enqueue_text_turn(
-        key=turn_coalescer.key_for_desktop(conversation_id),
+        key=str(turn_context["turn_key"]),
         conversation_id=conversation_id,
         text=message,
         current_message_id=user_message["id"],
-        assistant_source="assistant",
+        assistant_source=assistant_source,
         paths=runtime_paths,
+        route=route,
         wait_for_reply=False,
     )
     if not accepted.get("accepted"):
@@ -920,7 +1121,12 @@ async def api_conversation_message_send(
     conversation_id: str,
     payload: ConversationMessageRequest,
 ) -> dict[str, Any]:
-    return await _accept_conversation_message(payload.message, conversation_id=conversation_id, source="desktop")
+    return await _accept_conversation_message(
+        payload.message,
+        conversation_id=conversation_id,
+        source="desktop",
+        attachments_payload=payload.attachments,
+    )
 
 
 @app.patch("/conversations/{conversation_id}", dependencies=[Depends(require_token)])

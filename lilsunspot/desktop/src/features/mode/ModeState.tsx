@@ -32,15 +32,22 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     setBusy(true);
     setStatus("");
-    try {
-      const [modeList, mode] = await Promise.all([getModes(), getCurrentMode()]);
-      setModes(modeList);
-      setCurrent(mode);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "输出模式读取失败。");
-    } finally {
-      setBusy(false);
+    const failures: string[] = [];
+    const [modeListResult, modeResult] = await Promise.allSettled([getModes(), getCurrentMode()]);
+    if (modeListResult.status === "fulfilled") {
+      setModes(modeListResult.value);
+    } else {
+      failures.push(modeListResult.reason instanceof Error ? modeListResult.reason.message : "输出模式列表读取失败。");
     }
+    if (modeResult.status === "fulfilled") {
+      setCurrent(modeResult.value);
+    } else {
+      failures.push(modeResult.reason instanceof Error ? modeResult.reason.message : "当前输出模式读取失败。");
+    }
+    if (failures.length > 0) {
+      setStatus(failures.join(" "));
+    }
+    setBusy(false);
   }, []);
 
   useEffect(() => {

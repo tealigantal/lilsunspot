@@ -13,11 +13,11 @@ providers:
     display_name: Kimi
     type: cloud
     key_url: https://platform.moonshot.cn/console/api-keys
-    detect_url: https://api.moonshot.ai/v1
-    default_model: kimi-k2.5
+    detect_url: https://api.moonshot.cn/v1
+    default_model: kimi-k2.6
     env_key: KIMI_API_KEY
     hermes_provider: kimi-coding
-    base_url: https://api.moonshot.ai/v1
+    base_url: https://api.moonshot.cn/v1
     notes: Kimi official API platform path.
   - id: qwen
     display_name: 通义千问 / 阿里百炼
@@ -25,6 +25,8 @@ providers:
     key_url: https://bailian.console.aliyun.com/?apiKey=1
     detect_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     default_model: qwen-plus
+    vision_default_model: qwen-vl-max
+    auxiliary_vision: recommended
     env_key: DASHSCOPE_API_KEY
     hermes_provider: alibaba
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -35,6 +37,8 @@ providers:
     key_url: https://ollama.com/download
     detect_url: http://127.0.0.1:11434/v1
     default_model: llama3.2
+    vision_default_model: llava
+    auxiliary_vision: optional
     env_key: OLLAMA_API_KEY
     hermes_provider: custom
     base_url: http://127.0.0.1:11434/v1
@@ -45,6 +49,8 @@ providers:
     key_url: https://openrouter.ai/keys
     detect_url: https://openrouter.ai/api/v1
     default_model: openai/gpt-4o-mini
+    vision_default_model: openai/gpt-4o-mini
+    auxiliary_vision: recommended
     env_key: OPENROUTER_API_KEY
     hermes_provider: openrouter
     base_url: https://openrouter.ai/api/v1
@@ -55,6 +61,8 @@ providers:
     key_url: https://platform.openai.com/api-keys
     detect_url: https://api.openai.com/v1
     default_model: gpt-4o-mini
+    vision_default_model: gpt-4o-mini
+    auxiliary_vision: recommended
     env_key: OPENAI_API_KEY
     hermes_provider: custom
     base_url: https://api.openai.com/v1

@@ -16,6 +16,7 @@ from .attachments import (
     register_message_attachments,
 )
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .media_delivery import add_delivery_context_to_prompt, prepare_assistant_delivery, register_prepared_delivery
 from .mode_intents import apply_mode_intent, slash_command_hint
 from .safety import request_safety_approval
 
@@ -877,9 +878,9 @@ def _weixin_reply_cancelled() -> dict[str, Any]:
 def _chat_prompt_with_attachments(text: str, attachments: list[dict[str, Any]]) -> str:
     base = text.strip() or "用户发来了附件，请根据附件处理结果回复。"
     summaries = attachment_summaries_for_prompt(attachments)
-    if not summaries:
-        return base
-    return f"{base}\n\n以下是用户发来的附件处理结果：\n{summaries}"
+    prompt = f"{base}\n\n以下是用户发来的附件处理结果：\n{summaries}" if summaries else base
+    conversation_id = str(attachments[0].get("conversation_id") or conversations.PERSONAL_CONVERSATION_ID) if attachments else conversations.PERSONAL_CONVERSATION_ID
+    return add_delivery_context_to_prompt(prompt, attachments=attachments, conversation_id=conversation_id)
 
 
 async def _handle_weixin_after_store(
@@ -1093,16 +1094,56 @@ async def _handle_weixin_after_store(
             return {"ok": False, "intent": intent, "message": result.get("message", "微信私聊暂时不能回复。"), "chat": result}
         if conversations.get_conversation(conversation_id, runtime_paths) is None:
             return _weixin_reply_cancelled()
-        reply = _finish_weixin_reply(
+        prepared = prepare_assistant_delivery(
             str(result.get("reply") or ""),
-            {"kind": "chat_reply", "engine": result.get("engine"), "provider": result.get("provider")},
+            conversation_id=conversation_id,
+            paths=runtime_paths,
+            include_outbound_media=True,
+        )
+        reply = _finish_weixin_reply(
+            prepared.visible_text,
+            {
+                "kind": "chat_reply",
+                "engine": result.get("engine"),
+                "provider": result.get("provider"),
+                "delivery": prepared.metadata(),
+            },
             runtime_paths,
             conversation_id=conversation_id,
             reply_message_id=reply_message_id,
         )
         if reply is None:
             return _weixin_reply_cancelled()
-        return {"ok": True, "intent": intent, "message": "微信私聊回复已生成。", "chat": result}
+        try:
+            register_prepared_delivery(
+                prepared,
+                message_id=reply_message_id,
+                conversation_id=conversation_id,
+                source="assistant_delivery",
+                paths=runtime_paths,
+            )
+        except AttachmentError:
+            reply = conversations.update_message(
+                reply_message_id,
+                metadata_patch={
+                    "delivery": {
+                        "status": "rejected",
+                        "delivered_count": 0,
+                        "rejected_count": max(1, prepared.rejected_count),
+                        "reason_code": "unsafe_path",
+                    }
+                },
+                paths=runtime_paths,
+            ) or reply
+            prepared.outbound_text = prepared.visible_text
+        reply = conversations.get_message(reply_message_id, paths=runtime_paths) or reply
+        return {
+            "ok": True,
+            "intent": intent,
+            "message": "微信私聊回复已生成。",
+            "assistant_message": reply,
+            "chat": {**result, "reply": prepared.outbound_text, "visible_reply": prepared.visible_text},
+        }
 
     return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}
 

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppBootstrapRuntime, Provider } from "../../types";
-import { getProviders } from "../../api";
+import type { AppBootstrapRuntime, ModelCapabilities, OperationNotice, OperationState, Provider } from "../../types";
 import { ModelSettings } from "../model/ModelSettings";
 import { CapabilitySettings } from "./CapabilitySettings";
 import { ControlCenterSettings } from "./ControlCenterSettings";
@@ -13,23 +12,67 @@ export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doct
 type SettingsDrawerProps = {
   open: boolean;
   runtime: AppBootstrapRuntime;
+  providers: Provider[];
+  providerState: OperationState;
+  providerNotice: OperationNotice | null;
+  onProvidersRefresh: () => Promise<Provider[]>;
+  modelCapabilities: ModelCapabilities | null;
+  capabilityState: OperationState;
+  capabilityNotice: OperationNotice | null;
+  onModelCapabilitiesChanged: (capabilities: ModelCapabilities | null) => void;
+  onModelCapabilitiesRefresh: () => Promise<ModelCapabilities | null>;
   onClose: () => void;
   onSetupModel: () => void;
+  onModelSaved: () => Promise<void> | void;
+  onLocalProviderReset: () => Promise<void> | void;
   initialTab?: SettingsTab;
 };
 
-const TABS: { id: SettingsTab; label: string; badge?: string }[] = [
+const TABS: { id: SettingsTab; label: string }[] = [
   { id: "model", label: "模型服务" },
-  { id: "capabilities", label: "能力", badge: "Hermes" },
-  { id: "weixin", label: "微信", badge: "未连接" },
-  { id: "safety", label: "安全审批", badge: "暂无待处理" },
-  { id: "doctor", label: "诊断", badge: "未检查" },
+  { id: "capabilities", label: "能力" },
+  { id: "weixin", label: "微信" },
+  { id: "safety", label: "安全审批" },
+  { id: "doctor", label: "诊断" },
   { id: "control", label: "控制台" }
 ];
 
-export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTab = "model" }: SettingsDrawerProps) {
+function imageStatus(modelCapabilities: ModelCapabilities | null) {
+  const node = modelCapabilities?.capability_graph?.by_id?.["image.read"];
+  if (!node) {
+    return "待刷新";
+  }
+  if (node.status === "ready") {
+    return "图片可用";
+  }
+  if (node.status === "degraded") {
+    return "待验证";
+  }
+  if (node.status === "blocked") {
+    return "需检查";
+  }
+  return "可预览";
+}
+
+export function SettingsDrawer({
+  open,
+  runtime,
+  providers,
+  providerState,
+  providerNotice,
+  onProvidersRefresh,
+  modelCapabilities,
+  capabilityState,
+  capabilityNotice,
+  onModelCapabilitiesChanged,
+  onModelCapabilitiesRefresh,
+  onClose,
+  onSetupModel,
+  onModelSaved,
+  onLocalProviderReset,
+  initialTab = "model"
+}: SettingsDrawerProps) {
   const [active, setActive] = useState<SettingsTab>(initialTab);
-  const [providers, setProviders] = useState<Provider[]>([]);
 
   useEffect(() => {
     if (!open) {
@@ -47,29 +90,24 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
       return;
     }
     setActive(initialTab);
-    let mounted = true;
-    async function load() {
-      try {
-        const list = await getProviders();
-        if (mounted) {
-          setProviders(list);
-        }
-      } catch {
-        if (mounted) {
-          setProviders([]);
-        }
-      }
+    if (providers.length === 0 && providerState !== "running") {
+      void onProvidersRefresh();
     }
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, [open, initialTab]);
+  }, [open, initialTab, providers.length, providerState, onProvidersRefresh]);
 
   const currentProvider = useMemo(
-    () => providers.find((provider) => provider.id === runtime.provider) || null,
+    () => providers.find((provider) => provider.id === runtime.provider || provider.hermes_provider === runtime.provider) || null,
     [providers, runtime.provider]
   );
+
+  const tabBadges: Partial<Record<SettingsTab, string>> = {
+    model: runtime.configured ? "已设置" : "未设置",
+    capabilities: capabilityState === "running" ? "刷新中" : imageStatus(modelCapabilities),
+    weixin: modelCapabilities?.supports_weixin ? "可配置" : "未连接",
+    safety: "审批",
+    doctor: "诊断",
+    control: "总览"
+  };
 
   if (!open) {
     return null;
@@ -91,17 +129,47 @@ export function SettingsDrawer({ open, runtime, onClose, onSetupModel, initialTa
           {TABS.map((tab) => (
             <button key={tab.id} type="button" className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}>
               <span>{tab.label}</span>
-              {tab.badge && <em>{tab.badge}</em>}
+              {tabBadges[tab.id] && <em>{tabBadges[tab.id]}</em>}
             </button>
           ))}
         </nav>
         <div className="drawerBody">
-          {active === "model" && <ModelSettings runtime={runtime} provider={currentProvider} onSetupModel={onSetupModel} />}
-          {active === "capabilities" && <CapabilitySettings />}
+          {active === "model" && (
+            <ModelSettings
+              runtime={runtime}
+              provider={currentProvider}
+              providers={providers}
+              providerState={providerState}
+              providerNotice={providerNotice}
+              onProvidersRefresh={onProvidersRefresh}
+              modelCapabilities={modelCapabilities}
+              capabilityNotice={capabilityNotice}
+              onModelCapabilitiesChanged={onModelCapabilitiesChanged}
+              onModelCapabilitiesRefresh={onModelCapabilitiesRefresh}
+              onSetupModel={onSetupModel}
+              onModelSaved={onModelSaved}
+              onLocalProviderReset={onLocalProviderReset}
+            />
+          )}
+          {active === "capabilities" && (
+            <CapabilitySettings
+              modelCapabilities={modelCapabilities}
+              capabilityNotice={capabilityNotice}
+              onModelCapabilitiesRefresh={onModelCapabilitiesRefresh}
+              onModelCapabilitiesChanged={onModelCapabilitiesChanged}
+            />
+          )}
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}
-          {active === "control" && <ControlCenterSettings />}
+          {active === "control" && (
+            <ControlCenterSettings
+              modelCapabilities={modelCapabilities}
+              capabilityNotice={capabilityNotice}
+              onModelCapabilitiesRefresh={onModelCapabilitiesRefresh}
+              onModelCapabilitiesChanged={onModelCapabilitiesChanged}
+            />
+          )}
         </div>
       </aside>
     </div>

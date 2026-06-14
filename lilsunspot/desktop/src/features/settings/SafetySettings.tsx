@@ -49,16 +49,31 @@ export function SafetySettings() {
   async function load() {
     setBusy(true);
     setMessage("");
-    try {
-      const [nextPolicy, nextApprovals, nextAudit] = await Promise.all([getSafetyPolicy(), getSafetyApprovals(), getSafetyAudit()]);
-      setPolicy(nextPolicy);
-      setApprovals(nextApprovals);
-      setAuditEvents(nextAudit.events);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "安全审批状态读取失败。");
-    } finally {
-      setBusy(false);
+    const failures: string[] = [];
+    const [policyResult, approvalsResult, auditResult] = await Promise.allSettled([
+      getSafetyPolicy(),
+      getSafetyApprovals(),
+      getSafetyAudit()
+    ]);
+    if (policyResult.status === "fulfilled") {
+      setPolicy(policyResult.value);
+    } else {
+      failures.push(policyResult.reason instanceof Error ? policyResult.reason.message : "安全策略读取失败。");
     }
+    if (approvalsResult.status === "fulfilled") {
+      setApprovals(approvalsResult.value);
+    } else {
+      failures.push(approvalsResult.reason instanceof Error ? approvalsResult.reason.message : "待审批操作读取失败。");
+    }
+    if (auditResult.status === "fulfilled") {
+      setAuditEvents(auditResult.value.events);
+    } else {
+      failures.push(auditResult.reason instanceof Error ? auditResult.reason.message : "审计记录读取失败。");
+    }
+    if (failures.length > 0) {
+      setMessage(failures.join(" "));
+    }
+    setBusy(false);
   }
 
   async function decide(approvalId: string, decision: "approved" | "rejected") {
@@ -67,7 +82,18 @@ export function SafetySettings() {
     try {
       const result = await decideSafetyApproval(approvalId, decision);
       setMessage(result.message || "审批已处理。");
-      await load();
+      const nextApprovals = await getSafetyApprovals();
+      setApprovals(nextApprovals);
+      try {
+        const nextAudit = await getSafetyAudit();
+        setAuditEvents(nextAudit.events);
+      } catch (refreshError) {
+        setMessage(
+          refreshError instanceof Error
+            ? `${result.message || "审批已处理。"} 审计记录稍后刷新：${refreshError.message}`
+            : `${result.message || "审批已处理。"} 审计记录稍后刷新。`
+        );
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "审批处理失败。");
     } finally {

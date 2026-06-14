@@ -8,6 +8,7 @@ import { displayProvider } from "../features/model/ProviderCard";
 import { WeixinSettings } from "../features/settings/WeixinSettings";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
+import { useModelServiceState } from "./useModelServiceState";
 
 type ConsoleView = "chat" | "weixin";
 
@@ -24,6 +25,12 @@ const VIEW_COPY: Record<ConsoleView, { title: string; subtitle: string }> = {
 export function AppShell() {
   const bootstrapState = useBootstrapState();
   const modeState = useModeState();
+  const runtime = bootstrapState.bootstrap.runtime;
+  const modelService = useModelServiceState({
+    configured: runtime.configured,
+    provider: runtime.provider,
+    model: runtime.model
+  });
   const [activeView, setActiveView] = useState<ConsoleView>("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
@@ -34,11 +41,22 @@ export function AppShell() {
   async function refreshAndReturn() {
     setForceOnboarding(false);
     await bootstrapState.refresh();
+    await modelService.refreshCapabilities();
   }
 
   async function handleSaved() {
     setForceOnboarding(false);
     await bootstrapState.refresh();
+    await modelService.refreshCapabilities();
+  }
+
+  async function handleLocalProviderReset() {
+    setSettingsOpen(false);
+    setActiveView("chat");
+    setFirstChatMessages([]);
+    modelService.clearModelCapabilities();
+    await bootstrapState.refresh();
+    setForceOnboarding(true);
   }
 
   function handleFirstChatDone(messages: ChatMessage[]) {
@@ -48,6 +66,12 @@ export function AppShell() {
   }
 
   function setupModel() {
+    if (bootstrapState.bootstrap.runtime.configured) {
+      setSettingsTab("model");
+      setSettingsOpen(true);
+      setForceOnboarding(false);
+      return;
+    }
     setSettingsOpen(false);
     setForceOnboarding(true);
     setActiveView("chat");
@@ -68,6 +92,12 @@ export function AppShell() {
         forceOnboarding={forceOnboarding}
         initialMessages={firstChatMessages}
         busy={bootstrapState.busy}
+        modelCapabilities={modelService.modelCapabilities}
+        providers={modelService.providers}
+        providersBusy={modelService.providerState === "running"}
+        providersNotice={modelService.providerNotice}
+        onProvidersRefresh={modelService.refreshProviders}
+        onModelCapabilitiesChanged={modelService.setModelCapabilities}
         onRefresh={refreshAndReturn}
         onOpenSettings={openSettings}
         onSetupModel={setupModel}
@@ -77,7 +107,6 @@ export function AppShell() {
     );
   }
 
-  const runtime = bootstrapState.bootstrap.runtime;
   const chatConfigured = bootstrapState.bootstrap.stage === "chat_ready" && runtime.configured;
   const connectionLabel = chatConfigured ? "已连接" : runtime.configured ? "已配置" : "未配置";
   const showDevPanel = bootstrapState.devMode && bootstrapState.bootstrap.stage === "daemon_failed";
@@ -157,8 +186,19 @@ export function AppShell() {
       <SettingsDrawer
         open={settingsOpen}
         runtime={bootstrapState.bootstrap.runtime}
+        providers={modelService.providers}
+        providerState={modelService.providerState}
+        providerNotice={modelService.providerNotice}
+        onProvidersRefresh={modelService.refreshProviders}
+        modelCapabilities={modelService.modelCapabilities}
+        capabilityState={modelService.capabilityState}
+        capabilityNotice={modelService.capabilityNotice}
+        onModelCapabilitiesChanged={modelService.setModelCapabilities}
+        onModelCapabilitiesRefresh={modelService.refreshCapabilities}
         onClose={() => setSettingsOpen(false)}
         onSetupModel={setupModel}
+        onModelSaved={handleSaved}
+        onLocalProviderReset={handleLocalProviderReset}
         initialTab={settingsTab}
       />
     </main>

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +70,48 @@ def _read_env(path: Path) -> dict[str, str]:
     return values
 
 
+def _record_image_verification(
+    paths: RuntimePaths,
+    *,
+    ok: bool,
+    backend: str,
+    provider: str,
+    model: str,
+    error_code: str = "",
+) -> None:
+    if backend not in {"main_model", "auxiliary_vision"}:
+        return
+    try:
+        from .hermes_runtime import read_hermes_config, write_hermes_config
+
+        config = read_hermes_config(paths)
+        lilsunspot = config.setdefault("lilsunspot", {})
+        if not isinstance(lilsunspot, dict):
+            return
+        verification = lilsunspot.setdefault("capability_verification", {})
+        if not isinstance(verification, dict):
+            verification = {}
+            lilsunspot["capability_verification"] = verification
+        verification["image.read"] = {
+            "verification_status": "verified" if ok else "failed",
+            "last_error_code": "" if ok else error_code,
+            "backend": backend,
+            "resolved_provider": provider,
+            "resolved_model": model,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        write_hermes_config(config, paths)
+    except Exception:
+        pass
+
+
+def _image_verification_from_config(config: dict[str, Any]) -> dict[str, Any]:
+    lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
+    verification = lilsunspot.get("capability_verification") if isinstance(lilsunspot.get("capability_verification"), dict) else {}
+    image = verification.get("image.read") if isinstance(verification.get("image.read"), dict) else {}
+    return image
+
+
 def _make_chat_http_client(base_url: str) -> httpx.AsyncClient:
     timeout = httpx.Timeout(CHAT_TIMEOUT_SECONDS, connect=8.0)
     return httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False)
@@ -107,42 +152,239 @@ def _chat_payload(
     }
 
 
-def _model_supports_image_url(provider: str, model: str) -> bool:
-    provider_value = provider.strip().lower()
-    model_value = model.strip().lower()
-    if provider_value == "deepseek":
+def _cached_models_dev_data() -> dict[str, Any]:
+    try:
+        from agent import models_dev
+
+        cache = getattr(models_dev, "_models_dev_cache", {})
+        cache_time = float(getattr(models_dev, "_models_dev_cache_time", 0) or 0)
+        cache_ttl = float(getattr(models_dev, "_MODELS_DEV_CACHE_TTL", 3600) or 3600)
+        if isinstance(cache, dict) and cache and time.time() - cache_time < cache_ttl:
+            return cache
+
+        disk_age_func = getattr(models_dev, "_disk_cache_age_seconds", None)
+        load_disk_cache = getattr(models_dev, "_load_disk_cache", None)
+        if callable(disk_age_func) and callable(load_disk_cache):
+            disk_age = disk_age_func()
+            if disk_age is not None and disk_age < cache_ttl:
+                disk_data = load_disk_cache()
+                if isinstance(disk_data, dict):
+                    return disk_data
+    except Exception:
+        return {}
+    return {}
+
+
+def _model_entry_from_cached_models_dev(provider: str, model: str) -> dict[str, Any] | None:
+    try:
+        from agent import models_dev
+
+        provider_map = getattr(models_dev, "PROVIDER_TO_MODELS_DEV", {})
+        models_dev_provider = provider_map.get(provider)
+        if not models_dev_provider:
+            return None
+        data = _cached_models_dev_data()
+        provider_data = data.get(models_dev_provider)
+        if not isinstance(provider_data, dict):
+            return None
+        models = provider_data.get("models")
+        if not isinstance(models, dict):
+            return None
+        finder = getattr(models_dev, "_find_model_entry", None)
+        if callable(finder):
+            entry = finder(models, model)
+            return entry if isinstance(entry, dict) else None
+    except Exception:
+        return None
+    return None
+
+
+def _cached_supports_vision(provider: str, model: str) -> bool | None:
+    entry = _model_entry_from_cached_models_dev(provider, model)
+    if entry is None:
+        return None
+    modalities = entry.get("modalities")
+    input_modalities = modalities.get("input") if isinstance(modalities, dict) else None
+    if isinstance(input_modalities, list):
+        return "image" in input_modalities
+    return bool(entry.get("attachment", False))
+
+
+def _model_supports_image_url(provider: str, model: str, config: dict[str, Any] | None = None) -> bool:
+    try:
+        from agent.image_routing import _supports_vision_override
+
+        supports = _supports_vision_override(config if isinstance(config, dict) else {}, provider, model)
+    except Exception:
+        supports = None
+    if supports is None:
+        supports = _cached_supports_vision(provider, model)
+    return supports is True
+
+
+def _auxiliary_vision_configured(config: dict[str, Any]) -> bool:
+    try:
+        from agent.image_routing import _explicit_aux_vision_override
+
+        return bool(_explicit_aux_vision_override(config))
+    except Exception:
         return False
-    if provider_value == "openai":
-        return any(
-            token in model_value
-            for token in (
-                "gpt-4o",
-                "gpt-4.1",
-                "gpt-5",
-                "o3",
-                "o4",
-                "vision",
-            )
+
+
+def _capability_provider_for_model(provider: str, config: dict[str, Any]) -> str:
+    model_config = config.get("model") if isinstance(config.get("model"), dict) else {}
+    config_provider = str(model_config.get("provider") or "").strip()
+    provider_config = provider_by_id(provider)
+    hermes_provider = str((provider_config or {}).get("hermes_provider") or config_provider or provider).strip()
+    if hermes_provider and hermes_provider != "custom":
+        return hermes_provider
+    return config_provider or provider
+
+
+def _image_input_mode_for_status(config: dict[str, Any], main_supports_image: bool) -> str:
+    agent_config = config.get("agent") if isinstance(config.get("agent"), dict) else {}
+    configured_mode = str(agent_config.get("image_input_mode") or "auto").strip().lower()
+    if configured_mode == "native":
+        return "native"
+    if configured_mode == "text":
+        return "text"
+    if _auxiliary_vision_configured(config):
+        return "text"
+    return "native" if main_supports_image else "text"
+
+
+def _prepare_hermes_runtime_env(paths: RuntimePaths) -> None:
+    paths.hermes_home.mkdir(parents=True, exist_ok=True)
+    os.environ["HERMES_HOME"] = str(paths.hermes_home)
+    try:
+        from hermes_cli.env_loader import load_hermes_dotenv
+
+        load_hermes_dotenv(hermes_home=paths.hermes_home)
+    except Exception:
+        pass
+
+
+def _available_vision_backends(paths: RuntimePaths | None = None) -> list[str]:
+    if paths is not None:
+        _prepare_hermes_runtime_env(paths)
+    try:
+        from agent.auxiliary_client import get_available_vision_backends
+
+        return [str(item) for item in get_available_vision_backends() if str(item).strip()]
+    except Exception:
+        return []
+
+
+def _resolve_hermes_vision_backend(
+    paths: RuntimePaths | None = None,
+    *,
+    async_mode: bool = False,
+) -> tuple[str | None, Any | None, str | None]:
+    if paths is not None:
+        _prepare_hermes_runtime_env(paths)
+    try:
+        from agent.auxiliary_client import resolve_vision_provider_client
+
+        return resolve_vision_provider_client(async_mode=async_mode)
+    except Exception:
+        return None, None, None
+
+
+def image_recognition_status(
+    provider: str,
+    model: str,
+    *,
+    config: dict[str, Any] | None = None,
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    config = config if isinstance(config, dict) else {}
+    provider = provider.strip()
+    model = model.strip()
+    if not provider or not model:
+        return {
+            "supports_image": False,
+            "main_supports_image": False,
+            "auxiliary_configured": False,
+            "backend": "none",
+            "source": "none",
+            "image_input_mode": "text",
+            "verification_status": "not_configured",
+            "last_error_code": "",
+            "last_verified_at": "",
+            "resolved_provider": "",
+            "resolved_model": "",
+            "available_vision_backends": [],
+        }
+    if paths is not None:
+        _prepare_hermes_runtime_env(paths)
+    capability_provider = _capability_provider_for_model(provider, config)
+    main_supports_image = _model_supports_image_url(capability_provider, model, config)
+    auxiliary_configured = _auxiliary_vision_configured(config)
+    image_input_mode = _image_input_mode_for_status(config, main_supports_image)
+
+    available_backends = _available_vision_backends(paths) if auxiliary_configured else []
+    resolved_provider = ""
+    resolved_model = ""
+    last_error_code = ""
+    last_verified_at = ""
+    if image_input_mode == "native":
+        backend = "main_model"
+        source = "main_model"
+        supports_image = True
+        verification_status = "inferred_from_model_metadata"
+        resolved_provider = capability_provider
+        resolved_model = model
+    else:
+        resolver_provider, resolver_client, resolver_model = (
+            _resolve_hermes_vision_backend(paths) if auxiliary_configured else (None, None, None)
         )
-    if provider_value == "qwen":
-        return any(token in model_value for token in ("vl", "qvq", "omni", "vision"))
-    if provider_value == "openrouter":
-        return any(
-            token in model_value
-            for token in (
-                "gpt-4o",
-                "gpt-4.1",
-                "gpt-5",
-                "claude-3",
-                "gemini",
-                "qwen-vl",
-                "qwen2.5-vl",
-                "vision",
-            )
-        )
-    if provider_value == "ollama":
-        return any(token in model_value for token in ("llava", "bakllava", "moondream", "minicpm-v", "qwen-vl"))
-    return "vision" in model_value or "-vl" in model_value
+        if resolver_provider:
+            resolved_provider = str(resolver_provider)
+        if resolver_model:
+            resolved_model = str(resolver_model)
+        if resolver_client is not None:
+            backend = "auxiliary_vision"
+            source = "auxiliary_vision"
+            supports_image = True
+            verification_status = "configured_not_verified"
+        elif auxiliary_configured:
+            backend = "auxiliary_vision"
+            source = "auxiliary_vision"
+            supports_image = False
+            verification_status = "failed"
+            last_error_code = "missing_api_key"
+        else:
+            backend = "none"
+            source = "none"
+            supports_image = False
+            verification_status = "not_configured"
+    verification = _image_verification_from_config(config)
+    if (
+        backend in {"main_model", "auxiliary_vision"}
+        and str(verification.get("backend") or "") == backend
+        and str(verification.get("resolved_provider") or "") == resolved_provider
+        and str(verification.get("resolved_model") or "") == resolved_model
+    ):
+        recorded_status = str(verification.get("verification_status") or "").strip()
+        if recorded_status in {"verified", "failed"}:
+            verification_status = recorded_status
+            last_error_code = str(verification.get("last_error_code") or "").strip()
+            last_verified_at = str(verification.get("updated_at") or "").strip()
+            supports_image = recorded_status == "verified"
+    return {
+        "supports_image": bool(supports_image),
+        "main_supports_image": bool(main_supports_image),
+        "auxiliary_configured": bool(auxiliary_configured),
+        "backend": backend,
+        "source": source,
+        "image_input_mode": image_input_mode,
+        "verification_status": verification_status,
+        "last_error_code": last_error_code,
+        "last_verified_at": last_verified_at,
+        "resolved_provider": resolved_provider,
+        "resolved_model": resolved_model,
+        "available_vision_backends": available_backends,
+    }
 
 
 def _image_not_supported_message(provider: str, model: str) -> str:
@@ -242,6 +484,7 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
     current_mode = get_current_mode(paths)
     prompt = current_mode.get("prompt") if isinstance(current_mode.get("prompt"), dict) else {}
     system_hint = str(prompt.get("system_hint") or "").strip()
+    image_status = image_recognition_status(provider_id, model, config=config, paths=paths)
 
     return None, {
         "provider": str(provider_config["id"]),
@@ -251,6 +494,9 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         "api_key": api_key,
         "mode": str(current_mode.get("current") or "balanced"),
         "system_hint": system_hint,
+        "image_supports_native": image_status["backend"] == "main_model",
+        "image_backend": image_status["backend"],
+        "config": config,
     }
 
 
@@ -307,6 +553,96 @@ async def send_chat_message(
     }
 
 
+def _vision_error_message(error_code: str, backend: str) -> str:
+    model_label = "图片识别模型" if backend == "auxiliary_vision" else "当前模型"
+    if error_code == "invalid_key":
+        return f"图片已收到并可预览；{model_label}没有接受当前 API Key。"
+    if error_code == "missing_api_key":
+        return f"图片已收到并可预览；{model_label}还缺 API Key。"
+    if error_code == "model_not_found":
+        return f"图片已收到并可预览；{model_label}名称不可用。"
+    if error_code in {"quota_exceeded", "quota_exhausted"}:
+        return f"图片已收到并可预览；{model_label}账户额度可能不足。"
+    if error_code == "rate_limited":
+        return f"图片已收到并可预览；{model_label}请求太频繁，请稍后再试。"
+    if error_code == "network_error":
+        return f"图片已收到并可预览；暂时连不上{model_label}。"
+    if error_code == "provider_error":
+        return f"图片已收到并可预览；{model_label}暂时没有正常响应。"
+    return f"图片已收到并可预览；{model_label}没有成功完成视觉识别。"
+
+
+def _classify_vision_exception(exc: Exception) -> str:
+    text = str(exc).lower()
+    status_code = str(getattr(exc, "status_code", "") or "")
+    if "api key" in text or "unauthorized" in text or "invalid key" in text or status_code in {"401", "403"}:
+        return "invalid_key"
+    if "not found" in text or "model_not_found" in text or status_code == "404":
+        return "model_not_found"
+    if "rate" in text or "too many requests" in text or status_code == "429":
+        return "rate_limited"
+    if "quota" in text or "credit" in text or "insufficient" in text or status_code == "402":
+        return "quota_exhausted"
+    if "timeout" in text or "network" in text or "connection" in text or "connect" in text:
+        return "network_error"
+    if status_code:
+        return "provider_error"
+    return "unknown"
+
+
+def _value_from_obj(payload: Any, key: str) -> Any:
+    if isinstance(payload, dict):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _extract_llm_response_text(payload: Any) -> str:
+    output_text = _value_from_obj(payload, "output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    choices = _value_from_obj(payload, "choices")
+    if isinstance(choices, list):
+        for choice in choices:
+            message = _value_from_obj(choice, "message")
+            if message is None:
+                continue
+            reply = _content_to_text(_value_from_obj(message, "content"))
+            if reply:
+                return reply
+
+    message = _value_from_obj(payload, "message")
+    if message is not None:
+        reply = _content_to_text(_value_from_obj(message, "content"))
+        if reply:
+            return reply
+
+    return _content_to_text(_value_from_obj(payload, "content"))
+
+
+async def _call_hermes_vision(messages: list[dict[str, Any]]) -> Any:
+    provider, client, model = _resolve_hermes_vision_backend(async_mode=True)
+    if client is None or not model:
+        raise RuntimeError("no hermes vision backend")
+
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0,
+    }
+    try:
+        from agent.auxiliary_client import auxiliary_max_tokens_param, get_auxiliary_extra_body
+
+        request.update(auxiliary_max_tokens_param(300))
+        extra_body = get_auxiliary_extra_body()
+        if extra_body:
+            request["extra_body"] = extra_body
+    except Exception:
+        request["max_tokens"] = 300
+
+    return await client.chat.completions.create(**request)
+
+
 async def describe_image_data_url(
     image_data_url: str,
     *,
@@ -318,6 +654,8 @@ async def describe_image_data_url(
         return {
             "ok": False,
             "error_code": "invalid_image",
+            "stage": "vision.input",
+            "backend": "none",
             "message": "图片预览数据不可读取，暂时不能做视觉识别。",
         }
 
@@ -327,66 +665,105 @@ async def describe_image_data_url(
         return {
             "ok": False,
             "error_code": str(error.get("error_code") or "setup_required"),
+            "stage": str(error.get("stage") or "setup.model"),
+            "backend": "none",
             "message": str(error.get("message") or "还不能识别图片：还没有设置 AI 服务。"),
         }
     assert settings is not None
 
     provider = str(settings["provider"])
     model = str(settings["model"])
-    if not _model_supports_image_url(provider, model):
+    image_status = image_recognition_status(provider, model, config=settings["config"], paths=paths)
+    backend = str(image_status.get("backend") or "none")
+    stage = "vision.native" if backend == "main_model" else "vision.auxiliary"
+    resolved_provider = str(image_status.get("resolved_provider") or provider)
+    resolved_model = str(image_status.get("resolved_model") or model)
+    if backend == "none":
         return {
             "ok": False,
             "error_code": "image_not_supported",
+            "stage": "capability.unsupported",
+            "backend": "none",
+            "provider": provider,
+            "model": model,
             "message": _image_not_supported_message(provider, model),
         }
-
-    try:
-        base_url = provider_http._provider_base_url(settings["provider_config"])
-    except provider_http.ProviderValidationError:
+    if image_status.get("verification_status") == "failed":
+        error_code = str(image_status.get("last_error_code") or "unknown")
         return {
             "ok": False,
-            "error_code": "provider_required",
-            "message": "当前模型服务设置不可用，暂时不能识别图片。",
+            "error_code": error_code,
+            "stage": stage,
+            "backend": backend,
+            "provider": resolved_provider,
+            "model": resolved_model,
+            "message": _vision_error_message(error_code, backend),
         }
 
     prompt = f"{VISION_SUMMARY_PROMPT}\n文件名：{file_name or '图片'}"
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ],
+        }
+    ]
     try:
-        async with _make_chat_http_client(base_url) as client:
-            response = await client.post(
-                "chat/completions",
-                headers=_chat_request_headers(settings["api_key"]),
-                json=_chat_payload(
-                    model,
-                    prompt,
-                    settings["system_hint"],
-                    image_data_url=image_data_url,
-                ),
-            )
-    except (httpx.InvalidURL, httpx.RequestError):
+        _prepare_hermes_runtime_env(paths)
+        response = await _call_hermes_vision(messages)
+    except Exception as exc:
+        error_code = _classify_vision_exception(exc)
+        _record_image_verification(
+            paths,
+            ok=False,
+            backend=backend,
+            provider=resolved_provider,
+            model=resolved_model,
+            error_code=error_code,
+        )
         return {
             "ok": False,
-            "error_code": "network_error",
-            "message": "图片已收到并可预览；视觉识别暂时连不上模型服务。",
+            "error_code": error_code,
+            "stage": stage,
+            "backend": backend,
+            "provider": resolved_provider,
+            "model": resolved_model,
+            "message": _vision_error_message(error_code, backend),
         }
 
-    payload = provider_http._safe_json(response)
-    if response.status_code >= 400:
-        return {
-            "ok": False,
-            "error_code": provider_http._classify_http_error(response.status_code, payload),
-            "message": "图片已收到并可预览；当前模型没有成功完成视觉识别。",
-        }
-
-    reply = _extract_reply(payload)
+    reply = _extract_llm_response_text(response)
     if not reply:
+        _record_image_verification(
+            paths,
+            ok=False,
+            backend=backend,
+            provider=resolved_provider,
+            model=resolved_model,
+            error_code="empty_response",
+        )
         return {
             "ok": False,
             "error_code": "empty_response",
-            "message": "图片已收到并可预览；当前模型没有返回可显示的识别结果。",
+            "stage": stage,
+            "backend": backend,
+            "provider": resolved_provider,
+            "model": resolved_model,
+            "message": "图片已收到并可预览；模型没有返回可显示的识别结果。",
         }
+    _record_image_verification(
+        paths,
+        ok=True,
+        backend=backend,
+        provider=resolved_provider,
+        model=resolved_model,
+    )
     return {
         "ok": True,
         "summary": reply,
-        "provider": provider,
-        "model": model,
+        "provider": resolved_provider,
+        "model": resolved_model,
+        "backend": backend,
+        "stage": stage,
     }

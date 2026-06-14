@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import time
 from types import SimpleNamespace
 
@@ -118,6 +119,48 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
     assert "id:" in sse
     assert "event:" in sse
     assert "data:" in sse
+
+
+def test_desktop_message_in_weixin_conversation_uses_weixin_turn_context(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    route = {"account_id": "account_a", "chat_id": "wx_contact", "user_id": "wx_contact", "chat_type": "dm"}
+    conversation = daemon_client.conversations.create_weixin_conversation(route, title="微信私聊", paths=paths)
+    conversation_id = conversation["id"]
+    expected_key = daemon_client.turn_coalescer.key_for_weixin(route, conversation_id)
+    daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.02
+    seen: dict[str, object] = {}
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen["message"] = message
+        seen["conversation_id"] = conversation_id
+        seen["route"] = kwargs.get("route")
+        return {
+            "ok": True,
+            "reply": "微信上下文回复。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    sent = daemon_client.client.post(
+        f"/conversations/{conversation_id}/messages",
+        headers=daemon_client.headers,
+        json={"message": "桌面插一句"},
+    )
+
+    assert sent.status_code == 200
+    body = sent.json()
+    assert body["accepted"] is True
+    assert body["assistant_message"]["source"] == "weixin"
+    assert body["assistant_message"]["metadata"]["batch_key"] == expected_key
+    _wait_until(lambda: seen.get("route") == route)
+    assert seen["message"] == "桌面插一句"
+    assert seen["conversation_id"] == conversation_id
 
 
 def test_desktop_slow_reply_returns_accepted_before_agent_finishes(daemon_client, monkeypatch):
@@ -1045,6 +1088,8 @@ def test_weixin_image_preview_only_does_not_claim_visual_read(daemon_client, mon
         return {
             "ok": False,
             "error_code": "image_not_supported",
+            "backend": "none",
+            "stage": "capability.unsupported",
             "message": "图片已收到并可预览；当前 DeepSeek 文本模型 deepseek-chat 不能识别图片内容。",
         }
 
@@ -1076,6 +1121,9 @@ def test_weixin_image_preview_only_does_not_claim_visual_read(daemon_client, mon
     assert attachment["summary_text"] == ""
     assert attachment["preview_data_url"].startswith("data:image/png;base64,")
     assert "不能识别图片内容" in attachment["reason_cn"]
+    assert attachment["metadata"]["recognition_backend"] == "none"
+    assert attachment["metadata"]["recognition_stage"] == "capability.unsupported"
+    assert attachment["metadata"]["recognition_error_code"] == "image_not_supported"
 
 
 def test_weixin_image_visual_summary_marks_attachment_recognized(daemon_client, monkeypatch):
@@ -1098,7 +1146,14 @@ def test_weixin_image_visual_summary_marks_attachment_recognized(daemon_client, 
         }
 
     async def fake_describe_image_data_url(*args, **kwargs):
-        return {"ok": True, "summary": "画面里是一张收据。", "provider": "openai", "model": "gpt-4o-mini"}
+        return {
+            "ok": True,
+            "summary": "画面里是一张收据。",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "backend": "auxiliary_vision",
+            "stage": "vision.auxiliary",
+        }
 
     monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
     monkeypatch.setattr(daemon_client.chat_client, "describe_image_data_url", fake_describe_image_data_url)
@@ -1124,6 +1179,198 @@ def test_weixin_image_visual_summary_marks_attachment_recognized(daemon_client, 
     assert attachment["summary_status"] == "recognized"
     assert attachment["summary_text"] == "画面里是一张收据。"
     assert attachment["reason_cn"] == ""
+    assert attachment["metadata"]["recognition_backend"] == "auxiliary_vision"
+    assert attachment["metadata"]["recognition_stage"] == "vision.auxiliary"
+    assert attachment["metadata"]["recognition_error_code"] == ""
+
+
+def test_desktop_message_uploads_image_attachment_and_adds_summary_to_prompt(daemon_client, monkeypatch):
+    seen_prompt = {}
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_prompt["message"] = message
+        seen_prompt["current_message_id"] = kwargs.get("current_message_id")
+        return {
+            "ok": True,
+            "reply": "已收到图片。",
+            "engine": "hermes_agent_loop",
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    async def fake_describe_image_data_url(*args, **kwargs):
+        return {
+            "ok": False,
+            "error_code": "image_not_supported",
+            "backend": "none",
+            "stage": "capability.unsupported",
+            "message": "图片已收到并可预览；当前模型不能识别图片内容。",
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.chat_client, "describe_image_data_url", fake_describe_image_data_url)
+    image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax5kNQAAAAASUVORK5CYII="
+
+    response = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={
+            "message": "请看这张图",
+            "attachments": [
+                {
+                    "file_name": "desk.png",
+                    "mime_type": "image/png",
+                    "data_base64": image_base64,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["accepted"] is False
+    assert seen_prompt["current_message_id"] == body["user_message"]["id"]
+    assert "附件处理结果" in seen_prompt["message"]
+    assert "当前模型不能识别图片内容" in seen_prompt["message"]
+
+    attachment = body["user_message"]["attachments"][0]
+    assert attachment["file_name"] == "desk.png"
+    assert attachment["summary_status"] == "preview_only"
+    assert attachment["preview_data_url"].startswith("data:image/png;base64,")
+    assert "safe_path" not in attachment
+    assert attachment["metadata"]["recognition_backend"] == "none"
+    assert attachment["metadata"]["recognition_stage"] == "capability.unsupported"
+    assert attachment["metadata"]["recognition_error_code"] == "image_not_supported"
+
+
+def test_desktop_attachment_return_uses_assistant_attachment_card(daemon_client, monkeypatch):
+    seen_prompt = {}
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_prompt["message"] = message
+        match = re.search(r"MEDIA:lilsunspot-attachment://att_[A-Za-z0-9_-]+", message)
+        assert match is not None
+        return {
+            "ok": True,
+            "reply": f"给你。\n{match.group(0)}",
+            "engine": "hermes_agent_loop",
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    async def fake_describe_image_data_url(*args, **kwargs):
+        return {
+            "ok": False,
+            "error_code": "image_not_supported",
+            "backend": "none",
+            "stage": "capability.unsupported",
+            "message": "图片已收到并可预览；当前模型不能识别图片内容。",
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.chat_client, "describe_image_data_url", fake_describe_image_data_url)
+    image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax5kNQAAAAASUVORK5CYII="
+
+    response = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={
+            "message": "把这张图再发给我",
+            "attachments": [
+                {
+                    "file_name": "desk.png",
+                    "mime_type": "image/png",
+                    "data_base64": image_base64,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "返还标记" in seen_prompt["message"]
+    assert body["assistant_message"]["text"] == "给你。"
+    assert "MEDIA:" not in body["assistant_message"]["text"]
+    assert body["assistant_message"]["metadata"]["delivery"]["status"] == "delivered"
+    assert body["assistant_message"]["metadata"]["delivery"]["delivered_count"] == 1
+    returned = body["assistant_message"]["attachments"][0]
+    assert returned["file_name"] == "desk.png"
+    assert returned["summary_status"] == "preview_only"
+    assert "safe_path" not in returned
+
+
+def test_media_delivery_rejects_cross_conversation_attachment(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    conversation_a = daemon_client.conversations.create_conversation(title="A", paths=paths)
+    conversation_b = daemon_client.conversations.create_conversation(title="B", paths=paths)
+    source_message = daemon_client.conversations.create_message(
+        conversation_id=conversation_a["id"],
+        source="desktop",
+        role="user",
+        text="上传 A 文件",
+        paths=paths,
+    )
+    attachment = daemon_client.attachments.register_uploaded_attachments(
+        message_id=source_message["id"],
+        conversation_id=conversation_a["id"],
+        files=[{"file_name": "a.txt", "mime_type": "text/plain", "data": b"hello"}],
+        paths=paths,
+    )[0]
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        return {
+            "ok": True,
+            "reply": f"MEDIA:lilsunspot-attachment://{attachment['id']}",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+
+    response = daemon_client.client.post(
+        f"/conversations/{conversation_b['id']}/messages",
+        headers=daemon_client.headers,
+        json={
+            "message": "返还别的对话文件",
+            "attachments": [{"file_name": "b.txt", "mime_type": "text/plain", "data_base64": base64.b64encode(b"b").decode("ascii")}],
+        },
+    )
+
+    assert response.status_code == 200
+    assistant = response.json()["assistant_message"]
+    assert assistant["attachments"] == []
+    assert "MEDIA:" not in assistant["text"]
+    assert assistant["metadata"]["delivery"]["status"] == "rejected"
+    assert assistant["metadata"]["delivery"]["reason_code"] == "cross_conversation"
+
+
+def test_desktop_invalid_upload_does_not_create_message(daemon_client):
+    response = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={
+            "message": "坏附件",
+            "attachments": [{"file_name": "broken.png", "mime_type": "image/png", "data_base64": "not base64"}],
+        },
+    )
+
+    assert response.status_code == 400
+    messages = daemon_client.client.get("/conversations/personal/messages", headers=daemon_client.headers).json()["messages"]
+    assert messages == []
 
 
 def test_attachment_source_rejects_credential_dir_and_csv_uses_structured_summary(daemon_client):
@@ -1403,6 +1650,69 @@ class FakeWeixinSendAdapter:
     async def send_image_file(self, recipient, path):
         self.calls.append(("image", recipient, path))
         return FakeSendResult()
+
+
+def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    route = {"chat_id": "wx_user", "user_id": "wx_user", "chat_type": "dm"}
+    conversation = daemon_client.conversations.create_weixin_conversation(route, title="微信私聊", paths=paths)
+    source_message = daemon_client.conversations.create_message(
+        conversation_id=conversation["id"],
+        source="weixin",
+        role="user",
+        text="之前的文件",
+        paths=paths,
+    )
+    attachment = daemon_client.attachments.register_uploaded_attachments(
+        message_id=source_message["id"],
+        conversation_id=conversation["id"],
+        files=[{"file_name": "wx.txt", "mime_type": "text/plain", "data": b"hello"}],
+        source="weixin",
+        paths=paths,
+    )[0]
+    seen_prompts = []
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_prompts.append(message)
+        return {
+            "ok": True,
+            "reply": f"好的。\nMEDIA:lilsunspot-attachment://{attachment['id']}",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+
+    import lilsunspot.daemon.gateway as gateway
+
+    result = asyncio.run(
+        gateway.handle_weixin_message_event(
+            SimpleNamespace(
+                text="把刚才的文件发给我",
+                media_urls=[],
+                media_types=[],
+                message_id="wx_media_return",
+                source=SimpleNamespace(chat_id="wx_user", user_id="wx_user", chat_type="dm"),
+            ),
+            paths,
+        )
+    )
+
+    assert result["ok"] is True
+    assert "返还标记" in seen_prompts[0]
+    assert result["chat"]["visible_reply"] == "好的。"
+    assert "MEDIA:" in result["chat"]["reply"]
+    assert "lilsunspot-attachment://" not in result["chat"]["reply"]
+    messages = daemon_client.client.get(f"/conversations/{conversation['id']}/messages", headers=daemon_client.headers).json()["messages"]
+    assistant = next(item for item in reversed(messages) if item["role"] == "assistant" and item["status"] == "sent")
+    assert assistant["text"] == "好的。"
+    assert "MEDIA:" not in assistant["text"]
+    assert assistant["metadata"]["delivery"]["status"] == "delivered"
+    assert assistant["attachments"][0]["file_name"] == "wx.txt"
 
 
 def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(daemon_client, monkeypatch):

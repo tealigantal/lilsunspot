@@ -3,6 +3,7 @@ import type {
   AppBootstrapState,
   CapabilitiesResult,
   Capability,
+  CapabilityGraph,
   CapabilityTestResult,
   ChatSendResult,
   Conversation,
@@ -18,8 +19,10 @@ import type {
   DiagnosticsSummary,
   HealthStatus,
   LilsunspotEvent,
+  LocalProviderResetResult,
   ModeProfile,
   ModelCapabilities,
+  ModelRuntimeConfig,
   ProductCapability,
   ProductMemory,
   ProductReminder,
@@ -39,6 +42,7 @@ import type {
 
 const DEFAULT_DAEMON_URL = import.meta.env.VITE_LILSUNSPOT_DAEMON_URL || "http://127.0.0.1:8765";
 const TOKEN_HEADER = "X-Lilsunspot-Token";
+const CHAT_REQUEST_TIMEOUT_MS = 120_000;
 const WEIXIN_REQUEST_TIMEOUT_MS = 12_000;
 const WEIXIN_DISCONNECT_TIMEOUT_MS = 5_000;
 
@@ -120,6 +124,9 @@ export async function discoverDaemon(): Promise<DaemonDiscovery | null> {
 }
 
 function humanizeError(error: unknown): string {
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
   if (error instanceof Error) {
     if (error.message === "Failed to fetch") {
       return "小黑子本地服务没有响应。请点击“重新检查”。";
@@ -307,6 +314,10 @@ export async function getProviderCapabilities(): Promise<ModelCapabilities> {
   return requestJson<ModelCapabilities>("/providers/capabilities");
 }
 
+export async function getCapabilityGraph(): Promise<CapabilityGraph> {
+  return requestJson<CapabilityGraph>("/capability-graph");
+}
+
 export async function openProviderKeyUrl(provider: string): Promise<string> {
   const body = await requestJson<{ key_url: string }>("/providers/open-key-url", {
     method: "POST",
@@ -339,6 +350,30 @@ export async function saveProvider(
   });
 }
 
+export async function resetLocalProviderConfig(): Promise<LocalProviderResetResult> {
+  return requestJson<LocalProviderResetResult>("/providers/reset-local", {
+    method: "POST"
+  });
+}
+
+export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
+  return requestJson<ModelRuntimeConfig>("/models/runtime");
+}
+
+export async function saveAuxiliaryModel(payload: {
+  task: string;
+  provider: string;
+  model: string;
+  base_url?: string;
+  api_key?: string;
+}): Promise<ModelRuntimeConfig> {
+  const body = await requestJson<{ ok: boolean; models: ModelRuntimeConfig }>("/models/auxiliary", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  return body.models;
+}
+
 export async function getCapabilities(): Promise<CapabilitiesResult> {
   return requestJson<CapabilitiesResult>("/capabilities");
 }
@@ -361,7 +396,7 @@ export async function sendChatMessage(message: string): Promise<ChatSendResult> 
   return requestJson<ChatSendResult>("/chat/send", {
     method: "POST",
     body: JSON.stringify({ message })
-  });
+  }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
 }
 
 export async function getConversations(includeArchived = false): Promise<Conversation[]> {
@@ -424,11 +459,33 @@ export async function getConversationMessages(conversationId = "personal", after
   return body.messages;
 }
 
-export async function sendConversationMessage(conversationId: string, message: string): Promise<ConversationSendResult> {
+type ConversationUploadAttachment = {
+  file_name: string;
+  mime_type: string;
+  data_base64: string;
+};
+
+async function fileToUploadAttachment(file: File): Promise<ConversationUploadAttachment> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("附件读取失败。"));
+    reader.readAsDataURL(file);
+  });
+  const commaIndex = dataUrl.indexOf(",");
+  return {
+    file_name: file.name,
+    mime_type: file.type || "application/octet-stream",
+    data_base64: commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl
+  };
+}
+
+export async function sendConversationMessage(conversationId: string, message: string, attachments: File[] = []): Promise<ConversationSendResult> {
+  const payloadAttachments = await Promise.all(attachments.map((file) => fileToUploadAttachment(file)));
   return requestJson<ConversationSendResult>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ message })
-  });
+    body: JSON.stringify({ message, attachments: payloadAttachments })
+  }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
 }
 
 export async function subscribeDaemonEvents(): Promise<boolean> {

@@ -18,6 +18,7 @@ type ApiKeyStepProps = {
   onSave: () => void;
   onTest: () => void;
   onChangeProvider: () => void;
+  notice?: string;
   busy?: boolean;
   saving?: boolean;
   testing?: boolean;
@@ -38,6 +39,7 @@ export function ApiKeyStep({
   onSave,
   onTest,
   onChangeProvider,
+  notice = "",
   busy = false,
   saving = false,
   testing = false
@@ -52,12 +54,12 @@ export function ApiKeyStep({
       </div>
       <div className="setupGuide">
         <article>
-          <strong>1. 打开官网</strong>
-          <span>登录服务商账号，进入 API Key 页面。</span>
+          <strong>1. 注册或登录</strong>
+          <span>如果打开后只是官网主页，先注册/登录账号，再进入控制台。</span>
         </article>
         <article>
-          <strong>2. 复制 Key</strong>
-          <span>只复制完整文本，不截图也不发给别人。</span>
+          <strong>2. 开通并复制 Key</strong>
+          <span>在控制台/API Key 页面创建 Key；部分服务可能要实名、充值或开通模型。</span>
         </article>
         <article>
           <strong>3. 保存到本机</strong>
@@ -76,6 +78,7 @@ export function ApiKeyStep({
           从剪贴板粘贴
         </button>
       </div>
+      {notice && <p className="settingsInlineMessage">{notice}</p>}
       <label>
         API Key
         <input

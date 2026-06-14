@@ -9,6 +9,7 @@ import yaml
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .provider_client import ProviderValidationError, validate_base_url_override
+from .providers import load_provider_registry, provider_by_id
 
 
 class HermesRuntimeError(RuntimeError):
@@ -51,6 +52,37 @@ def _write_env_value(env_path: Path, key: str, value: str) -> None:
     tmp.replace(env_path)
 
 
+def _remove_env_keys(env_path: Path, keys: set[str]) -> int:
+    cleaned_keys = {key for key in keys if key.replace("_", "").isalnum() and key.upper() == key}
+    if not cleaned_keys or not env_path.exists():
+        return 0
+
+    lines = _read_env_lines(env_path)
+    removed = 0
+    out: list[str] = []
+    for line in lines:
+        name = line.partition("=")[0].strip()
+        if name in cleaned_keys:
+            removed += 1
+            continue
+        out.append(line)
+
+    if not removed:
+        return 0
+
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = env_path.with_suffix(env_path.suffix + ".tmp")
+    text = "\n".join(out).rstrip()
+    tmp.write_text((text + "\n") if text else "", encoding="utf-8")
+    tmp.replace(env_path)
+    return removed
+
+
+def _env_has_value(env_path: Path, key: str) -> bool:
+    prefix = f"{key}="
+    return any(line.startswith(prefix) and line.partition("=")[2].strip() for line in _read_env_lines(env_path))
+
+
 def _read_config(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         return {}
@@ -68,9 +100,68 @@ def _write_config(config_path: Path, config: dict[str, Any]) -> None:
     tmp.replace(config_path)
 
 
+def _product_auxiliary_default_base_url(
+    provider_config: dict[str, Any] | None,
+    provider_id: str,
+    hermes_provider: str,
+    provider_type: str,
+) -> str:
+    if provider_config is None:
+        return ""
+    base_url = str(provider_config.get("base_url") or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    if hermes_provider == "custom":
+        return base_url
+    if provider_type != "local" and provider_id != hermes_provider:
+        return base_url
+    return ""
+
+
+def _apply_product_auxiliary_compat_defaults(config: dict[str, Any]) -> bool:
+    auxiliary = config.get("auxiliary") if isinstance(config.get("auxiliary"), dict) else {}
+    lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
+    product_auxiliary = lilsunspot.get("auxiliary") if isinstance(lilsunspot.get("auxiliary"), dict) else {}
+    if not auxiliary or not product_auxiliary:
+        return False
+
+    changed = False
+    for task_id, product_entry in product_auxiliary.items():
+        if not isinstance(product_entry, dict):
+            continue
+        provider_id = str(product_entry.get("provider") or "").strip()
+        provider_config = provider_by_id(provider_id) if provider_id else None
+        hermes_provider = str((provider_config or {}).get("hermes_provider") or provider_id).strip()
+        provider_type = str((provider_config or {}).get("type") or "cloud").strip().lower()
+        default_base_url = _product_auxiliary_default_base_url(
+            provider_config,
+            provider_id,
+            hermes_provider,
+            provider_type,
+        )
+        if not default_base_url:
+            continue
+
+        hermes_entry = auxiliary.get(task_id)
+        if isinstance(hermes_entry, dict) and str(hermes_entry.get("provider") or "").strip() == hermes_provider:
+            if not str(hermes_entry.get("base_url") or "").strip():
+                hermes_entry["base_url"] = default_base_url
+                changed = True
+
+        if not str(product_entry.get("base_url") or "").strip():
+            product_entry["base_url"] = default_base_url
+            changed = True
+
+    return changed
+
+
 def read_hermes_config(paths: RuntimePaths | None = None) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
-    return _read_config(runtime_paths.hermes_home / "config.yaml")
+    config_path = runtime_paths.hermes_home / "config.yaml"
+    config = _read_config(config_path)
+    if _apply_product_auxiliary_compat_defaults(config):
+        _write_config(config_path, config)
+    return config
 
 
 def write_hermes_config(config: dict[str, Any], paths: RuntimePaths | None = None) -> None:
@@ -81,6 +172,38 @@ def write_hermes_config(config: dict[str, Any], paths: RuntimePaths | None = Non
 def save_hermes_env_value(key: str, value: str, paths: RuntimePaths | None = None) -> None:
     runtime_paths = paths or ensure_runtime_dirs()
     _write_env_value(runtime_paths.hermes_home / ".env", key, value)
+
+
+def clear_local_model_credentials(paths: RuntimePaths | None = None) -> dict[str, Any]:
+    runtime_paths = paths or ensure_runtime_dirs()
+    config = read_hermes_config(runtime_paths)
+    env_keys = {
+        str(provider.get("env_key") or "").strip()
+        for provider in load_provider_registry()
+        if str(provider.get("env_key") or "").strip()
+    }
+    removed_env_keys = _remove_env_keys(runtime_paths.hermes_home / ".env", env_keys)
+
+    cleared_config_keys: list[str] = []
+    for key in ("model", "fallback_providers", "provider_routing", "auxiliary"):
+        if key in config:
+            config.pop(key, None)
+            cleared_config_keys.append(key)
+
+    lilsunspot = config.get("lilsunspot")
+    if isinstance(lilsunspot, dict):
+        for key in ("provider", "model", "auxiliary", "capability_verification"):
+            if key in lilsunspot:
+                lilsunspot.pop(key, None)
+        lilsunspot["reset_at"] = datetime.now(timezone.utc).isoformat()
+        if not lilsunspot:
+            config.pop("lilsunspot", None)
+
+    write_hermes_config(config, runtime_paths)
+    return {
+        "removed_env_keys": removed_env_keys,
+        "cleared_config_keys": sorted(cleared_config_keys),
+    }
 
 
 def _redact_config_value(value: Any) -> Any:
@@ -111,9 +234,16 @@ def _redact_config_value(value: Any) -> Any:
     return value
 
 
+def _clear_capability_verification(config: dict[str, Any], capability_id: str) -> None:
+    lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
+    verification = lilsunspot.get("capability_verification") if isinstance(lilsunspot.get("capability_verification"), dict) else {}
+    verification.pop(capability_id, None)
+
+
 def model_runtime_config(paths: RuntimePaths | None = None) -> dict[str, Any]:
     config = read_hermes_config(paths)
     model = config.get("model") if isinstance(config.get("model"), dict) else {}
+    lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
     return {
         "main": {
             "provider": str(model.get("provider") or ""),
@@ -123,6 +253,7 @@ def model_runtime_config(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "fallback_providers": _redact_config_value(config.get("fallback_providers") or []),
         "provider_routing": _redact_config_value(config.get("provider_routing") or {}),
         "auxiliary": _redact_config_value(config.get("auxiliary") or {}),
+        "lilsunspot_auxiliary": _redact_config_value(lilsunspot.get("auxiliary") or {}),
         "compression": _redact_config_value(config.get("compression") or {}),
     }
 
@@ -161,8 +292,10 @@ def save_auxiliary_model(
     provider: str,
     model: str,
     base_url: str = "",
+    api_key: str = "",
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any]:
+    paths = paths or ensure_runtime_dirs()
     task_id = task.strip()
     if not re.fullmatch(r"[a-zA-Z0-9_.-]+", task_id):
         raise HermesRuntimeError("辅助模型任务名不合法。")
@@ -171,14 +304,75 @@ def save_auxiliary_model(
     if not isinstance(auxiliary, dict):
         auxiliary = {}
         config["auxiliary"] = auxiliary
+    provider_id = provider.strip()
+    provider_config = provider_by_id(provider_id)
+    hermes_provider = str((provider_config or {}).get("hermes_provider") or provider_id).strip()
+    env_key = str((provider_config or {}).get("env_key") or "").strip()
+    provider_type = str((provider_config or {}).get("type") or "cloud").strip().lower()
+    normalized_base_url = base_url.strip().rstrip("/")
+    if provider_config is not None:
+        try:
+            normalized_base_url = validate_base_url_override(provider_config, normalized_base_url).strip().rstrip("/")
+        except ProviderValidationError as exc:
+            raise HermesRuntimeError(str(exc)) from exc
+        if not normalized_base_url:
+            normalized_base_url = _product_auxiliary_default_base_url(
+                provider_config,
+                provider_id,
+                hermes_provider,
+                provider_type,
+            )
+
+    api_key = api_key.strip()
+    clearing_task = hermes_provider in {"", "auto"} and not model.strip() and not normalized_base_url and not api_key
+    if clearing_task:
+        auxiliary.pop(task_id, None)
+        lilsunspot = config.setdefault("lilsunspot", {})
+        if isinstance(lilsunspot, dict):
+            lilsunspot_aux = lilsunspot.setdefault("auxiliary", {})
+            if isinstance(lilsunspot_aux, dict):
+                lilsunspot_aux.pop(task_id, None)
+        if task_id == "vision":
+            _clear_capability_verification(config, "image.read")
+        write_hermes_config(config, paths)
+        return model_runtime_config(paths)
+
+    if hermes_provider in {"", "auto"}:
+        raise HermesRuntimeError("请先选择图片识别服务。")
+    if not model.strip():
+        raise HermesRuntimeError("视觉模型名称不能为空。")
+
+    if api_key:
+        if not env_key:
+            raise HermesRuntimeError("这个视觉模型服务暂不能保存 API Key。")
+        _write_env_value(paths.hermes_home / ".env", env_key, api_key)
+
+    if provider_config is not None and provider_type != "local" and not api_key and hermes_provider not in {"auto", "main"}:
+        env_path = paths.hermes_home / ".env"
+        has_existing_key = any(line.startswith(f"{env_key}=") and line.partition("=")[2].strip() for line in _read_env_lines(env_path))
+        if not has_existing_key:
+            raise HermesRuntimeError("请先填写这个视觉模型服务的 API Key。")
+
     entry: dict[str, str] = {
-        "provider": provider.strip(),
+        "provider": hermes_provider,
         "model": model.strip(),
     }
-    normalized_base_url = base_url.strip().rstrip("/")
     if normalized_base_url:
         entry["base_url"] = normalized_base_url
     auxiliary[task_id] = entry
+
+    lilsunspot = config.setdefault("lilsunspot", {})
+    if isinstance(lilsunspot, dict):
+        lilsunspot_aux = lilsunspot.setdefault("auxiliary", {})
+        if isinstance(lilsunspot_aux, dict):
+            lilsunspot_aux[task_id] = {
+                "provider": provider_id,
+                "model": model.strip(),
+                "base_url": normalized_base_url,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+    if task_id == "vision":
+        _clear_capability_verification(config, "image.read")
     write_hermes_config(config, paths)
     return model_runtime_config(paths)
 
@@ -275,13 +469,13 @@ def save_provider_credentials(
         raise HermesRuntimeError("Provider 缺少 Hermes provider 映射。")
     if not model:
         raise HermesRuntimeError("模型名称不能为空。")
-    if not api_key and provider_type != "local":
-        raise HermesRuntimeError("API Key 不能为空。")
     if not env_key:
         raise HermesRuntimeError("Provider 缺少 env_key，Day1 暂不能保存。")
 
     env_path = paths.hermes_home / ".env"
     config_path = paths.hermes_home / "config.yaml"
+    if not api_key and provider_type != "local" and not _env_has_value(env_path, env_key):
+        raise HermesRuntimeError("API Key 不能为空。")
 
     if api_key:
         _write_env_value(env_path, env_key, api_key)
@@ -304,11 +498,14 @@ def save_provider_credentials(
     model_config.pop("api_key", None)
 
     config["model"] = model_config
+    existing_lilsunspot = config.get("lilsunspot") if isinstance(config.get("lilsunspot"), dict) else {}
     config["lilsunspot"] = {
+        **existing_lilsunspot,
         "provider": provider_id,
         "model": model,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    _clear_capability_verification(config, "image.read")
     _write_config(config_path, config)
 
     return {

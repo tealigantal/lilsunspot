@@ -591,7 +591,7 @@ label {
 
 .stepRail {
   display: grid;
-  grid-template-columns: 110px repeat(4, minmax(0, 1fr));
+  grid-template-columns: 110px repeat(auto-fit, minmax(92px, 1fr));
   align-items: center;
   gap: var(--space-4);
   min-width: 0;
@@ -1312,11 +1312,122 @@ label {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 104px;
   gap: var(--space-3);
-  align-items: stretch;
+  align-items: end;
   border: 1px solid rgba(99, 246, 218, 0.24);
   border-radius: 18px;
   padding: 8px;
   background: #f7fbff;
+}
+
+.composerError {
+  margin: 0 24px 10px;
+  max-width: calc(100% - 48px);
+  border: 1px solid rgba(255, 89, 89, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 89, 89, 0.12);
+  color: #ffe4e4;
+  font-weight: 800;
+  line-height: 1.45;
+  padding: 10px 12px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.composerInputStack {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composerAttachmentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px 0;
+}
+
+.composerAttachmentChip {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 260px);
+  border: 1px solid rgba(7, 17, 30, 0.12);
+  border-radius: 999px;
+  padding: 4px 6px 4px 10px;
+  background: rgba(7, 17, 30, 0.08);
+  color: #07111e;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 16px;
+}
+
+.composerAttachmentChip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerAttachmentChip em {
+  color: rgba(7, 17, 30, 0.62);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.composerAttachmentChip button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(7, 17, 30, 0.12);
+  color: #07111e;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.composerCapabilityHint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(7, 17, 30, 0.08);
+  color: #07111e;
+}
+
+.composerCapabilityHint.ready {
+  background: rgba(21, 128, 61, 0.12);
+}
+
+.composerCapabilityHint.degraded,
+.composerCapabilityHint.needs_setup,
+.composerCapabilityHint.blocked {
+  background: rgba(255, 139, 36, 0.14);
+}
+
+.composerCapabilityHint span {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: #07111e;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.composerCapabilityHint button {
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #07111e;
 }
 
 .chatComposer textarea {
@@ -1326,9 +1437,50 @@ label {
   background: transparent;
 }
 
-.chatComposer button {
+.composerActions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chatComposer button,
+.composerFileButton {
   min-height: 56px;
   align-self: center;
+}
+
+.chatComposer .composerAttachmentChip button {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+}
+
+.composerFileButton {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border: 1px solid rgba(7, 17, 30, 0.18);
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  background: rgba(7, 17, 30, 0.08);
+  color: #07111e;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.composerFileButton input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composerFileButton.disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .chatSidePanel {
@@ -1625,6 +1777,242 @@ label {
 
 .settingsSummary {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.settingsHeader.compact {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.settingsHeader.compact h4 {
+  margin: 0 0 4px;
+  color: var(--ikun-text);
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.settingsHeader.compact p {
+  max-width: 620px;
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.reconfigurePanel {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  border-block: 1px solid rgba(99, 246, 218, 0.18);
+  padding-block: var(--space-4);
+}
+
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.primaryButton {
+  background: var(--ikun-orange);
+  color: #07111e;
+}
+
+.inlineSuccess,
+.inlineError,
+.inlineHint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.inlineSuccess {
+  color: var(--ikun-cyan);
+}
+
+.operationNoticeBanner {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid rgba(99, 246, 218, 0.24);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  background: rgba(20, 38, 61, 0.68);
+  color: var(--ikun-muted);
+}
+
+.operationNoticeBanner p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 19px;
+}
+
+.operationNoticeBanner.success {
+  border-color: rgba(99, 246, 218, 0.34);
+  background: rgba(99, 246, 218, 0.11);
+  color: var(--ikun-cyan);
+}
+
+.operationNoticeBanner.warning {
+  border-color: rgba(255, 213, 82, 0.34);
+  background: rgba(255, 213, 82, 0.11);
+  color: var(--ikun-yellow);
+}
+
+.operationNoticeBanner.danger {
+  border-color: rgba(239, 68, 68, 0.32);
+  background: rgba(239, 68, 68, 0.11);
+  color: #ff8a8a;
+}
+
+.inlineError {
+  color: #ff8a8a;
+}
+
+.inlineHint {
+  color: var(--ikun-muted);
+}
+
+.visionModelPanel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid rgba(99, 246, 218, 0.2);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  background: rgba(7, 17, 30, 0.5);
+}
+
+.visionOnboardingStep {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.visionChoicePanel {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  border: 1px solid rgba(255, 213, 82, 0.24);
+  border-radius: var(--radius-card);
+  padding: var(--space-5);
+  background: rgba(255, 213, 82, 0.08);
+}
+
+.visionPanelHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.visionChoicePanel h3 {
+  margin: 0 0 8px;
+  color: var(--ikun-text);
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.visionChoicePanel p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--ikun-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.visionChoiceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.visionChoiceActions button,
+.visionModelActions button {
+  min-height: 42px;
+}
+
+.visionLimitations {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.visionLimitations span,
+.settingsInlineMessage {
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(255, 213, 82, 0.1);
+  color: var(--ikun-yellow);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.settingsInlineMessage {
+  margin: 0;
+  background: rgba(99, 246, 218, 0.11);
+  color: var(--ikun-cyan);
+}
+
+.settingsInlineMessage.danger {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.11);
+  color: #ff8a8a;
+}
+
+.visionModelGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.visionModelGrid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ikun-muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.visionModelGrid input,
+.visionModelGrid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.visionProviderGuide {
+  display: grid;
+  align-content: end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.visionProviderGuide button {
+  width: 100%;
+  min-height: 58px;
+}
+
+.visionProviderGuide span {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.visionModelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .controlCenter {
@@ -2222,6 +2610,51 @@ label {
   line-height: 1.45;
 }
 
+.capabilityGraphStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.capabilityGraphStrip article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(99, 246, 218, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(7, 17, 30, 0.34);
+}
+
+.capabilityGraphStrip article > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.capabilityGraphStrip strong,
+.capabilityGraphStrip span,
+.capabilityGraphStrip p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.capabilityGraphStrip strong {
+  color: var(--ikun-text);
+}
+
+.capabilityGraphStrip span,
+.capabilityGraphStrip p {
+  color: var(--ikun-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.capabilityGraphStrip p {
+  margin: 0;
+}
+
 .capabilityGroups,
 .capabilityList,
 .auditList {
@@ -2713,7 +3146,8 @@ label {
     padding: 10px;
   }
 
-  .chatComposer button {
+  .chatComposer button,
+  .composerFileButton {
     min-height: 48px;
   }
 
@@ -2876,7 +3310,7 @@ label {
   }
 
   .stepRail {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
     gap: 8px;
     padding: 14px;
   }
@@ -2940,7 +3374,8 @@ label {
   .controlPanelGrid,
   .controlFormGrid,
   .controlFormGrid.single,
-  .capabilitySwitchGrid {
+  .capabilitySwitchGrid,
+  .visionModelGrid {
     grid-template-columns: 1fr;
   }
 
@@ -2967,6 +3402,10 @@ label {
 
   .chatComposer {
     grid-template-columns: minmax(0, 1fr) 78px;
+  }
+
+  .composerAttachmentChip {
+    max-width: 100%;
   }
 
   .chatComposer textarea {

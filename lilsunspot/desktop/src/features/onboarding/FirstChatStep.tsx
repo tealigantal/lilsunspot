@@ -55,7 +55,7 @@ export function FirstChatStep({ onDone, onSkip }: FirstChatStepProps) {
         {
           id: `${Date.now()}-assistant-error`,
           role: "assistant",
-          text: `${error instanceof Error ? error.message : "发送失败。"}\n请重新检查 AI 服务设置。`,
+          text: `${error instanceof Error ? error.message : "发送失败。"}\n你可以稍后进入主界面重试，或到设置里重新测试模型服务。`,
           error: true
         }
       ]);

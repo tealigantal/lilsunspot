@@ -1,6 +1,108 @@
 # Agent Memory
 
-## 2026-06-12 - PR prep merge conflict resolution
+## 2026-06-14 - save-success onboarding refresh is non-blocking
+
+- Task: re-locate and fix the first-start error shown after saving the main AI service.
+- Files touched: `lilsunspot/desktop/src/features/onboarding/OnboardingFlow.tsx`, `lilsunspot/desktop/src/features/onboarding/ApiKeyStep.tsx`, `lilsunspot/desktop/src/features/model/ModelReconfigurePanel.tsx`, `lilsunspot/desktop/src/api.ts`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: local log evidence showed `provider saved provider=deepseek model=deepseek-chat`, so the save itself succeeded. The user-visible failure came from post-save capability/UI refresh being rendered as the blocking `当前步骤没有完成` error. First-start save now treats capability refresh and later UI refresh as non-blocking after `saveProvider()` succeeds; it shows an inline notice and continues to the next step. Reconfigure save now behaves the same way. Tauri string errors are no longer collapsed into generic `请求失败，请稍后再试。`.
+- Validation: desktop build passed, focused auth/provider pytest 9 passed, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon 110 passed plus secret guard and desktop build, and `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup.exe at 55,805,640 bytes.
+- Remaining risk: the fixed installer was built but not installed and clicked through in the live app during this pass.
+
+## 2026-06-14 - vision provider key-page matching
+
+- Task: fix the image-recognition settings UI so its key-page jump matches the selected vision provider independently from the main chat provider.
+- Files touched: `lilsunspot/desktop/src/features/model/VisionModelPanel.tsx`, `lilsunspot/desktop/src/App.css`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/tests/test_auth_and_provider.py`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: the vision panel now shows a provider-specific key/help button and calls `openProviderKeyUrl(selectedVisionProvider.id)` only for the currently selected image-recognition service. The helper text states it will not jump to the main chat model provider. The backend `/providers/open-key-url` no longer falls back to `detect_url`, so an API Base URL cannot be opened as a mistaken website.
+- Validation: focused auth/provider pytest 9 passed, desktop build passed, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon 110 passed plus secret guard and desktop build, and `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup.exe at 55,800,847 bytes.
+- Remaining risk: the new button was not manually clicked in the installed app after the NSIS build; visual screenshot-level acceptance for 390px width was not rerun.
+
+## 2026-06-14 - local AI key reset button
+
+- Task: add a user-facing way to clear saved local AI keys and return directly to the first-start setup flow.
+- Files touched: `lilsunspot/daemon/hermes_runtime.py`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/tests/test_auth_and_provider.py`, desktop API/types/app/settings/model files, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added token-protected `POST /providers/reset-local`, which removes known provider registry env keys from Hermes `.env`, clears main model/fallback/routing/auxiliary vision/capability verification config, and returns sanitized bootstrap state. The model settings page now shows `清除本机 AI Key` for configured installs; after confirmation it calls the reset endpoint, closes settings, refreshes bootstrap, and opens the first-start onboarding from the beginning. Chat records, attachments, runtime token, Weixin credentials, and non-model local data are intentionally left intact.
+- Validation: focused auth/provider pytest 8 passed, related auth/capability/product pytest 25 passed, `npm run build --prefix lilsunspot/desktop` passed, `python scripts/guard_no_secrets.py` passed, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon 109 passed, `git diff --check` had only LF/CRLF warnings, and `npm run tauri:build --prefix lilsunspot/desktop` produced `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe` at 55,806,149 bytes.
+- Remaining risk: this was not manually clicked in the installed app after building; real user data reset should still be tested once in the UI before relying on it for repeated first-start rehearsals.
+
+## 2026-06-14 - Current full-chain media delivery and onboarding merge
+
+- Task: implement the Current full-chain refactor slice for service configuration, capability-driven image setup, desktop attachment return, Weixin media delivery, and front-end false-failure handling.
+- Files touched: `lilsunspot/daemon/media_delivery.py`, daemon app/gateway/coalescer/agent/attachment/conversation modules and tests, desktop API/chat/onboarding/CSS files, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added a product-layer media delivery service that parses Hermes `MEDIA:` plus `MEDIA:lilsunspot-attachment://<attachment_id>`, strips internal markers from visible assistant text, validates conversation ownership and safe paths, registers assistant attachment cards, and records only sanitized `delivery.status/count/reason_code` metadata. Weixin route turns now keep Hermes `weixin` platform context and return safe `MEDIA:/...` strings only to the official adapter path. First-run model setup now keeps image recognition configuration in the same service page, and chat sends use a longer timeout without creating unreconcilable local assistant failure bubbles.
+- Validation: focused conversation tests passed, focused capability/product/chat tests passed, daemon test suite passed, product tests passed, desktop build passed, secret guard passed, `scripts/check.ps1` passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup.exe. No API Key, runtime token, Weixin credential, private chat body, attachment original content, or full model reply was recorded.
+- Remaining risk: installed-app smoke and screenshot-level responsive UI verification have not been automated in this pass.
+
+## 2026-06-13 - Windows desktop shortcut icon overlay investigation
+
+- Task: diagnose the user's desktop screenshot where many desktop shortcuts show the same unexpected overlay/icon.
+- Files touched: `lilsunspot/notes/agent-memory.md`.
+- Decision/result: local read-only checks found no `Shell Icons\29` override in HKCU/HKLM, and `.lnk` still uses the default Windows icon handler `{00021401-0000-0000-C000-000000000046}`. The lilsunspot installer hook only recreates its own shortcut and does not write global Shell Icons or overlay-handler registry values. The visible pattern affects shortcut rendering more than actual application/file associations, so the likely cause is Explorer icon/overlay cache corruption or a third-party overlay cache issue, not a project code change.
+- Validation: read-only registry queries, shortcut metadata summary, and repository search for global shell icon/overlay writes. No system settings were changed.
+- Remaining risk: the fix was not applied in this task because rebuilding the icon cache requires restarting Explorer and briefly disrupting the desktop.
+
+## 2026-06-13 - LIL-CAPABILITY-ORCHESTRATION-01A capability graph and auxiliary vision loop
+
+- Task: implement the first capability-orchestration slice so model settings, onboarding, chat attachments, Weixin image ingress, and diagnostics share one product capability state while the image path can use a real auxiliary vision model when the main chat model is text-only.
+- Files touched: `TASKS.md`, new `lilsunspot/daemon/capability_graph.py`, daemon API/product/capability/chat/attachment/conversation modules, focused daemon tests, desktop API/types/chat/settings/model/CSS files, and this memory file.
+- Decision/result: added a token-protected `/capability-graph` and extended `/providers/capabilities` with graph-derived image fields while keeping legacy fields. `chat.text`, `image.read`, `file.read`, `mode.adjust`, `weixin.receive`, and `weixin.send_file` now expose `status`, `source`, `blocking_reason`, `user_message_cn`, `next_actions`, and `last_verified_at`. Image uploads now prefer native main-model vision, otherwise call configured `auxiliary.vision` for a Chinese summary before the main chat answer. Attachment metadata records only sanitized recognition backend/stage/error code; successful recognition marks `recognized`, failures remain `preview_only`.
+- Validation: focused graph/image tests passed, daemon tests passed, product tests passed, desktop build passed, `python scripts/guard_no_secrets.py` passed, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed, and `git diff --check` passed. A targeted live smoke reached the real DeepSeek text-model plus Qwen auxiliary-vision path without logging secrets, attachment content, private text, or full model replies, but the available DashScope key was classified as `invalid_key`.
+- Remaining risk: `npm run tauri:build --prefix lilsunspot/desktop` and direct sidecar rebuild are blocked by repeated PyPI TLS handshake EOF while `uv` fetches PyInstaller dependencies, so no fresh NSIS setup was produced in this pass. A real `recognized` live smoke still needs a valid vision provider key, and screenshot-level UI acceptance was not rerun in this pass.
+
+## 2026-06-13 - record attachment composer clearing expectation
+
+- Task: record the user's feedback that after sending an image, the attachment composer should not keep the sent image around.
+- Files touched: `TASKS.md`, `lilsunspot/notes/model-capability-ux-plan.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added attachment composer clearing to the capability orchestration task and UX plan. The expected behavior is: once a send request is accepted, the input/composer attachment queue clears; the sent message keeps its attachment card in history; if sending fails, pending attachments may be restored so the user can retry. This prevents duplicate sends and avoids confusing users into thinking the image is still unsent.
+- Validation: documentation-only change; no product code, screenshot file, API key, runtime token, Weixin credential, private message text, or attachment content was recorded.
+- Remaining risk: the UI behavior still needs implementation and visual acceptance.
+
+## 2026-06-13 - holistic model capability UX plan
+
+- Task: record the user's feedback that future work must plan across all models and all user-facing chains instead of narrow patches or brittle keyword triggers.
+- Files touched: `TASKS.md`, `lilsunspot/notes/model-capability-ux-plan.md`, `lilsunspot/notes/doc-index.md`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added a product-level model capability and UX plan covering user behavior assumptions, unified capability graph, structured intent routing, model orchestration, proactive onboarding, error taxonomy, validation matrix, and phased delivery. `TASKS.md` now points to `LIL-CAPABILITY-ORCHESTRATION-01` as the next top-priority task, with the vision-provider issue treated as the first slice of a broader capability orchestration fix. The plan explicitly rejects keyword-based mode handling and single-page patching as sufficient.
+- Validation: documentation-only change; no product code, screenshot file, API key, runtime token, Weixin credential, private message text, or attachment content was recorded.
+- Remaining risk: the plan still needs implementation and live validation with safe test credentials across providers, desktop, Weixin, and installed-app flows.
+
+## 2026-06-13 - record vision save versus recognition mismatch
+
+- Task: analyze the user's screenshots showing an unexplained chat failure and a saved Qwen vision model that still does not recognize uploaded images, then record the findings as a follow-up task without changing product code.
+- Files touched: `TASKS.md` and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: local code inspection indicates two likely product issues. First, the settings/capabilities path treats `auxiliary.vision` as image recognition available, so the UI can show “图片识别已可用”. Second, the actual attachment recognition path calls `describe_image_data_url()`, which currently rejects non-native main models via `image_supports_native` and then only sends `image_url` to the main chat model. That explains the mismatch where `qwen-vl-max` is saved but the chat answer still says `qwen-plus` cannot understand images. The generic failure bubble also hides the failing stage and error code, so users cannot tell whether the problem is Key, quota, model name, Base URL, provider HTTP, auxiliary vision, or agent loop.
+- Validation: documentation-only change after local source inspection; no product code, screenshot file, API key, runtime token, or private data was recorded.
+- Remaining risk: this is a code-path analysis, not a live provider repro. The next implementation task should verify with safe test credentials and visual acceptance.
+
+## 2026-06-13 - record vision provider guide follow-up
+
+- Task: record the user's screenshot feedback as the next task instead of implementing it immediately.
+- Files touched: `TASKS.md` and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: added `LIL-VISION-PROVIDER-GUIDE-01` at the top of `Next` to improve the image-recognition model setup UX. The task asks for official provider links, plain guidance for getting keys and choosing models, Base URL explanation, safe saved-key handling, and acceptance coverage for Qwen/DashScope, misclicks, repeat saves, continue-text-chat, and 390x760 mobile layout.
+- Validation: documentation-only change; no product code, screenshot file, API key, runtime token, or private data was recorded.
+- Remaining risk: official links and provider-specific wording still need implementation and current-source verification when the task is picked up.
+
+## 2026-06-12 - LIL-VISION-ONBOARDING-01 model vision onboarding
+
+- Task: start the next Current/Next task and improve the model-selection experience from a normal-user perspective, including visual acceptance and user misclick testing.
+- Files touched: `TASKS.md`, `lilsunspot/resources/provider_registry.yaml`, `lilsunspot/daemon/hermes_runtime.py`, `product_features.py`, capability/product tests, desktop model/onboarding API/types/CSS files, new `VisionModelPanel.tsx`, new `VisionOnboardingStep.tsx`, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: after saving the main chat model, onboarding now reuses `/providers/capabilities` and Hermes image-routing status to decide whether image recognition is available. Text-only main models show “当前模型不能直接识别图片” before chat, with clear paths to continue text chat or add a separate image-recognition model through Hermes `auxiliary.vision`. The shared vision-model panel is reused in onboarding and settings, preserves existing auxiliary config when saving main provider settings, redacts keys, and rejects empty/misclicked saves with plain Chinese errors.
+- Validation: focused capabilities/product pytest 12 passed, daemon pytest 98 passed, product pytest 38 passed, `npm run build --prefix lilsunspot/desktop`, `python scripts/guard_no_secrets.py`, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1`, `git diff --check`, local Chrome/CDP visual acceptance at 960x680 and 390x760 including double-click continue, empty save, and missing cloud API key, and `npm run tauri:build --prefix lilsunspot/desktop` passed. NSIS setup exists at `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`.
+- Remaining risk: no real vision-provider API call or freshly installed NSIS click-through was run in this pass. Visual screenshots and mock daemon data stayed under ignored temporary directories. No API key, runtime token, Weixin credential, private message text, screenshot, or attachment content was recorded in repo memory.
+
+## 2026-06-12 - auxiliary vision model desktop settings
+
+- Task: expose the Hermes official auxiliary vision-model path so users can configure image recognition separately when the main chat model is text-only.
+- Files touched: `lilsunspot/daemon/hermes_runtime.py`, `app.py`, capability/product tests, desktop model settings API/types/CSS, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: lilsunspot now saves image recognition settings into Hermes `auxiliary.vision`, while preserving the user's lilsunspot provider id under `lilsunspot.auxiliary.vision` for UI display. Cloud vision providers require an API key the first time; provider base URLs and Hermes provider ids are normalized through the existing provider registry. The desktop model settings drawer now has a "图片识别模型" panel for OpenRouter, OpenAI-compatible, Qwen, and local Ollama/LLaVA-style services, plus a clear action to return to no separate vision model. Hermes core was not rewritten.
+- Validation: focused auxiliary-vision pytest passed, related daemon/product/API pytest 22 passed, and desktop TypeScript/Vite build passed before the full check/build stage.
+- Remaining risk: no real provider API call or installed-app image upload smoke test was run with live credentials in this automated pass. No API key, runtime token, Weixin credential, private message text, screenshot, or attachment content was recorded.
+
+## 2026-06-12 - capability registry prompt alignment and desktop uploads
+
+- Task: replace the image-specific ability prompt with a generic Hermes-backed capability snapshot for chat answers, then add desktop attachment upload for images and other files.
+- Files touched: `lilsunspot/daemon/chat_client.py`, `agent_runner.py`, `capabilities.py`, `product_features.py`, `app.py`, `attachments.py`, desktop chat API/UI/CSS files, daemon/product tests, and `lilsunspot/notes/agent-memory.md`.
+- Decision/result: confirmed Hermes already has official model/tool/image-routing sources (`tools_config`, `models_dev`, `image_routing`, and `vision_analyze`). Removed the lilsunspot image-only system prompt and model-name heuristic; agent turns now receive a generic snapshot generated from the same `/capabilities` registry, with current provider/model and the desktop upload entry represented as an enabled product runtime capability. Desktop chat can now upload up to 5 local attachments, stores them under the safe attachment directory, summarizes supported file types, and runs existing image recognition only when the configured vision backend supports it. Hermes core was not rewritten.
+- Validation: focused upload/capability pytest passed, broader focused daemon/product pytest passed, `python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-product-full` passed with 38 tests, `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed, `git diff --check` returned only CRLF warnings, sidecar rebuild passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup artifact at 55,764,782 bytes.
+- Remaining risk: browser screenshot QA was not available through the Browser plugin in this session, so the installed app still needs one manual upload smoke test with real local files and the user's configured model credentials. No API key, runtime token, Weixin credential, private message text, screenshot, or attachment content was recorded.
 
 - Task: prepare the local Hermes capability work for PR after `develop` was already in a merge with `origin/develop`.
 - Files touched: conflict resolution in `TASKS.md`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/tests/conftest.py`, `lilsunspot/desktop/src/App.css`, `lilsunspot/desktop/src/api.ts`, `SettingsDrawer.tsx`, `types.ts`, `scripts/guard_no_secrets.py`, and this memory file.

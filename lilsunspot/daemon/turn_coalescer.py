@@ -11,6 +11,8 @@ from typing import Any
 
 from . import conversations
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .attachments import AttachmentError
+from .media_delivery import add_delivery_context_to_prompt, prepare_assistant_delivery, register_prepared_delivery
 
 
 TEXT_BATCH_DELAY_SECONDS = 3.0
@@ -269,7 +271,11 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
         _set_future_result(batch, _cancelled_result())
         return
 
-    prompt = _build_prompt([item.text for item in batch.items])
+    prompt = add_delivery_context_to_prompt(
+        _build_prompt([item.text for item in batch.items]),
+        conversation_id=batch.conversation_id,
+        paths=batch.paths,
+    )
     message_ids = [item.message_id for item in batch.items if item.message_id]
     current_message_id = message_ids[-1] if message_ids else None
     try:
@@ -298,9 +304,16 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
         return
 
     if chat_result.get("ok"):
+        prepared = prepare_assistant_delivery(
+            str(chat_result.get("reply") or ""),
+            conversation_id=batch.conversation_id,
+            paths=batch.paths,
+            include_outbound_media=bool(batch.route),
+        )
+        delivery_metadata = prepared.metadata()
         updated = conversations.update_message(
             batch.assistant_message_id,
-            text=str(chat_result.get("reply") or ""),
+            text=prepared.visible_text,
             status="sent",
             metadata_patch={
                 "kind": "chat_reply",
@@ -309,12 +322,41 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
                 "model": chat_result.get("model"),
                 "hermes_session_id": chat_result.get("hermes_session_id"),
                 "batch_count": len(batch.items),
+                "delivery": delivery_metadata,
             },
             paths=batch.paths,
         )
         if updated is None:
             _set_future_result(batch, _cancelled_result(chat_result))
             return
+        try:
+            register_prepared_delivery(
+                prepared,
+                message_id=batch.assistant_message_id,
+                conversation_id=batch.conversation_id,
+                source="assistant_delivery",
+                paths=batch.paths,
+            )
+        except AttachmentError:
+            updated = conversations.update_message(
+                batch.assistant_message_id,
+                metadata_patch={
+                    "delivery": {
+                        "status": "rejected",
+                        "delivered_count": 0,
+                        "rejected_count": max(1, prepared.rejected_count),
+                        "reason_code": "unsafe_path",
+                    }
+                },
+                paths=batch.paths,
+            ) or updated
+            prepared.outbound_text = prepared.visible_text
+        updated = conversations.get_message(batch.assistant_message_id, paths=batch.paths) or updated
+        next_chat = {
+            **chat_result,
+            "reply": prepared.outbound_text if batch.route else prepared.visible_text,
+            "visible_reply": prepared.visible_text,
+        }
         _set_future_result(
             batch,
             {
@@ -323,7 +365,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
                 "suppressed": False,
                 "message": "回复已生成。",
                 "assistant_message": updated,
-                "chat": chat_result,
+                "chat": next_chat,
             },
         )
         return

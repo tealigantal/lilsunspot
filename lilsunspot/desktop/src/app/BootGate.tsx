@@ -1,4 +1,4 @@
-import type { AppBootstrapState } from "../types";
+import type { AppBootstrapState, ModelCapabilities, OperationNotice, Provider } from "../types";
 import { ErrorWithAction } from "../shared/components/ErrorWithAction";
 import { PrimaryActionPanel } from "../shared/components/PrimaryActionPanel";
 import { StatusBadge } from "../shared/components/StatusBadge";
@@ -12,7 +12,13 @@ type BootGateProps = {
   bootstrap: AppBootstrapState;
   forceOnboarding: boolean;
   initialMessages: ChatMessage[];
+  modelCapabilities: ModelCapabilities | null;
+  providers: Provider[];
+  providersBusy?: boolean;
+  providersNotice?: OperationNotice | null;
   busy?: boolean;
+  onProvidersRefresh: () => Promise<Provider[]>;
+  onModelCapabilitiesChanged: (capabilities: ModelCapabilities | null) => void;
   onRefresh: () => void;
   onOpenSettings: (tab?: SettingsTab) => void;
   onSetupModel: () => void;
@@ -24,7 +30,13 @@ export function BootGate({
   bootstrap,
   forceOnboarding,
   initialMessages,
+  modelCapabilities,
+  providers,
+  providersBusy = false,
+  providersNotice = null,
   busy = false,
+  onProvidersRefresh,
+  onModelCapabilitiesChanged,
   onRefresh,
   onOpenSettings,
   onSetupModel,
@@ -59,6 +71,12 @@ export function BootGate({
       <OnboardingFlow
         onSaved={onBootstrapChanged}
         onFirstChatDone={onFirstChatDone}
+        providers={providers}
+        providersBusy={providersBusy}
+        providersNotice={providersNotice}
+        onProvidersRefresh={onProvidersRefresh}
+        modelCapabilities={modelCapabilities}
+        onModelCapabilitiesChanged={onModelCapabilitiesChanged}
         initialProvider={bootstrap.runtime.provider}
         initialStep={reconfiguringExistingModel ? "api_key" : bootstrap.runtime.provider ? "choose" : undefined}
         completion={reconfiguringExistingModel ? "return_to_chat" : "first_chat"}
@@ -87,6 +105,7 @@ export function BootGate({
       <ChatHome
         bootstrap={bootstrap}
         initialMessages={initialMessages}
+        modelCapabilities={modelCapabilities}
         onSetupModel={onSetupModel}
         onRefresh={onRefresh}
         onOpenSettings={onOpenSettings}

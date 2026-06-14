@@ -725,18 +725,32 @@ def update_attachment_summary(
     summary_text: str = "",
     preview_data_url: str = "",
     reason_cn: str = "",
+    metadata_update: dict[str, Any] | None = None,
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any] | None:
     now = _now_iso()
     with _DB_LOCK, _connect(paths) as conn:
-        conn.execute(
-            """
-            UPDATE attachments
-            SET summary_status = ?, summary_text = ?, preview_data_url = ?, reason_cn = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (summary_status, summary_text, preview_data_url, reason_cn, now, attachment_id),
-        )
+        if metadata_update:
+            row = conn.execute("SELECT metadata FROM attachments WHERE id = ?", (attachment_id,)).fetchone()
+            existing_metadata = _json_loads(str(row["metadata"])) if row is not None else {}
+            next_metadata = {**existing_metadata, **metadata_update}
+            conn.execute(
+                """
+                UPDATE attachments
+                SET summary_status = ?, summary_text = ?, preview_data_url = ?, reason_cn = ?, updated_at = ?, metadata = ?
+                WHERE id = ?
+                """,
+                (summary_status, summary_text, preview_data_url, reason_cn, now, _json_dumps(next_metadata), attachment_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE attachments
+                SET summary_status = ?, summary_text = ?, preview_data_url = ?, reason_cn = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (summary_status, summary_text, preview_data_url, reason_cn, now, attachment_id),
+            )
         conn.commit()
         row = conn.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,)).fetchone()
         if row is None:
@@ -769,10 +783,12 @@ def get_attachment(
 
 def list_recent_attachments(
     *,
+    conversation_id: str = PERSONAL_CONVERSATION_ID,
     limit: int = 20,
     include_safe_path: bool = False,
     paths: RuntimePaths | None = None,
 ) -> list[dict[str, Any]]:
+    conversation_id = conversation_id.strip() or PERSONAL_CONVERSATION_ID
     limit = max(1, min(int(limit or 20), 100))
     with _DB_LOCK, _connect(paths) as conn:
         rows = conn.execute(
@@ -784,7 +800,7 @@ def list_recent_attachments(
             ORDER BY a.rowid DESC
             LIMIT ?
             """,
-            (PERSONAL_CONVERSATION_ID, limit),
+            (conversation_id, limit),
         ).fetchall()
     attachments = []
     for row in rows:
@@ -795,11 +811,26 @@ def list_recent_attachments(
     return attachments
 
 
-def find_recent_generated_attachment(
+def find_attachment_by_safe_path(
+    safe_path: str | Path,
     *,
+    include_safe_path: bool = False,
     paths: RuntimePaths | None = None,
 ) -> dict[str, Any] | None:
-    for attachment in list_recent_attachments(limit=40, paths=paths):
+    target = str(Path(safe_path))
+    with _DB_LOCK, _connect(paths) as conn:
+        row = conn.execute("SELECT * FROM attachments WHERE safe_path = ?", (target,)).fetchone()
+        if row is None:
+            return None
+        return _attachment_public_from_row(row, include_safe_path=include_safe_path)
+
+
+def find_recent_generated_attachment(
+    *,
+    conversation_id: str = PERSONAL_CONVERSATION_ID,
+    paths: RuntimePaths | None = None,
+) -> dict[str, Any] | None:
+    for attachment in list_recent_attachments(conversation_id=conversation_id, limit=40, paths=paths):
         metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
         source = str(metadata.get("source") or "")
         message_role = str(attachment.get("message_role") or "")

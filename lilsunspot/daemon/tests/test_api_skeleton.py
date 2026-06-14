@@ -114,7 +114,9 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     assert seen["settings"]["model"] == "llama3.2"
     assert seen["settings"]["hermes_provider"] == "custom"
     default_hint = client.get("/modes/current", headers=headers).json()["prompt"]["system_hint"]
-    assert seen["settings"]["system_hint"] == default_hint
+    assert seen["settings"]["system_hint"].startswith(default_hint)
+    assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
+    assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
 
 
 def test_weixin_private_text_uses_hermes_agent_loop(daemon_client, monkeypatch):

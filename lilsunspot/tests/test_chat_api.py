@@ -105,7 +105,9 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     assert _prompt_layer_ids(current_mode) == ["product_baseline", "mode_profile", "slider_overrides"]
     assert "普通中文" in default_hint
     assert "当前输出偏好" in default_hint
-    assert seen["settings"]["system_hint"] == default_hint
+    assert seen["settings"]["system_hint"].startswith(default_hint)
+    assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
+    assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
     assert seen["message"] == "你好"
 
 
@@ -135,7 +137,9 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     assert paths.data_dir == (tmp_path / "data").resolve()
     assert (paths.data_dir / "mode-profile.json").exists()
     assert not (paths.hermes_home / "mode-profile.json").exists()
-    assert seen["settings"]["system_hint"] == selected_hint
+    assert seen["settings"]["system_hint"].startswith(selected_hint)
+    assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
+    assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
     assert seen["message"] == "帮我整理下一步"
 
 

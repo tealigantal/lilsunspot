@@ -80,6 +80,7 @@ class PreparedDelivery:
             "delivered_count": self.delivered_count,
             "rejected_count": self.rejected_count,
             "reason_code": self.reason_code,
+            "reason_text": _reason_message(self.reason_code) if self.reason_code else "",
         }
 
 
@@ -133,6 +134,19 @@ def add_delivery_context_to_prompt(
     if not context:
         return prompt
     return f"{prompt.strip()}\n\n{context}".strip()
+
+
+def generated_file_delivery_prompt(deliverable_dir: Path) -> str:
+    return "\n".join(
+        [
+            "用户要求生成新文件、报告、表格、图片文件或把新文件发给当前聊天时，必须创建真实文件并交付。",
+            f"本轮唯一允许写入和交付新文件的目录：{deliverable_dir}",
+            "优先流程：直接调用 lilsunspot_create_deliverable_file(file_name, content_text?, content_base64?, mime_type?, caption?) 创建并交付单个文件。",
+            "兼容流程：如果已经用 Hermes write_file 写入上面目录内的真实文件，再调用 lilsunspot_deliver_file(path, caption?)。",
+            "已有附件返还只使用 lilsunspot_return_attachment(att_...)；新生成文件绝不能把任务名、todo id、文件名或 write_work 当作 attachment_id。",
+            "最终可见回复只写自然中文；不要在正文里显示本地路径、URL、MEDIA 标记或 lilsunspot-attachment 内部 URI。",
+        ]
+    )
 
 
 def prepare_assistant_delivery(
@@ -325,9 +339,12 @@ def _resolve_delivery_action(
     if action.get("ok") is False:
         return None, str(action.get("reason_code") or "delivery_action_failed")
     attachment_id = str(action.get("attachment_id") or "").strip()
-    if not attachment_id:
-        return None, "invalid_delivery_action"
-    return _resolve_attachment_ref(attachment_id, conversation_id=conversation_id, paths=paths)
+    if attachment_id:
+        return _resolve_attachment_ref(attachment_id, conversation_id=conversation_id, paths=paths)
+    safe_path = str(action.get("safe_path") or "").strip()
+    if safe_path:
+        return _resolve_generated_delivery_path(safe_path, conversation_id=conversation_id, paths=paths)
+    return None, "invalid_delivery_action"
 
 
 def _media_kind_from_action(action: dict[str, Any], path: str) -> str:
@@ -377,6 +394,36 @@ def _resolve_media_path(
     if _looks_like_stored_attachment_path(resolved, paths) and stored_attachment is None:
         return None, "missing_attachment"
     return str(resolved), ""
+
+
+def _resolve_generated_delivery_path(
+    media_path: str,
+    *,
+    conversation_id: str,
+    paths: RuntimePaths,
+) -> tuple[str | None, str]:
+    try:
+        resolved = assert_safe_attachment_path(media_path, paths)
+    except Exception:
+        return None, "unsafe_path"
+    root = (
+        paths.hermes_home
+        / "cache"
+        / "documents"
+        / _safe_delivery_path_part(conversation_id or conversations.PERSONAL_CONVERSATION_ID)
+    ).resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except Exception:
+        return None, "cross_conversation"
+    if not resolved.is_file():
+        return None, "missing_file"
+    return str(resolved), ""
+
+
+def _safe_delivery_path_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._-")
+    return cleaned[:80] or "conversation"
 
 
 def _stored_attachment_for_path(path: Path, paths: RuntimePaths) -> dict[str, Any] | None:
@@ -438,6 +485,15 @@ def _delivery_status(delivered_count: int, rejected_count: int) -> str:
 def _reason_message(reason_code: str) -> str:
     return {
         "unsafe_path": "这个文件不在小黑子的安全附件目录里，不能直接返还。",
+        "missing_file": "没有找到要发送的文件。",
+        "empty_file": "生成的文件是空的，已拒绝发送。",
+        "file_too_large": "生成的文件超过 25 MB，暂时不能发送。",
+        "invalid_file_name": "文件名不安全，已拒绝生成。",
+        "missing_file_content": "没有收到要写入文件的内容。",
+        "ambiguous_file_content": "文件内容只能使用文本或 base64 其中一种。",
+        "invalid_base64": "文件内容不是有效的 base64。",
+        "file_write_failed": "文件写入失败。",
+        "missing_file_path": "没有收到要发送的文件路径。",
         "missing_attachment": "没有找到要返还的附件。",
         "cross_conversation": "这个附件属于另一个对话，不能在当前对话里返还。",
         "adapter_unavailable": "当前发送通道不可用。",
@@ -445,6 +501,6 @@ def _reason_message(reason_code: str) -> str:
         "invalid_delivery_output": "附件返还需要走小黑子的结构化工具，不能把内部附件链接写在正文里。",
         "invalid_delivery_action": "附件返还动作格式不正确。",
         "delivery_action_failed": "附件返还动作没有成功。",
-        "invalid_attachment_id": "附件编号不正确。",
+        "invalid_attachment_id": "附件编号不正确。已有附件必须使用 att_ 开头的真实附件编号；新生成文件需要先创建文件再交付。",
         "no_active_turn": "当前没有可用的附件返还上下文。",
     }.get(reason_code, "附件暂时不能返还。")

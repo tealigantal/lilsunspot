@@ -1,5 +1,29 @@
 # Agent Memory
 
+## 2026-06-16 - generated file delivery acceptance recheck
+
+- Task: rerun acceptance-level validation for generated file/image delivery and the fresh setup.exe.
+- Files touched: this memory file only after validation.
+- Decision/result: no product code changes were needed during acceptance. The NSIS build script moved the previous installer into `stale/`, generated a new current setup.exe, and the installed-app smoke used that setup.exe to install into an isolated temp app directory, launch repository-external `Lilsunspot.exe`, verify the packaged sidecar, and uninstall.
+- Validation: focused conversation sync pytest 50 passed, focused agent/compat pytest 7 passed, `scripts/check.ps1` passed with daemon 124 passed plus secret guard and desktop build, `python scripts/guard_no_secrets.py` passed, `git diff --check` passed, `npm run tauri:build --prefix lilsunspot/desktop` produced fresh NSIS `Lilsunspot_0.1.0_x64-setup.exe` at 56,660,042 bytes with timestamp 2026-06-16 03:50:41 +08:00, and `scripts/smoke_lilsunspot_installed_app.ps1` passed against that installer.
+- Remaining risk: this acceptance still did not perform a live Weixin scan/send or a real installed-app LLM generated-file chat with a provider key.
+
+## 2026-06-16 - generated file delivery recheck
+
+- Task: rerun validation for the generated file/image delivery tool chain and confirm the current NSIS installer is fresh.
+- Files touched: this memory file only after validation.
+- Decision/result: no product code changes were needed during the recheck. The local NSIS build script moved the previous installer into `stale/` and generated a new current `Lilsunspot_0.1.0_x64-setup.exe`.
+- Validation: focused conversation sync pytest 50 passed, `scripts/check.ps1` passed with daemon 124 passed plus secret guard and desktop build, `python scripts/guard_no_secrets.py` passed, `git diff --check` passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced a fresh setup.exe at 56,659,946 bytes, timestamp 2026-06-16 03:43:12 +08:00.
+- Remaining risk: this recheck did not perform a live Weixin scan/send or installed-app live LLM file-generation chat.
+
+## 2026-06-16 - generated file delivery tool chain
+
+- Task: implement product-layer generation and delivery for new files/images, not just returning existing `att_...` attachments.
+- Files touched: `lilsunspot/daemon/agent_runner.py`, `capabilities.py`, `delivery_actions.py`, `delivery_tools.py`, `media_delivery.py`, `test_conversation_sync.py`, `lilsunspot/desktop/src/features/chat/ChatTranscript.tsx`, and this memory file.
+- Decision/result: enabled Hermes `file` toolset for lilsunspot agent turns, scoped writes with `HERMES_WRITE_SAFE_ROOT` to `hermes_home/cache/documents/<conversation_id>/<turn_id>/`, and added product tools `lilsunspot_deliver_file` plus `lilsunspot_create_deliverable_file`. Backend turn results keep safe paths only internally; model-visible tool JSON and desktop messages stay path-free. Desktop registers generated files as assistant attachments, while Weixin same-route delivery continues through `send_image_file` or `send_document`.
+- Validation: focused conversation sync pytest 50 passed, capabilities pytest 11 passed, agent runner pytest 3 passed, Hermes compatibility pytest 4 passed, product features pytest 7 passed, `scripts/check.ps1` passed with daemon 124 passed plus secret guard and desktop build, `python scripts/guard_no_secrets.py` passed, `git diff --check` passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced fresh NSIS `Lilsunspot_0.1.0_x64-setup.exe` at 56,659,534 bytes, timestamp 2026-06-16 03:33:50 +08:00.
+- Remaining risk: Weixin generated-file sending is fake-adapter tested only; no live Weixin scan/send was performed. The full Hermes `write_file` implementation still depends on the upstream shell backend on Windows, so the reliable local generation path is the new product `lilsunspot_create_deliverable_file` tool.
+
 ## 2026-06-16 - installer overwrite locked sidecar dll fix
 
 - Task: diagnose the NSIS overwrite error where `VCRUNTIME140.dll` under the installed `lilsunspotd` sidecar directory could not be written during setup.

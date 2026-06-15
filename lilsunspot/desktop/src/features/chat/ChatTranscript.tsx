@@ -100,7 +100,8 @@ function deliveryStatusText(metadata: Record<string, unknown> | undefined) {
     return `已返还 ${deliveredCount} 个附件，${rejectedCount} 个附件未能返还。`;
   }
   if (status === "rejected") {
-    return "附件没有返还成功。";
+    const reasonText = String(value.reason_text || "");
+    return reasonText || "附件没有返还成功。";
   }
   return "";
 }

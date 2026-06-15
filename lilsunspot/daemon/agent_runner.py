@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +13,15 @@ from . import provider_client as provider_http
 from .capabilities import capability_prompt_snapshot, enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
-from .delivery_actions import delivery_turn_context
+from .delivery_actions import deliverable_dir_for_turn, delivery_turn_context
 from .delivery_tools import LILSUNSPOT_DELIVERY_TOOLSET, register_delivery_tools
+from .media_delivery import generated_file_delivery_prompt
 
 
 logger = logging.getLogger(__name__)
 AGENT_ENGINE = "hermes_agent_loop"
 _IMPORT_LOCK = threading.Lock()
+_AGENT_TURN_LOCK = threading.Lock()
 
 
 def _ensure_hermes_home(paths: RuntimePaths) -> None:
@@ -95,9 +98,24 @@ def _fallback_history_from_lilsunspot(
 def _enabled_toolsets_for_lilsunspot_agent(paths: RuntimePaths) -> list[str]:
     register_delivery_tools()
     toolsets = list(enabled_toolsets_for_agent(paths))
+    if "file" not in toolsets:
+        toolsets.append("file")
     if LILSUNSPOT_DELIVERY_TOOLSET not in toolsets:
         toolsets.append(LILSUNSPOT_DELIVERY_TOOLSET)
     return toolsets
+
+
+@contextmanager
+def _temporary_env(name: str, value: str) -> Any:
+    previous = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
 
 
 def _approval_notify_callback(session_id: str):
@@ -194,39 +212,53 @@ def _run_agent_turn(
     approval_token = set_current_session_key(session_id)
     register_gateway_notify(session_id, _approval_notify_callback(session_id))
     try:
-        with delivery_turn_context(
-            conversation_id=conversation_id,
-            source=platform_name,
-            route=route,
-            paths=paths,
-        ) as delivery_context:
-            agent = AIAgent(
-                model=settings["model"],
-                provider=settings["hermes_provider"],
-                base_url=settings["base_url"],
-                api_key=settings["api_key"],
-                enabled_toolsets=_enabled_toolsets_for_lilsunspot_agent(paths),
-                fallback_model=fallback_chain_for_agent(paths),
-                quiet_mode=True,
-                verbose_logging=False,
-                session_id=session_id,
-                session_db=session_db,
-                platform=platform_name,
-                user_id=str((route or {}).get("user_id") or ""),
-                chat_id=conversation_id,
-                chat_name=str(conversation.get("title") or ""),
-                chat_type=str((route or {}).get("chat_type") or ""),
-                gateway_session_key=session_id,
-                skip_context_files=True,
-                skip_memory=False,
-                ephemeral_system_prompt=str(settings.get("system_hint") or ""),
+        turn_id = current_message_id or f"turn_{session_id}"
+        deliverable_dir = deliverable_dir_for_turn(paths, conversation_id, turn_id)
+        deliverable_dir.mkdir(parents=True, exist_ok=True)
+        system_prompt = "\n\n".join(
+            part
+            for part in (
+                str(settings.get("system_hint") or "").strip(),
+                generated_file_delivery_prompt(deliverable_dir),
             )
-            result = agent.run_conversation(
-                user_message=message,
-                conversation_history=history,
-                task_id=session_id,
-            )
-            delivery_actions = delivery_context.actions_for_result()
+            if part
+        )
+        with _AGENT_TURN_LOCK:
+            with _temporary_env("HERMES_WRITE_SAFE_ROOT", str(deliverable_dir)):
+                with delivery_turn_context(
+                    conversation_id=conversation_id,
+                    source=platform_name,
+                    route=route,
+                    paths=paths,
+                    deliverable_dir=deliverable_dir,
+                ) as delivery_context:
+                    agent = AIAgent(
+                        model=settings["model"],
+                        provider=settings["hermes_provider"],
+                        base_url=settings["base_url"],
+                        api_key=settings["api_key"],
+                        enabled_toolsets=_enabled_toolsets_for_lilsunspot_agent(paths),
+                        fallback_model=fallback_chain_for_agent(paths),
+                        quiet_mode=True,
+                        verbose_logging=False,
+                        session_id=session_id,
+                        session_db=session_db,
+                        platform=platform_name,
+                        user_id=str((route or {}).get("user_id") or ""),
+                        chat_id=conversation_id,
+                        chat_name=str(conversation.get("title") or ""),
+                        chat_type=str((route or {}).get("chat_type") or ""),
+                        gateway_session_key=session_id,
+                        skip_context_files=True,
+                        skip_memory=False,
+                        ephemeral_system_prompt=system_prompt,
+                    )
+                    result = agent.run_conversation(
+                        user_message=message,
+                        conversation_history=history,
+                        task_id=session_id,
+                    )
+                    delivery_actions = delivery_context.actions_for_result()
     finally:
         unregister_gateway_notify(session_id)
         reset_current_session_key(approval_token)

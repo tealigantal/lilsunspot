@@ -16,6 +16,7 @@ from .gateway import weixin_status
 from .hermes_runtime import read_hermes_config
 from .providers import provider_by_id
 from .runtime_discovery import read_runtime_descriptor
+from .upstream_audit import safe_upstream_capability_audit
 
 
 DEFAULT_CAPABILITIES = [
@@ -517,29 +518,47 @@ def _changed_files_from_report(text: str) -> int | None:
     return total if found_category_count else None
 
 
+def _list_value_after(text: str, prefix: str) -> list[str]:
+    for line in text.splitlines():
+        if not line.startswith(prefix):
+            continue
+        raw = line[len(prefix) :].strip()
+        if not raw or raw.lower() == "none":
+            return []
+        return [item.strip().strip("`") for item in raw.split(",") if item.strip().strip("`")]
+    return []
+
+
+def _empty_upstream_status(summary: str, audit: dict[str, Any] | None = None) -> dict[str, Any]:
+    capability_audit = audit or {}
+    return {
+        "available": bool(capability_audit.get("available")),
+        "latest_report": "",
+        "generated_at": "",
+        "summary": summary,
+        "commits_since_base": None,
+        "changed_files": None,
+        "working_tree_dirty": capability_audit.get("working_tree_dirty"),
+        "latest_upstream": str(capability_audit.get("latest_commit") or ""),
+        "recorded_base": str(capability_audit.get("recorded_base") or ""),
+        "missing_toolsets": list(capability_audit.get("missing_toolsets") or []),
+        "missing_configurable_toolsets": list(capability_audit.get("missing_configurable_toolsets") or []),
+        "missing_default_config_keys": list(capability_audit.get("missing_default_config_keys") or []),
+        "missing_capability_mappings": list(capability_audit.get("missing_capability_mappings") or []),
+        "missing_config_mappings": list(capability_audit.get("missing_config_mappings") or []),
+        "sync_eligible": bool(capability_audit.get("sync_eligible")),
+        "capability_audit": capability_audit,
+    }
+
+
 def upstream_status() -> dict[str, Any]:
+    capability_audit = safe_upstream_capability_audit(_repo_root())
     reports_dir = _repo_root() / "lilsunspot" / "notes" / "upstream-sync-reports"
     if not reports_dir.exists():
-        return {
-            "available": False,
-            "latest_report": "",
-            "generated_at": "",
-            "summary": "还没有生成 Hermes upstream 检查报告。",
-            "commits_since_base": None,
-            "changed_files": None,
-            "working_tree_dirty": None,
-        }
+        return _empty_upstream_status("还没有生成 Hermes upstream 检查报告。", capability_audit)
     reports = sorted(reports_dir.glob("*.md"), key=lambda item: item.stat().st_mtime, reverse=True)
     if not reports:
-        return {
-            "available": False,
-            "latest_report": "",
-            "generated_at": "",
-            "summary": "还没有生成 Hermes upstream 检查报告。",
-            "commits_since_base": None,
-            "changed_files": None,
-            "working_tree_dirty": None,
-        }
+        return _empty_upstream_status("还没有生成 Hermes upstream 检查报告。", capability_audit)
     latest = reports[0]
     text = latest.read_text(encoding="utf-8", errors="replace")
 
@@ -557,6 +576,14 @@ def upstream_status() -> dict[str, Any]:
     summary = "已生成只读检查报告。"
     if commits is not None:
         summary = f"本地缓存 upstream 相对记录 base 有 {commits} 个提交待审计。"
+    report_latest = value_after("- Remote commit:")
+    report_recorded = value_after("- Recorded base:")
+    report_missing_toolsets = _list_value_after(text, "- Missing TOOLSETS in current worktree:")
+    report_missing_configurable = _list_value_after(text, "- Missing CONFIGURABLE_TOOLSETS in current worktree:")
+    report_missing_default_config = _list_value_after(text, "- Missing DEFAULT_CONFIG keys in current worktree:")
+    missing_toolsets = list(capability_audit.get("missing_toolsets") or report_missing_toolsets)
+    missing_configurable = list(capability_audit.get("missing_configurable_toolsets") or report_missing_configurable)
+    missing_default_config = list(capability_audit.get("missing_default_config_keys") or report_missing_default_config)
     return {
         "available": True,
         "latest_report": str(latest),
@@ -565,6 +592,15 @@ def upstream_status() -> dict[str, Any]:
         "commits_since_base": commits,
         "changed_files": changed_count,
         "working_tree_dirty": dirty,
+        "latest_upstream": str(capability_audit.get("latest_commit") or report_latest),
+        "recorded_base": str(capability_audit.get("recorded_base") or report_recorded),
+        "missing_toolsets": missing_toolsets,
+        "missing_configurable_toolsets": missing_configurable,
+        "missing_default_config_keys": missing_default_config,
+        "missing_capability_mappings": list(capability_audit.get("missing_capability_mappings") or sorted(set(missing_toolsets) | set(missing_configurable))),
+        "missing_config_mappings": list(capability_audit.get("missing_config_mappings") or missing_default_config),
+        "sync_eligible": bool(capability_audit.get("sync_eligible")) if capability_audit.get("available") else bool(dirty is False and commits),
+        "capability_audit": capability_audit,
     }
 
 

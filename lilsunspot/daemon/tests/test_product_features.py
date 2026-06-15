@@ -211,6 +211,14 @@ def test_upstream_status_sums_category_changed_files(daemon_client, tmp_path, mo
                 "| Other upstream | 12 |",
                 "| Tools | 3 |",
                 "",
+                "## Capability surface gaps",
+                "",
+                "- Missing TOOLSETS in current worktree: `context_engine`",
+                "- Missing CONFIGURABLE_TOOLSETS in current worktree: `context_engine`",
+                "- Missing /capabilities mappings: `context_engine`",
+                "- Missing DEFAULT_CONFIG keys in current worktree: `gateway`, `tools`, `paste_collapse_threshold`",
+                "- Missing DEFAULT_CONFIG capability mappings: `gateway`, `tools`, `paste_collapse_threshold`",
+                "",
                 "## Changed files sample",
                 "- `sample.py`",
             ]
@@ -225,6 +233,11 @@ def test_upstream_status_sums_category_changed_files(daemon_client, tmp_path, mo
     assert status["commits_since_base"] == 9
     assert status["changed_files"] == 15
     assert status["working_tree_dirty"] is True
+    assert status["missing_toolsets"] == ["context_engine"]
+    assert status["missing_configurable_toolsets"] == ["context_engine"]
+    assert status["missing_capability_mappings"] == ["context_engine"]
+    assert status["missing_default_config_keys"] == ["gateway", "tools", "paste_collapse_threshold"]
+    assert status["missing_config_mappings"] == ["gateway", "tools", "paste_collapse_threshold"]
 
 
 def test_conversation_search_finds_messages_and_attachments(daemon_client):

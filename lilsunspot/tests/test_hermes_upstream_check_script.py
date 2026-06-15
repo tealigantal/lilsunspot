@@ -35,6 +35,11 @@ def test_hermes_upstream_check_uses_product_upstream_metadata_and_reports():
         'Messaging gateway',
         'Dashboard/TUI',
         'Packaging/deps',
+        'Capability surface gaps',
+        'lilsunspot.daemon.upstream_audit',
+        'Missing TOOLSETS in current worktree',
+        'Missing CONFIGURABLE_TOOLSETS in current worktree',
+        'Missing DEFAULT_CONFIG keys in current worktree',
     ]
 
     for fragment in required_fragments:

@@ -11,6 +11,7 @@ from .capability_graph import build_capability_graph
 from .chat_client import current_runtime_model
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .hermes_runtime import read_hermes_config, write_hermes_config
+from .upstream_audit import safe_upstream_capability_audit
 
 
 LILSUNSPOT_PLATFORM = "lilsunspot"
@@ -81,6 +82,7 @@ TOOLSET_NAMES_CN = {
     "skills": "技能",
     "todo": "任务清单",
     "memory": "长期记忆",
+    "context_engine": "上下文引擎",
     "session_search": "历史会话搜索",
     "clarify": "澄清问题",
     "delegation": "子代理委托",
@@ -286,8 +288,16 @@ def _capability(
     config_keys: list[str] | None = None,
     tools: list[str] | None = None,
     source: str = "lilsunspot",
+    source_of_truth: str = "",
     configurable: bool = True,
+    registered: bool = True,
+    configured: bool | None = None,
+    executable: bool | None = None,
+    verified: bool = False,
+    last_verified_at: str = "",
 ) -> dict[str, Any]:
+    configured_value = bool(enabled) if configured is None else bool(configured)
+    executable_value = bool(enabled and available) if executable is None else bool(executable)
     return {
         "id": capability_id,
         "category": category,
@@ -303,11 +313,17 @@ def _capability(
         "config_keys": config_keys or [],
         "tools": tools or [],
         "source": source,
+        "source_of_truth": source_of_truth or source,
         "configurable": bool(configurable),
+        "registered": bool(registered),
+        "configured": configured_value,
+        "executable": executable_value,
+        "verified": bool(verified),
+        "last_verified_at": last_verified_at,
     }
 
 
-def list_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
+def list_capabilities(paths: RuntimePaths | None = None, *, include_upstream_audit: bool = True) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
     repo_root = Path(__file__).resolve().parents[2]
     _prepare_hermes_runtime_env(runtime_paths)
@@ -433,13 +449,16 @@ def list_capabilities(paths: RuntimePaths | None = None) -> dict[str, Any]:
         )
 
     capabilities.extend(_runtime_capabilities(config, runtime_paths))
-    return {
+    result = {
         "capabilities": sorted(capabilities, key=lambda item: (item["category"], item["id"])),
         "platform": LILSUNSPOT_PLATFORM,
         "enabled_toolsets": sorted(enabled_toolsets),
         "default_toolsets": list(DEFAULT_LILSUNSPOT_TOOLSETS),
         "config_keys": MODEL_CONFIG_KEYS,
     }
+    if include_upstream_audit:
+        result["upstream_audit"] = safe_upstream_capability_audit(repo_root)
+    return result
 
 
 def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[dict[str, Any]]:
@@ -454,6 +473,8 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="high",
             config_keys=["lilsunspot.weixin"],
             source="lilsunspot_gateway",
+            source_of_truth="Hermes WeixinAdapter + lilsunspot gateway state",
+            verified=False,
         ),
         _capability(
             capability_id="integration.mcp_servers",
@@ -464,6 +485,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="high",
             config_keys=["mcp_servers", f"platform_toolsets.{LILSUNSPOT_PLATFORM}"],
             source="hermes_config",
+            source_of_truth="Hermes config.mcp_servers",
         ),
         _capability(
             capability_id="integration.plugins",
@@ -474,6 +496,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="high",
             config_keys=["plugins.enabled", "plugins.disabled"],
             source="hermes_config",
+            source_of_truth="Hermes plugin registry/config",
         ),
         _capability(
             capability_id="security.approvals",
@@ -484,6 +507,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="high",
             config_keys=["approvals", "command_allowlist"],
             source="hermes_approval",
+            source_of_truth="Hermes tools.approval + lilsunspot audit",
             configurable=False,
         ),
         _capability(
@@ -495,6 +519,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="low",
             config_keys=["audit.db"],
             source="lilsunspot",
+            source_of_truth="lilsunspot local audit.db",
             configurable=False,
         ),
         _capability(
@@ -506,6 +531,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="medium",
             config_keys=["profiles"],
             source="hermes_runtime",
+            source_of_truth="Hermes profiles/config",
         ),
         _capability(
             capability_id="runtime.sessions",
@@ -516,6 +542,7 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="medium",
             config_keys=["sessions"],
             source="hermes_runtime",
+            source_of_truth="Hermes SessionDB",
         ),
         _capability(
             capability_id="runtime.desktop_image_upload",
@@ -526,7 +553,81 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="medium",
             config_keys=["desktop.chat.attachments"],
             source="lilsunspot_desktop",
+            source_of_truth="lilsunspot desktop attachment registry",
             configurable=False,
+        ),
+        _capability(
+            capability_id="product.reminders.crud",
+            category="automation",
+            name="本地提醒记录",
+            description="当前只支持创建、暂停、完成和删除本地提醒记录；还没有调度执行器。",
+            enabled=True,
+            risk="medium",
+            config_keys=["product_reminders"],
+            source="lilsunspot_product",
+            source_of_truth="lilsunspot product_reminders table",
+            configurable=False,
+            verified=False,
+        ),
+        _capability(
+            capability_id="product.reminders.scheduler",
+            category="automation",
+            name="提醒调度执行",
+            description="提醒调度器尚未接入；不能把本地提醒 CRUD 展示成已会自动提醒。",
+            enabled=False,
+            available=False,
+            reason="not_implemented",
+            risk="medium",
+            config_keys=["product_reminders"],
+            source="lilsunspot_product",
+            source_of_truth="not implemented",
+            configurable=False,
+            configured=False,
+            executable=False,
+            verified=False,
+        ),
+        _capability(
+            capability_id="product.memory.crud",
+            category="memory",
+            name="本地记忆记录",
+            description="当前只支持本地记忆 CRUD；尚未作为小黑子产品记忆注入 Hermes prompt。",
+            enabled=True,
+            risk="medium",
+            config_keys=["product_memories"],
+            source="lilsunspot_product",
+            source_of_truth="lilsunspot product_memories table",
+            configurable=False,
+            verified=False,
+        ),
+        _capability(
+            capability_id="product.memory.prompt_injection",
+            category="memory",
+            name="产品记忆注入",
+            description="小黑子产品层记忆尚未接入 Hermes prompt；不能展示为真实长期记忆已生效。",
+            enabled=False,
+            available=False,
+            reason="not_implemented",
+            risk="medium",
+            config_keys=["product_memories", "memory"],
+            source="lilsunspot_product",
+            source_of_truth="not implemented",
+            configurable=False,
+            configured=False,
+            executable=False,
+            verified=False,
+        ),
+        _capability(
+            capability_id="product.capability_switches",
+            category="runtime",
+            name="产品能力开关",
+            description="产品开关只表达用户偏好和审批边界，不等于对应 Hermes tool 已真实执行。",
+            enabled=True,
+            risk="medium",
+            config_keys=["product_capabilities"],
+            source="lilsunspot_product",
+            source_of_truth="lilsunspot product_capabilities table",
+            configurable=False,
+            verified=False,
         ),
         _capability(
             capability_id="runtime.diagnostics",
@@ -537,6 +638,24 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="low",
             config_keys=["doctor", "diagnostics"],
             source="lilsunspot",
+            source_of_truth="lilsunspot doctor/diagnostics API",
+        ),
+        _capability(
+            capability_id="runtime.doctor_repair",
+            category="runtime",
+            name="自动修复",
+            description="/doctor/repair 仍是占位接口；当前不会修改系统配置，也不能展示成可执行修复。",
+            enabled=False,
+            available=False,
+            reason="not_implemented",
+            risk="high",
+            config_keys=["doctor.repair"],
+            source="lilsunspot",
+            source_of_truth="placeholder",
+            configurable=False,
+            configured=False,
+            executable=False,
+            verified=False,
         ),
         _capability(
             capability_id="runtime.upstream_sync",
@@ -547,6 +666,8 @@ def _runtime_capabilities(config: dict[str, Any], paths: RuntimePaths) -> list[d
             risk="medium",
             config_keys=["lilsunspot/UPSTREAM_COMMIT.txt", ".github/workflows/lilsunspot-upstream-sync.yml"],
             source="github_actions",
+            source_of_truth="GitHub Actions upstream sync workflow",
+            verified=False,
         ),
     ]
 
@@ -574,7 +695,7 @@ def capability_prompt_snapshot(paths: RuntimePaths | None = None) -> str:
     cached = _CAPABILITY_PROMPT_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    payload = list_capabilities(runtime_paths)
+    payload = list_capabilities(runtime_paths, include_upstream_audit=False)
     current_model = current_runtime_model(runtime_paths)
     provider = str(current_model.get("provider") or "未配置")
     model = str(current_model.get("model") or "未配置")
@@ -582,7 +703,7 @@ def capability_prompt_snapshot(paths: RuntimePaths | None = None) -> str:
     lines = [
         "当前 lilsunspot 能力状态快照（来源：Hermes toolset/model 配置与 /capabilities registry）。",
         f"当前主模型：provider={provider}；model={model}；configured={configured}。",
-        "回答能力问题时只依据这份快照：status=enabled 才能直接承诺可用；blocked/needs_config/unsupported/disabled 必须说明限制或下一步；不要根据模型通用知识自行承诺未启用能力。",
+        "回答能力问题时只依据这份快照：只有 executable=true 且 verified=true 的能力才能说已真实验证；registered/configured/executable 但 verified=false 只能说已接入或可尝试，不能承诺真实可用。",
     ]
     graph = build_capability_graph(runtime_paths)
     for node in graph.get("nodes", []):
@@ -599,7 +720,13 @@ def capability_prompt_snapshot(paths: RuntimePaths | None = None) -> str:
         status_text = " ".join(str(item.get("status_text") or "").split())
         deps = [str(dep) for dep in item.get("dependencies") or [] if str(dep).strip()]
         dep_text = f" 依赖：{'；'.join(deps[:3])}。" if deps else ""
-        lines.append(f"- {capability_id} / {name}: status={status}；{status_text}{dep_text}")
+        truth = (
+            f" registered={str(bool(item.get('registered'))).lower()}；"
+            f"configured={str(bool(item.get('configured'))).lower()}；"
+            f"executable={str(bool(item.get('executable'))).lower()}；"
+            f"verified={str(bool(item.get('verified'))).lower()}"
+        )
+        lines.append(f"- {capability_id} / {name}: status={status}；{truth}；{status_text}{dep_text}")
     snapshot = "\n".join(lines)
     _CAPABILITY_PROMPT_CACHE.clear()
     _CAPABILITY_PROMPT_CACHE[cache_key] = snapshot
@@ -607,7 +734,7 @@ def capability_prompt_snapshot(paths: RuntimePaths | None = None) -> str:
 
 
 def get_capability(capability_id: str, paths: RuntimePaths | None = None) -> dict[str, Any]:
-    for item in list_capabilities(paths)["capabilities"]:
+    for item in list_capabilities(paths, include_upstream_audit=False)["capabilities"]:
         if item["id"] == capability_id:
             return item
     raise CapabilityError("没有找到这个能力。")
@@ -660,17 +787,59 @@ def update_capability(
 
 def test_capability(capability_id: str, paths: RuntimePaths | None = None) -> dict[str, Any]:
     capability = get_capability(capability_id, paths)
+    layers = [
+        {
+            "id": "registered",
+            "label": "本地注册",
+            "ok": bool(capability.get("registered")),
+            "state": "registered" if capability.get("registered") else "missing",
+            "message": "本地能力入口已注册。" if capability.get("registered") else "本地能力入口缺失。",
+        },
+        {
+            "id": "configured",
+            "label": "配置状态",
+            "ok": bool(capability.get("configured")),
+            "state": "configured" if capability.get("configured") else "needs_config",
+            "message": "相关开关或配置已存在。" if capability.get("configured") else "还没有启用或配置这个能力。",
+        },
+        {
+            "id": "executable",
+            "label": "执行前检查",
+            "ok": bool(capability.get("executable")),
+            "state": "executable" if capability.get("executable") else str(capability.get("status") or "blocked"),
+            "message": "本地依赖检查通过。" if capability.get("executable") else str(capability.get("status_text") or "依赖或配置尚未满足。"),
+        },
+        {
+            "id": "verified",
+            "label": "真实 smoke",
+            "ok": bool(capability.get("verified")),
+            "state": "verified" if capability.get("verified") else "unverified",
+            "message": (
+                f"最近一次真实验证通过：{capability.get('last_verified_at')}"
+                if capability.get("verified")
+                else "还没有对应账号、环境或真实调用的 smoke 记录。"
+            ),
+        },
+    ]
+    ok = all(bool(layer["ok"]) for layer in layers)
+    if ok:
+        message = "能力已注册、已配置、可执行，并且有真实验证记录。"
+    elif capability.get("executable"):
+        message = "能力已通过本地注册和执行前检查，但还没有真实 smoke 记录，不能判定为已验证。"
+    else:
+        message = str(capability.get("status_text") or "能力当前不可执行。")
     if not capability["available"]:
-        return {
-            "ok": False,
-            "capability": capability,
-            "message": capability["status_text"],
-            "actions": capability["dependencies"] or ["检查依赖和账号配置"],
-        }
+        actions = capability["dependencies"] or ["检查依赖和账号配置"]
+    elif not capability.get("verified"):
+        actions = ["运行真实 smoke", "检查账号或外部环境"]
+    else:
+        actions = []
     return {
-        "ok": True,
+        "ok": ok,
         "capability": capability,
-        "message": "能力注册和本地配置检查通过。真实外部调用仍以对应服务状态为准。",
+        "message": message,
+        "layers": layers,
+        "actions": actions,
     }
 
 
@@ -693,7 +862,7 @@ def save_platform_toolsets(toolsets: list[str], paths: RuntimePaths | None = Non
 
 
 def get_platform_toolsets(paths: RuntimePaths | None = None) -> dict[str, Any]:
-    payload = list_capabilities(paths)
+    payload = list_capabilities(paths, include_upstream_audit=False)
     toolset_caps = [item for item in payload["capabilities"] if item["id"].startswith("toolset.")]
     return {
         "platform": LILSUNSPOT_PLATFORM,

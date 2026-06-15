@@ -1,0 +1,97 @@
+name: Lilsunspot Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      production:
+        description: "Block unless installer has a valid Authenticode signature"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      mirror_base_url:
+        description: "Public HTTPS base URL for latest.json artifact URLs"
+        required: true
+        default: "https://updates.lilsunspot.com/lilsunspot/windows"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release:
+    name: Build Windows updater artifacts
+    runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      LILSUNSPOT_RCLONE_CONFIG: ${{ secrets.LILSUNSPOT_RCLONE_CONFIG }}
+      LILSUNSPOT_RCLONE_REMOTE: ${{ vars.LILSUNSPOT_RCLONE_REMOTE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lilsunspot/desktop/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install desktop dependencies
+        shell: pwsh
+        run: npm ci --prefix lilsunspot/desktop
+
+      - name: Install uv
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check uv
+
+      - name: Build release artifacts
+        shell: pwsh
+        run: |
+          $args = @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "scripts/build_lilsunspot_release.ps1",
+            "-OutputDir",
+            "ignored/lilsunspot-release",
+            "-MirrorBaseUrl",
+            "${{ inputs.mirror_base_url }}"
+          )
+          if ("${{ inputs.production }}" -eq "true") {
+            $args += "-Production"
+          }
+          pwsh @args
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lilsunspot-windows-updater-artifacts
+          path: ignored/lilsunspot-release/*
+
+      - name: Upload to update mirror
+        if: env.LILSUNSPOT_RCLONE_CONFIG != '' && env.LILSUNSPOT_RCLONE_REMOTE != ''
+        shell: pwsh
+        run: |
+          choco install rclone -y --no-progress
+          $configPath = Join-Path $env:RUNNER_TEMP "rclone.conf"
+          Set-Content -LiteralPath $configPath -Value $env:LILSUNSPOT_RCLONE_CONFIG -NoNewline
+          rclone copy "ignored/lilsunspot-release" $env:LILSUNSPOT_RCLONE_REMOTE --config $configPath --checksum --verbose
+
+      - name: Mirror configuration required for production
+        if: inputs.production == 'true' && (env.LILSUNSPOT_RCLONE_CONFIG == '' || env.LILSUNSPOT_RCLONE_REMOTE == '')
+        shell: pwsh
+        run: throw "Production release requires LILSUNSPOT_RCLONE_CONFIG secret and LILSUNSPOT_RCLONE_REMOTE variable."

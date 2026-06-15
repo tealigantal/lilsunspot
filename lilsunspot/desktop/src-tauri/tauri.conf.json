@@ -16,6 +16,8 @@
         "title": "Lilsunspot 小黑子",
         "width": 960,
         "height": 680,
+        "minWidth": 960,
+        "minHeight": 680,
         "resizable": true
       }
     ],
@@ -26,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
     "resources": ["binaries/lilsunspotd"],
     "icon": ["icons/icon.ico"],
     "windows": {
@@ -34,6 +37,15 @@
         "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "nsis/installer-hooks.nsh",
         "languages": ["SimpChinese", "English"]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdEOTdFMjIxNjdGMzFFNkUKUldSdUh2Tm5JZUtYZlloS2pIZjJwMXhxbmhiUGhGSDFnT0E2RStmRWl6R1orWUlzMEJPNjBWMFQK",
+      "endpoints": ["https://updates.lilsunspot.com/lilsunspot/windows/latest.json"],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -3,7 +3,8 @@ Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $DesktopDir = Join-Path $Root "lilsunspot\desktop"
-$SidecarPath = Join-Path $DesktopDir "src-tauri\binaries\lilsunspotd-x86_64-pc-windows-msvc.exe"
+$TauriConfigPath = Join-Path $DesktopDir "src-tauri\tauri.conf.json"
+$SidecarPath = Join-Path $DesktopDir "src-tauri\binaries\lilsunspotd\lilsunspotd.exe"
 $NsisDir = Join-Path $DesktopDir "src-tauri\target\release\bundle\nsis"
 
 function Assert-Command {
@@ -51,6 +52,12 @@ function Invoke-Native {
     }
 }
 
+function Test-UpdaterArtifactsEnabled {
+    $TauriConfigRaw = [System.IO.File]::ReadAllText($TauriConfigPath, [System.Text.Encoding]::UTF8)
+    $TauriConfig = $TauriConfigRaw | ConvertFrom-Json
+    return [bool] $TauriConfig.bundle.createUpdaterArtifacts
+}
+
 Push-Location $Root
 try {
     Assert-Command "git"
@@ -61,7 +68,14 @@ try {
     Assert-Path (Join-Path $DesktopDir "node_modules") "desktop dependencies"
 
     Invoke-Native "git diff check" "git" @("diff", "--check")
-    Invoke-Native "daemon tests" "python" @("-m", "pytest", "lilsunspot/daemon/tests")
+    Invoke-Native "daemon tests" "python" @(
+        "-m",
+        "pytest",
+        "lilsunspot/daemon/tests",
+        "--timeout-method=thread",
+        "--basetemp",
+        ".tmp-pytest-lilsunspot-daemon-release"
+    )
     Invoke-Native "product tests" "python" @("-m", "pytest", "lilsunspot/tests", "--timeout-method=thread", "--basetemp", ".tmp-pytest-lilsunspot")
     Invoke-Native "secret guard" "python" @("scripts/guard_no_secrets.py")
     Invoke-Native "desktop build" "npm" @("run", "build", "--prefix", $DesktopDir)
@@ -76,10 +90,20 @@ try {
     if (-not $Installer) {
         throw "NSIS installer not found in $NsisDir."
     }
+    $UpdaterSignature = "$($Installer.FullName).sig"
+    if ((Test-UpdaterArtifactsEnabled) -and -not (Test-Path -LiteralPath $UpdaterSignature)) {
+        throw "Updater signature not found for $($Installer.FullName)."
+    }
 
     Write-Host "Release check passed."
     Write-Host "Sidecar: $SidecarPath"
     Write-Host "Installer: $($Installer.FullName)"
+    if (Test-UpdaterArtifactsEnabled) {
+        Write-Host "Updater signature: $UpdaterSignature"
+    }
+    else {
+        Write-Host "Updater artifacts disabled for local release check."
+    }
 }
 finally {
     Pop-Location

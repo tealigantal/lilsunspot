@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from hermes_constants import reset_hermes_home_override, set_hermes_home_override
@@ -75,13 +76,97 @@ async def handle_inbound_weixin_event(event: Any) -> str | None:
 
     result = await handle_weixin_message_event(event)
     if result.get("ok") and isinstance(result.get("chat"), dict):
-        reply = str(result["chat"].get("reply") or "").strip()
+        chat = result["chat"]
+        reply = str(chat.get("visible_reply") or chat.get("reply") or "").strip()
+        media_items = _delivery_media_items(chat)
+        if media_items:
+            recipient = _recipient_from_event(event)
+            error_message = await _send_same_channel_delivery(_adapter, recipient, reply, media_items)
+            if error_message:
+                _record_weixin_delivery_failure(result, error_message)
+                return error_message
+            _last_reply_at = _iso_now()
+            return None
     else:
         reply = str(result.get("message") or "").strip()
     if reply:
         _last_reply_at = _iso_now()
         return reply
     return None
+
+
+def _recipient_from_event(event: Any) -> str:
+    source = getattr(event, "source", None)
+    return str(getattr(source, "chat_id", "") or getattr(event, "chat_id", "") or "").strip()
+
+
+async def _send_same_channel_delivery(adapter: Any, recipient: str, text: str, media_items: list[dict[str, str]]) -> str:
+    if adapter is None or not getattr(adapter, "is_connected", False):
+        return "微信还没有连接，暂时不能发送附件。"
+    if not recipient:
+        return "没有找到当前微信会话，暂时不能发送附件。"
+
+    if text:
+        result = await adapter.send(recipient, text)
+        if not getattr(result, "success", False):
+            return "微信文本发送失败。"
+
+    for item in media_items:
+        media_path = str(item.get("path") or "")
+        media_kind = str(item.get("media_kind") or "").lower()
+        if media_kind == "image":
+            result = await adapter.send_image_file(recipient, media_path)
+        else:
+            result = await adapter.send_document(recipient, media_path)
+        if not getattr(result, "success", False):
+            return "微信文件发送失败。"
+    return ""
+
+
+def _delivery_media_items(chat: dict[str, Any]) -> list[dict[str, str]]:
+    raw_items = chat.get("_delivery_media")
+    if isinstance(raw_items, list):
+        items: list[dict[str, str]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            if not path:
+                continue
+            media_kind = str(item.get("media_kind") or "").strip().lower()
+            items.append({"path": path, "media_kind": "image" if media_kind == "image" else "document"})
+        if items:
+            return items
+    fallback_paths = [str(item).strip() for item in (chat.get("_delivery_media_paths") or []) if str(item).strip()]
+    return [
+        {
+            "path": path,
+            "media_kind": "image" if Path(path).suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"} else "document",
+        }
+        for path in fallback_paths
+    ]
+
+
+def _record_weixin_delivery_failure(result: dict[str, Any], message: str) -> None:
+    assistant_message = result.get("assistant_message") if isinstance(result.get("assistant_message"), dict) else None
+    message_id = str((assistant_message or {}).get("id") or "").strip()
+    if not message_id:
+        return
+    try:
+        from . import conversations
+
+        conversations.update_message(
+            message_id,
+            metadata_patch={
+                "weixin_delivery": {
+                    "ok": False,
+                    "reason_code": "adapter_send_failed",
+                    "message": message,
+                }
+            },
+        )
+    except Exception:
+        pass
 
 
 async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any]:

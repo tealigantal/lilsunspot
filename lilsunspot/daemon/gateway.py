@@ -1098,6 +1098,7 @@ async def _handle_weixin_after_store(
             str(result.get("reply") or ""),
             conversation_id=conversation_id,
             paths=runtime_paths,
+            delivery_actions=result.get("delivery_actions") if isinstance(result.get("delivery_actions"), list) else [],
             include_outbound_media=True,
         )
         reply = _finish_weixin_reply(
@@ -1136,13 +1137,23 @@ async def _handle_weixin_after_store(
                 paths=runtime_paths,
             ) or reply
             prepared.outbound_text = prepared.visible_text
+            prepared.media_paths = []
+            prepared.media_items = []
         reply = conversations.get_message(reply_message_id, paths=runtime_paths) or reply
+        next_chat = {
+            **result,
+            "reply": prepared.visible_text,
+            "visible_reply": prepared.visible_text,
+            "_delivery_media": list(prepared.media_items),
+            "_delivery_media_paths": list(prepared.media_paths),
+        }
+        next_chat.pop("delivery_actions", None)
         return {
             "ok": True,
             "intent": intent,
             "message": "微信私聊回复已生成。",
             "assistant_message": reply,
-            "chat": {**result, "reply": prepared.outbound_text, "visible_reply": prepared.visible_text},
+            "chat": next_chat,
         }
 
     return {"ok": False, "intent": intent, "message": "这个微信命令暂时不能处理。"}

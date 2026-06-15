@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import lilsunspotIcon from "../assets/lilsunspot-icon.png";
+import { checkUpdate, dismissUpdate, downloadAndInstallUpdate, isDesktopRuntime } from "../api";
 import { SettingsDrawer, type SettingsTab } from "../features/settings/SettingsDrawer";
 import type { ChatMessage } from "../features/chat/ChatTranscript";
 import { modeName } from "../features/mode/ModeQuickPanel";
 import { useModeState } from "../features/mode/ModeState";
 import { displayProvider } from "../features/model/ProviderCard";
 import { WeixinSettings } from "../features/settings/WeixinSettings";
+import type { AppUpdateStatus } from "../types";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
 import { useModelServiceState } from "./useModelServiceState";
@@ -37,6 +39,9 @@ export function AppShell() {
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [firstChatMessages, setFirstChatMessages] = useState<ChatMessage[]>([]);
   const [devToken, setDevToken] = useState("");
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [updateNoticeHidden, setUpdateNoticeHidden] = useState(false);
+  const [updateNoticeMessage, setUpdateNoticeMessage] = useState("");
 
   async function refreshAndReturn() {
     setForceOnboarding(false);
@@ -80,6 +85,49 @@ export function AppShell() {
   function openSettings(tab: SettingsTab = "model") {
     setSettingsTab(tab);
     setSettingsOpen(true);
+  }
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) {
+      return;
+    }
+    let cancelled = false;
+    void checkUpdate().then((status) => {
+      if (!cancelled) {
+        setUpdateStatus(status);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function installUpdateFromNotice() {
+    setUpdateNoticeMessage("正在下载并安装更新。");
+    try {
+      const result = await downloadAndInstallUpdate();
+      setUpdateNoticeMessage(result.message);
+    } catch (error) {
+      setUpdateNoticeMessage(error instanceof Error ? error.message : "更新下载或安装失败。");
+    }
+  }
+
+  async function dismissUpdateFromNotice() {
+    const update = updateStatus?.update;
+    if (!update) {
+      return;
+    }
+    try {
+      await dismissUpdate(update.version);
+      setUpdateStatus({
+        state: "dismissed",
+        update,
+        message: "已忽略这个版本。"
+      });
+      setUpdateNoticeHidden(true);
+    } catch (error) {
+      setUpdateNoticeMessage(error instanceof Error ? error.message : "忽略版本失败。");
+    }
   }
 
   function renderActiveView() {
@@ -152,6 +200,11 @@ export function AppShell() {
           <div className="topBarActions">
             <span className="statusPill aqua">输出：{modeName(modeState.current?.current || "balanced")}</span>
             <span className={chatConfigured ? "statusPill green" : "statusPill warning"}>{connectionLabel}</span>
+            {updateStatus?.state === "available" && (
+              <button type="button" className="secondaryButton compactButton" onClick={() => openSettings("update")}>
+                有新版本
+              </button>
+            )}
             <button type="button" className="secondaryButton compactButton" onClick={() => openSettings("model")}>
               设置
             </button>
@@ -159,6 +212,30 @@ export function AppShell() {
         </header>
 
         <div className="consoleContent">
+          {updateStatus?.state === "available" && updateStatus.update && !updateNoticeHidden && (
+            <article className="updatePromptCard">
+              <div>
+                <strong>{updateStatus.update.critical ? "重要更新可用" : "发现新版小黑子"}</strong>
+                <span>
+                  {updateStatus.update.version}
+                  {updateStatus.update.published_at ? ` · ${updateStatus.update.published_at}` : ""}
+                </span>
+                {updateStatus.update.notes && <p>{updateStatus.update.notes}</p>}
+                {updateNoticeMessage && <p>{updateNoticeMessage}</p>}
+              </div>
+              <div className="actionRow">
+                <button type="button" onClick={() => void installUpdateFromNotice()}>
+                  下载并安装
+                </button>
+                <button type="button" className="secondaryButton" onClick={() => setUpdateNoticeHidden(true)}>
+                  稍后提醒
+                </button>
+                <button type="button" className="secondaryButton" onClick={() => void dismissUpdateFromNotice()}>
+                  忽略此版本
+                </button>
+              </div>
+            </article>
+          )}
           {showDevPanel && (
             <details className="devPanel">
               <summary>开发者模式：浏览器调试连接</summary>
@@ -199,6 +276,8 @@ export function AppShell() {
         onSetupModel={setupModel}
         onModelSaved={handleSaved}
         onLocalProviderReset={handleLocalProviderReset}
+        updateStatus={updateStatus}
+        onUpdateStatusChanged={setUpdateStatus}
         initialTab={settingsTab}
       />
     </main>

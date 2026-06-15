@@ -772,6 +772,7 @@ def _assistant_message_from_chat_result(
         str(chat_result.get("reply") or ""),
         conversation_id=conversation_id,
         paths=paths,
+        delivery_actions=chat_result.get("delivery_actions") if isinstance(chat_result.get("delivery_actions"), list) else [],
         include_outbound_media=False,
     )
     metadata = {
@@ -813,6 +814,7 @@ def _assistant_message_from_chat_result(
         ) or assistant_message
     assistant_message = conversations.get_message(assistant_message["id"], paths=paths) or assistant_message
     next_chat = {**chat_result, "reply": prepared.visible_text}
+    next_chat.pop("delivery_actions", None)
     return assistant_message, next_chat
 
 

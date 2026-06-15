@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppBootstrapRuntime, ModelCapabilities, OperationNotice, OperationState, Provider } from "../../types";
+import type { AppBootstrapRuntime, AppUpdateStatus, ModelCapabilities, OperationNotice, OperationState, Provider } from "../../types";
 import { ModelSettings } from "../model/ModelSettings";
+import { AppUpdateSettings } from "./AppUpdateSettings";
 import { CapabilitySettings } from "./CapabilitySettings";
 import { ControlCenterSettings } from "./ControlCenterSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { SafetySettings } from "./SafetySettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor" | "control";
+export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor" | "control" | "update";
 
 type SettingsDrawerProps = {
   open: boolean;
@@ -25,6 +26,8 @@ type SettingsDrawerProps = {
   onSetupModel: () => void;
   onModelSaved: () => Promise<void> | void;
   onLocalProviderReset: () => Promise<void> | void;
+  updateStatus: AppUpdateStatus | null;
+  onUpdateStatusChanged: (status: AppUpdateStatus) => void;
   initialTab?: SettingsTab;
 };
 
@@ -34,7 +37,8 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "weixin", label: "微信" },
   { id: "safety", label: "安全审批" },
   { id: "doctor", label: "诊断" },
-  { id: "control", label: "控制台" }
+  { id: "control", label: "控制台" },
+  { id: "update", label: "应用更新" }
 ];
 
 function imageStatus(modelCapabilities: ModelCapabilities | null) {
@@ -70,6 +74,8 @@ export function SettingsDrawer({
   onSetupModel,
   onModelSaved,
   onLocalProviderReset,
+  updateStatus,
+  onUpdateStatusChanged,
   initialTab = "model"
 }: SettingsDrawerProps) {
   const [active, setActive] = useState<SettingsTab>(initialTab);
@@ -106,7 +112,15 @@ export function SettingsDrawer({
     weixin: modelCapabilities?.supports_weixin ? "可配置" : "未连接",
     safety: "审批",
     doctor: "诊断",
-    control: "总览"
+    control: "总览",
+    update:
+      updateStatus?.state === "available"
+        ? "有新版"
+        : updateStatus?.state === "failed"
+          ? "检查失败"
+          : updateStatus?.state === "current"
+            ? "最新"
+            : "检查"
   };
 
   if (!open) {
@@ -162,6 +176,7 @@ export function SettingsDrawer({
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}
+          {active === "update" && <AppUpdateSettings status={updateStatus} onStatusChanged={onUpdateStatusChanged} />}
           {active === "control" && (
             <ControlCenterSettings
               modelCapabilities={modelCapabilities}

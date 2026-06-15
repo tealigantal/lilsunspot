@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     env, fs,
@@ -17,11 +17,13 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
+use tauri_plugin_updater::UpdaterExt;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8765;
 const TOKEN_FILE_NAME: &str = "runtime-token.json";
 const RUNTIME_FILE_NAME: &str = "daemon-runtime.json";
+const UPDATE_STATE_FILE_NAME: &str = "desktop-update-state.json";
 const WINDOWS_SIDECAR_NAME: &str = "lilsunspotd-x86_64-pc-windows-msvc.exe";
 const ATTACHMENT_DIR_NAME: &str = "attachments";
 const DAEMON_HTTP_DEFAULT_TIMEOUT_MS: u64 = 5_000;
@@ -63,6 +65,35 @@ struct DaemonHttpResponse {
 
 struct DaemonConnectGuard;
 
+#[derive(Serialize, Clone)]
+struct AppUpdateInfo {
+    version: String,
+    current_version: String,
+    published_at: String,
+    notes: String,
+    size: Option<u64>,
+    critical: bool,
+}
+
+#[derive(Serialize)]
+struct AppUpdateStatus {
+    state: String,
+    update: Option<AppUpdateInfo>,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct AppUpdateInstallResult {
+    ok: bool,
+    version: String,
+    message: String,
+}
+
+#[derive(Deserialize, Serialize, Default)]
+struct DesktopUpdateState {
+    dismissed_version: String,
+}
+
 impl DaemonConnectGuard {
     fn enter() -> Option<Self> {
         if DAEMON_CONNECTING.swap(true, Ordering::SeqCst) {
@@ -86,6 +117,101 @@ fn data_dir() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(value).join("Lilsunspot").join("data"));
     }
     Err("无法找到小黑子的本地数据目录。".to_string())
+}
+
+fn update_state_path(data_path: &Path) -> PathBuf {
+    data_path.join(UPDATE_STATE_FILE_NAME)
+}
+
+fn read_dismissed_update_version(data_path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(update_state_path(data_path)).ok()?;
+    let state = serde_json::from_str::<DesktopUpdateState>(&raw).ok()?;
+    let version = state.dismissed_version.trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version.to_string())
+    }
+}
+
+fn write_dismissed_update_version(data_path: &Path, version: &str) -> Result<(), String> {
+    fs::create_dir_all(data_path).map_err(|_| "无法保存更新提醒设置。".to_string())?;
+    let state = DesktopUpdateState {
+        dismissed_version: version.trim().to_string(),
+    };
+    let payload =
+        serde_json::to_string_pretty(&state).map_err(|_| "无法保存更新提醒设置。".to_string())?;
+    fs::write(update_state_path(data_path), payload)
+        .map_err(|_| "无法保存更新提醒设置。".to_string())
+}
+
+fn validate_update_version(version: &str) -> Result<String, String> {
+    let value = version.trim();
+    if value.is_empty()
+        || value.len() > 80
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | '+'))
+    {
+        return Err("更新版本号不正确。".to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn version_is_dismissed(data_path: &Path, version: &str) -> bool {
+    read_dismissed_update_version(data_path).as_deref() == Some(version)
+}
+
+fn raw_json_string(raw: &serde_json::Value, key: &str) -> String {
+    raw.get(key)
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+fn raw_json_bool(raw: &serde_json::Value, key: &str) -> bool {
+    raw.get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn raw_json_size(raw: &serde_json::Value) -> Option<u64> {
+    raw.get("size")
+        .and_then(|value| value.as_u64())
+        .or_else(|| {
+            raw.pointer("/platforms/windows-x86_64/size")
+                .and_then(|value| value.as_u64())
+        })
+        .or_else(|| {
+            raw.pointer("/platforms/windows-x86_64-nsis/size")
+                .and_then(|value| value.as_u64())
+        })
+}
+
+fn app_update_info(update: &tauri_plugin_updater::Update) -> AppUpdateInfo {
+    let raw_pub_date = raw_json_string(&update.raw_json, "pub_date");
+    let published_at = if raw_pub_date.is_empty() {
+        update.date.map(|value| value.to_string()).unwrap_or_default()
+    } else {
+        raw_pub_date
+    };
+    AppUpdateInfo {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        published_at,
+        notes: update.body.clone().unwrap_or_default(),
+        size: raw_json_size(&update.raw_json),
+        critical: raw_json_bool(&update.raw_json, "critical"),
+    }
+}
+
+fn failed_update_status(message: impl Into<String>) -> AppUpdateStatus {
+    AppUpdateStatus {
+        state: "failed".to_string(),
+        update: None,
+        message: message.into(),
+    }
 }
 
 fn endpoint_from_parts(host: &str, port: u16) -> Result<DaemonEndpoint, String> {
@@ -707,6 +833,75 @@ fn open_attachment(attachment_id: String) -> Result<bool, String> {
     Ok(true)
 }
 
+#[tauri::command]
+async fn check_update(app: AppHandle) -> AppUpdateStatus {
+    let data_path = match data_dir() {
+        Ok(path) => path,
+        Err(message) => return failed_update_status(message),
+    };
+    let updater = match app.updater() {
+        Ok(value) => value,
+        Err(_) => {
+            return failed_update_status("应用更新检查暂时不可用。");
+        }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let info = app_update_info(&update);
+            if version_is_dismissed(&data_path, &info.version) {
+                AppUpdateStatus {
+                    state: "dismissed".to_string(),
+                    update: Some(info),
+                    message: "这个版本已忽略。".to_string(),
+                }
+            } else {
+                AppUpdateStatus {
+                    state: "available".to_string(),
+                    update: Some(info),
+                    message: "发现新版小黑子。".to_string(),
+                }
+            }
+        }
+        Ok(None) => AppUpdateStatus {
+            state: "current".to_string(),
+            update: None,
+            message: "当前已经是最新版本。".to_string(),
+        },
+        Err(_) => failed_update_status("无法连接更新源，请稍后再试。"),
+    }
+}
+
+#[tauri::command]
+async fn download_and_install_update(app: AppHandle) -> Result<AppUpdateInstallResult, String> {
+    let updater = app
+        .updater()
+        .map_err(|_| "应用更新检查暂时不可用。".to_string())?;
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|_| "无法连接更新源，请稍后再试。".to_string())?
+    else {
+        return Ok(AppUpdateInstallResult {
+            ok: true,
+            version: "".to_string(),
+            message: "当前已经是最新版本。".to_string(),
+        });
+    };
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|_| "更新下载或安装失败，请稍后重试。".to_string())?;
+    app.restart()
+}
+
+#[tauri::command]
+fn dismiss_update_version(version: String) -> Result<(), String> {
+    let version = validate_update_version(&version)?;
+    let data_path = data_dir()?;
+    write_dismissed_update_version(&data_path, &version)
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -756,6 +951,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             setup_tray(app)?;
             Ok(())
         })
@@ -772,7 +969,10 @@ fn main() {
             discover_daemon,
             daemon_request,
             subscribe_events,
-            open_attachment
+            open_attachment,
+            check_update,
+            download_and_install_update,
+            dismiss_update_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running lilsunspot desktop");
@@ -869,5 +1069,33 @@ mod tests {
         let request = capture_request("DELETE", None);
         assert!(request.starts_with("DELETE /conversations/unit HTTP/1.1"));
         assert!(request.contains("X-Lilsunspot-Token: unit-token"));
+    }
+
+    #[test]
+    fn dismissed_update_version_uses_desktop_state_file() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let data_path = std::env::temp_dir().join(format!(
+            "lilsunspot-update-state-test-{}-{unique}",
+            std::process::id()
+        ));
+
+        assert_eq!(read_dismissed_update_version(&data_path), None);
+        write_dismissed_update_version(&data_path, "1.2.3").expect("write dismissed version");
+        assert_eq!(
+            read_dismissed_update_version(&data_path).as_deref(),
+            Some("1.2.3")
+        );
+        assert!(version_is_dismissed(&data_path, "1.2.3"));
+        assert!(!version_is_dismissed(&data_path, "1.2.4"));
+
+        let state_path = update_state_path(&data_path);
+        assert_eq!(
+            state_path.file_name().and_then(|value| value.to_str()),
+            Some(UPDATE_STATE_FILE_NAME)
+        );
+        let _ = fs::remove_dir_all(data_path);
     }
 }

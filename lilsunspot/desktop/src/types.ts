@@ -18,6 +18,36 @@ export type DaemonHttpResponse = {
   body: string;
 };
 
+export type AppUpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "current"
+  | "unavailable"
+  | "failed"
+  | "dismissed";
+
+export type AppUpdateInfo = {
+  version: string;
+  current_version: string;
+  published_at: string;
+  notes: string;
+  size?: number | null;
+  critical: boolean;
+};
+
+export type AppUpdateStatus = {
+  state: AppUpdateState;
+  update: AppUpdateInfo | null;
+  message: string;
+};
+
+export type AppUpdateInstallResult = {
+  ok: boolean;
+  version: string;
+  message: string;
+};
+
 export type HealthStatus = {
   ok: boolean;
   status: "ready" | string;

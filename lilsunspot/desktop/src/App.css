@@ -2063,6 +2063,45 @@ label {
   line-height: 24px;
 }
 
+.updatePromptCard,
+.updateCard {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(255, 213, 82, 0.28);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: rgba(255, 213, 82, 0.09);
+}
+
+.updatePromptCard {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.updatePromptCard strong,
+.updateCard h4 {
+  color: var(--ikun-text);
+}
+
+.updatePromptCard span,
+.updateCard span {
+  color: var(--ikun-yellow);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 18px;
+}
+
+.updatePromptCard p,
+.updateCard p,
+.updateNotes {
+  margin: 0;
+  color: var(--ikun-muted);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
 .controlPanelCard p,
 .productList p {
   font-size: 13px;
@@ -3292,7 +3331,7 @@ label {
 
   .topBarActions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
     width: 100%;
   }
 
@@ -3374,6 +3413,7 @@ label {
   .controlPanelGrid,
   .controlFormGrid,
   .controlFormGrid.single,
+  .updatePromptCard,
   .capabilitySwitchGrid,
   .visionModelGrid {
     grid-template-columns: 1fr;

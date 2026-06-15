@@ -1,5 +1,56 @@
 # Agent Memory
 
+## 2026-06-16 - attachment return installed-app screenshot verification
+
+- Task: complete screenshot-level verification for the attachment-return redesign and prepare the validated branch for PR.
+- Files touched: delivery product-layer code/tests, desktop Tauri config/build scripts, updater-release scripts/tests, desktop update UI files, `lilsunspot/desktop/src-tauri/tauri.conf.json`, and this memory file.
+- Decision/result: verified that existing attachment return is driven by the LLM calling `lilsunspot_return_attachment`, while the backend performs real attachment delivery through sanitized `assistant_message.attachments`. The visible assistant text came from the model; no `MEDIA:` or `lilsunspot-attachment://` text was accepted as a successful attachment return.
+- Decision/result: local updater artifacts remain disabled for default NSIS builds, so `setup.exe` can be rebuilt without a Tauri updater signing key. The desktop window now records a minimum configured size matching the designed desktop viewport.
+- Validation: live installed daemon chat succeeded with the stored local provider config; live desktop image upload/return produced one delivered assistant attachment and no internal URI leak; CDP screenshot verification captured the assistant return card at `ignored/visual-qa/screenshots/20260616-010548/dev-qa-assistant-return-card-1200x820.png`; fresh installed-app screenshot captured `ignored/visual-qa/screenshots/20260616-011642/installed-fresh-960x680.png`; the temporary QA conversation was deleted after screenshots.
+- Validation: focused pytest 20 passed, `scripts/check.ps1` passed with daemon 119 passed plus secret guard and desktop build, `python scripts/guard_no_secrets.py` passed, `git diff --check` passed, and `npm run tauri:build --prefix lilsunspot/desktop` produced `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe` at 56,646,965 bytes with no `.sig` or `latest.json`.
+- Remaining risk: Weixin was validated through fake-adapter tests only; no live Weixin scan/contact send was performed in this pass. Programmatic Win32 `SetWindowPos` can still force any size and is not used as the manual resize acceptance signal.
+
+## 2026-06-16 - local setup build isolated from updater artifacts
+
+- Task: disable updater artifacts for the default local NSIS build so current-code `setup.exe` does not require Tauri updater signing key.
+- Files touched: `lilsunspot/desktop/src-tauri/tauri.conf.json`, `scripts/build_lilsunspot_desktop_nsis.ps1`, `scripts/check_release.ps1`, updater/release static tests, and this memory file.
+- Decision/result: default Tauri config now sets `bundle.createUpdaterArtifacts=false`. The NSIS build script still moves stale installers out of the current output directory, but only requires `TAURI_SIGNING_PRIVATE_KEY` / `.sig` when updater artifacts are explicitly enabled. Release check now reports updater artifacts disabled instead of failing on missing `.sig`.
+- Validation: focused updater/release static pytest passed, secret guard passed, `git diff --check` passed, `npm run tauri:build --prefix lilsunspot/desktop` passed without updater key, and `scripts/check.ps1` passed with daemon 119 passed plus desktop build.
+- Resulting installer: fresh local setup exists at `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`, timestamp 2026-06-16 00:30:19 +08:00, size 56,646,075 bytes. No updater `.sig` is expected for this local build.
+
+## 2026-06-16 - stale setup artifact cleanup on failed NSIS build
+
+- Task: fix the unsafe state where a failed fresh `tauri:build` could leave an older `Lilsunspot_*_x64-setup.exe` in the NSIS output directory.
+- Files touched: `scripts/build_lilsunspot_desktop_nsis.ps1`, `lilsunspot/tests/test_lilsunspot_updater_release_plan.py`, and this memory file.
+- Decision/result: the NSIS build script now clears stale `Lilsunspot_*_x64-setup.exe` and `.sig` artifacts inside the repository output directory before checking updater signing env or starting Tauri. If signing env is missing, the build still fails, but there is no old installer left to mistake for a current deliverable.
+- Validation: ran `npm run tauri:build --prefix lilsunspot/desktop` with signing env cleared and confirmed the expected signing failure removed the old installer; `Test-Path` for `Lilsunspot_0.1.0_x64-setup.exe` returned false. Focused updater/release pytest passed with `--timeout-method=thread`; secret guard and `git diff --check` passed.
+- Remaining risk: no fresh setup.exe exists until `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PATH` is supplied and the installer build succeeds.
+
+## 2026-06-15 - attachment return tool-action redesign
+
+- Task: implement v2 attachment return redesign so existing附件返还 is a structured product-layer tool action, not model正文 `MEDIA:` / `lilsunspot-attachment://` parsing.
+- Files touched: `lilsunspot/daemon/delivery_actions.py`, `delivery_tools.py`, `agent_runner.py`, `media_delivery.py`, `app.py`, `gateway.py`, `turn_coalescer.py`, `weixin_runtime.py`, daemon test fixtures/tests, and this memory file.
+- Decision/result: added the internal `lilsunspot_delivery` toolset and `lilsunspot_return_attachment` handler with per-turn context, conversation/path validation, duplicate action handling, and redacted action output. Prompts now expose only structured attachment fields; desktop and Weixin收口 consume delivery actions; internal attachment URI output is stripped and recorded as `invalid_delivery_output` without返还成功. Generated safe local `MEDIA:<path>` files still use the existing Hermes-compatible path delivery.
+- Validation: focused conversation delivery tests passed, Hermes compatibility tests passed, `scripts/check.ps1` passed with daemon 119 passed plus secret guard and desktop web build, `python scripts/guard_no_secrets.py` passed, and `git diff --check` passed.
+- Remaining risk: fresh `npm run tauri:build --prefix lilsunspot/desktop` is blocked by the current updater-signing gate requiring `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PATH`; an older `Lilsunspot_0.1.0_x64-setup.exe` exists but was not rebuilt for this task.
+
+## 2026-06-15 - attachment return markdown URI parsing
+
+- Task: fix assistant attachment return when the model wraps `lilsunspot-attachment://` as a Markdown image/link, and ensure the Weixin same-channel path can return images.
+- Files touched: `lilsunspot/daemon/media_delivery.py`, `lilsunspot/daemon/tests/test_conversation_sync.py`, and this memory file.
+- Decision/result: extended the canonical backend delivery parser to accept Markdown image/link wrappers around `lilsunspot-attachment://att_*` and still route through the existing same-conversation safety validation, visible-text cleanup, assistant attachment-card registration, and Weixin outbound `MEDIA:<safe_path>` generation. No frontend fallback was added.
+- Validation: focused desktop attachment return and Weixin image return tests passed; `scripts/check.ps1` passed with daemon 115 passed, secret guard, and desktop build. Rebuilt NSIS with updater artifacts, silently installed it to `%LOCALAPPDATA%\Lilsunspot`, and installed-app smoke passed with an isolated data dir.
+- Remaining risk: manual verification should still confirm the returned image card renders in the real desktop conversation and the Weixin adapter sends the generated image through the live account. The local staging updater private key used only for rebuilding this installer was removed after the build.
+
+## 2026-06-15 - Tauri updater and Hermes sync release scaffolding
+
+- Task: implement the Hermes core sync and Tauri updater plan for the Windows product line.
+- Files touched: Tauri config/Cargo/Rust entry, desktop update API/types/settings/AppShell/CSS, `scripts/hermes_upstream_sync.ps1`, release/build scripts, release workflow, script/config tests, and this memory file.
+- Decision/result: added Tauri updater configuration with fixed manifest endpoint `https://updates.lilsunspot.com/lilsunspot/windows/latest.json`, NSIS updater artifacts, passive install mode, Rust commands for check/download-install/dismiss, local-only dismissed-version persistence, and a Chinese app update card in startup/settings. Added a dirty-tree-refusing maintainer sync wrapper that creates `codex/upstream-sync-YYYYMMDD`, generates reports, merges `upstream/main`, updates `lilsunspot/UPSTREAM_COMMIT.txt`, and reruns the upstream gap report.
+- Decision/result: added `scripts/build_lilsunspot_release.ps1` plus `.github/workflows/lilsunspot-release.yml` to produce `setup.exe`, `.sig`, SHA256, `latest.json`, and mirror-upload-ready artifacts. Production release is blocked unless Authenticode is valid; staging builds can proceed without Authenticode but still require Tauri updater signing key material.
+- Validation: focused updater/release static pytest passed, cargo check/test passed, desktop build passed, Tauri NSIS build passed and produced `Lilsunspot_0.1.0_x64-setup.exe` plus `.sig`, release script smoke produced `latest.json` and SHA256, secret guard passed, `git diff --check` passed, `scripts/check.ps1` passed, and `scripts/check_release.ps1` passed with updater signing env configured.
+- Remaining risk: production CDN/DNS/upload credentials and Windows Authenticode certificate signing are not configured in the repository; the committed updater pubkey is a staging key and must be replaced to match the CI private key secret before a public release. The temporary local staging private key used for validation was removed after the build. Installed-app update install/ restart flow still needs manual old-to-new version acceptance.
+
 ## 2026-06-15 - capability truth audit and upstream gap report
 
 - Task: implement the first Hermes capability真实性 slice from the new audit plan.

@@ -20,6 +20,8 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.chat_client as chat_client
     import lilsunspot.daemon.config_paths as config_paths
     import lilsunspot.daemon.conversations as conversations
+    import lilsunspot.daemon.delivery_actions as delivery_actions
+    import lilsunspot.daemon.delivery_tools as delivery_tools
     import lilsunspot.daemon.doctor as doctor
     import lilsunspot.daemon.diagnostics as diagnostics
     import lilsunspot.daemon.gateway as gateway
@@ -42,6 +44,8 @@ def daemon_client(tmp_path, monkeypatch):
     auth = importlib.reload(auth)
     audit = importlib.reload(audit)
     conversations = importlib.reload(conversations)
+    delivery_actions = importlib.reload(delivery_actions)
+    delivery_tools = importlib.reload(delivery_tools)
     agent_runner = importlib.reload(agent_runner)
     attachments = importlib.reload(attachments)
     capabilities = importlib.reload(capabilities)
@@ -79,6 +83,8 @@ def daemon_client(tmp_path, monkeypatch):
         client=client,
         config_paths=config_paths,
         conversations=conversations,
+        delivery_actions=delivery_actions,
+        delivery_tools=delivery_tools,
         headers=headers,
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,

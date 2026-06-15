@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import re
 import time
 from types import SimpleNamespace
@@ -243,6 +244,12 @@ def test_desktop_short_messages_coalesce_into_one_agent_turn(daemon_client, monk
     assert "2. 第二条" in seen_prompts[0]
     assert "3. 第三条" in seen_prompts[0]
 
+    _wait_until(
+        lambda: any(
+            item["role"] == "assistant" and item["text"] == "合并回复。"
+            for item in daemon_client.conversations.list_messages("personal")
+        )
+    )
     messages = daemon_client.conversations.list_messages("personal")
     assert [item["text"] for item in messages if item["role"] == "user"] == ["第一条", "第二条", "第三条"]
     assistant_messages = [item for item in messages if item["role"] == "assistant"]
@@ -1253,11 +1260,20 @@ def test_desktop_attachment_return_uses_assistant_attachment_card(daemon_client,
 
     async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
         seen_prompt["message"] = message
-        match = re.search(r"MEDIA:lilsunspot-attachment://att_[A-Za-z0-9_-]+", message)
+        match = re.search(r"attachment_id:\s*(?P<id>att_[A-Za-z0-9_-]+)", message)
         assert match is not None
         return {
             "ok": True,
-            "reply": f"给你。\n{match.group(0)}",
+            "reply": "给你。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_desktop_unit",
+                    "attachment_id": match.group("id"),
+                    "file_name": "desk.png",
+                    "media_kind": "image",
+                }
+            ],
             "engine": "hermes_agent_loop",
             "provider": "deepseek",
             "model": "deepseek-chat",
@@ -1297,15 +1313,102 @@ def test_desktop_attachment_return_uses_assistant_attachment_card(daemon_client,
 
     assert response.status_code == 200
     body = response.json()
-    assert "返还标记" in seen_prompt["message"]
+    assert "attachment_id:" in seen_prompt["message"]
+    assert "返还标记" not in seen_prompt["message"]
+    assert "MEDIA:" not in seen_prompt["message"]
+    assert "lilsunspot-attachment://" not in seen_prompt["message"]
     assert body["assistant_message"]["text"] == "给你。"
     assert "MEDIA:" not in body["assistant_message"]["text"]
+    assert "lilsunspot-attachment://" not in body["assistant_message"]["text"]
     assert body["assistant_message"]["metadata"]["delivery"]["status"] == "delivered"
     assert body["assistant_message"]["metadata"]["delivery"]["delivered_count"] == 1
     returned = body["assistant_message"]["attachments"][0]
     assert returned["file_name"] == "desk.png"
     assert returned["summary_status"] == "preview_only"
     assert "safe_path" not in returned
+
+
+def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    source_message = daemon_client.conversations.create_message(
+        conversation_id="personal",
+        source="desktop",
+        role="user",
+        text="上传文件",
+        paths=paths,
+    )
+    attachment = daemon_client.attachments.register_uploaded_attachments(
+        message_id=source_message["id"],
+        conversation_id="personal",
+        files=[{"file_name": "tool.txt", "mime_type": "text/plain", "data": b"hello"}],
+        paths=paths,
+    )[0]
+
+    enabled_toolsets = daemon_client.agent_runner._enabled_toolsets_for_lilsunspot_agent(paths)
+    assert "lilsunspot_delivery" in enabled_toolsets
+    assert "lilsunspot_delivery" not in daemon_client.capabilities.enabled_toolsets_for_agent(paths)
+
+    from model_tools import get_tool_definitions
+
+    tool_defs = get_tool_definitions(enabled_toolsets=["lilsunspot_delivery"], quiet_mode=True)
+    assert any(item["function"]["name"] == "lilsunspot_return_attachment" for item in tool_defs)
+
+    no_context = json.loads(daemon_client.delivery_tools.return_attachment_handler({"attachment_id": attachment["id"]}))
+    assert no_context["ok"] is False
+    assert no_context["reason_code"] == "no_active_turn"
+
+    with daemon_client.delivery_actions.delivery_turn_context(
+        conversation_id="personal",
+        source="lilsunspot",
+        route=None,
+        paths=paths,
+    ) as context:
+        first = json.loads(daemon_client.delivery_tools.return_attachment_handler({"attachment_id": attachment["id"]}))
+        duplicate = json.loads(daemon_client.delivery_tools.return_attachment_handler({"attachment_id": attachment["id"]}))
+        actions = context.actions_for_result()
+
+    assert first["ok"] is True
+    assert first["attachment_id"] == attachment["id"]
+    assert first["media_kind"] == "document"
+    assert duplicate["duplicate"] is True
+    assert len(actions) == 1
+    assert "safe_path" not in first
+
+    other = daemon_client.conversations.create_conversation(title="Other", paths=paths)
+    with daemon_client.delivery_actions.delivery_turn_context(
+        conversation_id=other["id"],
+        source="lilsunspot",
+        route=None,
+        paths=paths,
+    ):
+        cross = json.loads(daemon_client.delivery_tools.return_attachment_handler({"attachment_id": attachment["id"]}))
+    assert cross["ok"] is False
+    assert cross["reason_code"] == "cross_conversation"
+
+    unsafe_path = paths.data_dir / "unsafe-delivery.txt"
+    unsafe_path.write_text("unsafe", encoding="utf-8")
+    unsafe_attachment = daemon_client.conversations.create_attachment_record(
+        attachment_id="att_unsafe_delivery",
+        message_id=source_message["id"],
+        conversation_id="personal",
+        safe_path=unsafe_path,
+        file_name="unsafe-delivery.txt",
+        mime_type="text/plain",
+        size_bytes=unsafe_path.stat().st_size,
+        summary_status="ready",
+        paths=paths,
+    )
+    with daemon_client.delivery_actions.delivery_turn_context(
+        conversation_id="personal",
+        source="lilsunspot",
+        route=None,
+        paths=paths,
+    ):
+        unsafe = json.loads(
+            daemon_client.delivery_tools.return_attachment_handler({"attachment_id": unsafe_attachment["id"]})
+        )
+    assert unsafe["ok"] is False
+    assert unsafe["reason_code"] == "unsafe_path"
 
 
 def test_media_delivery_rejects_cross_conversation_attachment(daemon_client, monkeypatch):
@@ -1329,7 +1432,16 @@ def test_media_delivery_rejects_cross_conversation_attachment(daemon_client, mon
     async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
         return {
             "ok": True,
-            "reply": f"MEDIA:lilsunspot-attachment://{attachment['id']}",
+            "reply": "我试一下。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_cross_unit",
+                    "attachment_id": attachment["id"],
+                    "file_name": "a.txt",
+                    "media_kind": "document",
+                }
+            ],
             "engine": "hermes_agent_loop",
             "provider": "unit",
             "model": "unit-model",
@@ -1356,6 +1468,95 @@ def test_media_delivery_rejects_cross_conversation_attachment(daemon_client, mon
     assert "MEDIA:" not in assistant["text"]
     assert assistant["metadata"]["delivery"]["status"] == "rejected"
     assert assistant["metadata"]["delivery"]["reason_code"] == "cross_conversation"
+
+
+def test_media_delivery_fails_closed_on_internal_attachment_uri(daemon_client, monkeypatch):
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        match = re.search(r"attachment_id:\s*(?P<id>att_[A-Za-z0-9_-]+)", message)
+        assert match is not None
+        return {
+            "ok": True,
+            "reply": f"给你。\n![desk.png](lilsunspot-attachment://{match.group('id')})",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    async def fake_describe_image_data_url(*args, **kwargs):
+        return {
+            "ok": False,
+            "error_code": "image_not_supported",
+            "backend": "none",
+            "stage": "capability.unsupported",
+            "message": "图片已收到并可预览；当前模型不能识别图片内容。",
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.chat_client, "describe_image_data_url", fake_describe_image_data_url)
+    image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax5kNQAAAAASUVORK5CYII="
+
+    response = daemon_client.client.post(
+        "/conversations/personal/messages",
+        headers=daemon_client.headers,
+        json={
+            "message": "把这张图再发给我",
+            "attachments": [
+                {
+                    "file_name": "desk.png",
+                    "mime_type": "image/png",
+                    "data_base64": image_base64,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assistant = response.json()["assistant_message"]
+    assert assistant["attachments"] == []
+    assert "lilsunspot-attachment://" not in assistant["text"]
+    assert assistant["metadata"]["delivery"]["status"] == "rejected"
+    assert assistant["metadata"]["delivery"]["reason_code"] == "invalid_delivery_output"
+
+
+def test_generated_safe_media_path_still_registers_assistant_attachment(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    generated_dir = paths.hermes_home / "cache" / "documents"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = generated_dir / "report.txt"
+    generated_file.write_text("generated report", encoding="utf-8")
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        return {
+            "ok": True,
+            "reply": f"报告已生成。\nMEDIA:{generated_file}",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+
+    response = daemon_client.client.post(
+        "/chat/send",
+        headers=daemon_client.headers,
+        json={"message": "生成报告"},
+    )
+
+    assert response.status_code == 200
+    messages = daemon_client.client.get("/conversations/personal/messages", headers=daemon_client.headers).json()["messages"]
+    assistant = next(item for item in reversed(messages) if item["role"] == "assistant")
+    assert assistant["text"] == "报告已生成。"
+    assert assistant["metadata"]["delivery"]["status"] == "delivered"
+    assert assistant["attachments"][0]["file_name"] == "report.txt"
+    assert "safe_path" not in assistant["attachments"][0]
 
 
 def test_desktop_invalid_upload_does_not_create_message(daemon_client):
@@ -1652,7 +1853,7 @@ class FakeWeixinSendAdapter:
         return FakeSendResult()
 
 
-def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_client, monkeypatch):
+def test_weixin_same_channel_image_reply_uses_official_media_delivery(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     route = {"chat_id": "wx_user", "user_id": "wx_user", "chat_type": "dm"}
     conversation = daemon_client.conversations.create_weixin_conversation(route, title="微信私聊", paths=paths)
@@ -1666,7 +1867,7 @@ def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_cli
     attachment = daemon_client.attachments.register_uploaded_attachments(
         message_id=source_message["id"],
         conversation_id=conversation["id"],
-        files=[{"file_name": "wx.txt", "mime_type": "text/plain", "data": b"hello"}],
+        files=[{"file_name": "wx.png", "mime_type": "image/png", "data": b"\x89PNG\r\n\x1a\nunit-test-image"}],
         source="weixin",
         paths=paths,
     )[0]
@@ -1674,9 +1875,20 @@ def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_cli
 
     async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
         seen_prompts.append(message)
+        match = re.search(r"attachment_id:\s*(?P<id>att_[A-Za-z0-9_-]+)", message)
+        assert match is not None
         return {
             "ok": True,
-            "reply": f"好的。\nMEDIA:lilsunspot-attachment://{attachment['id']}",
+            "reply": "好的。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_weixin_unit",
+                    "attachment_id": match.group("id"),
+                    "file_name": "wx.png",
+                    "media_kind": "image",
+                }
+            ],
             "engine": "hermes_agent_loop",
             "provider": "unit",
             "model": "unit-model",
@@ -1686,11 +1898,11 @@ def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_cli
         }
 
     monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
-
-    import lilsunspot.daemon.gateway as gateway
+    fake_adapter = FakeWeixinSendAdapter()
+    monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
 
     result = asyncio.run(
-        gateway.handle_weixin_message_event(
+        daemon_client.weixin_runtime.handle_inbound_weixin_event(
             SimpleNamespace(
                 text="把刚才的文件发给我",
                 media_urls=[],
@@ -1698,21 +1910,88 @@ def test_weixin_same_channel_media_reply_uses_official_media_delivery(daemon_cli
                 message_id="wx_media_return",
                 source=SimpleNamespace(chat_id="wx_user", user_id="wx_user", chat_type="dm"),
             ),
-            paths,
         )
     )
 
-    assert result["ok"] is True
-    assert "返还标记" in seen_prompts[0]
-    assert result["chat"]["visible_reply"] == "好的。"
-    assert "MEDIA:" in result["chat"]["reply"]
-    assert "lilsunspot-attachment://" not in result["chat"]["reply"]
+    assert result is None
+    assert "attachment_id:" in seen_prompts[0]
+    assert "返还标记" not in seen_prompts[0]
+    assert "MEDIA:" not in seen_prompts[0]
+    assert "lilsunspot-attachment://" not in seen_prompts[0]
+    assert fake_adapter.calls[0] == ("send", "wx_user", "好的。")
+    assert fake_adapter.calls[1][0] == "image"
+    assert fake_adapter.calls[1][1] == "wx_user"
+    assert fake_adapter.calls[1][2].endswith(".png")
     messages = daemon_client.client.get(f"/conversations/{conversation['id']}/messages", headers=daemon_client.headers).json()["messages"]
     assistant = next(item for item in reversed(messages) if item["role"] == "assistant" and item["status"] == "sent")
     assert assistant["text"] == "好的。"
     assert "MEDIA:" not in assistant["text"]
+    assert "lilsunspot-attachment://" not in assistant["text"]
     assert assistant["metadata"]["delivery"]["status"] == "delivered"
-    assert assistant["attachments"][0]["file_name"] == "wx.txt"
+    assert assistant["attachments"][0]["file_name"] == "wx.png"
+
+
+def test_weixin_same_channel_document_reply_uses_send_document(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    route = {"chat_id": "wx_doc_user", "user_id": "wx_doc_user", "chat_type": "dm"}
+    conversation = daemon_client.conversations.create_weixin_conversation(route, title="微信文档", paths=paths)
+    source_message = daemon_client.conversations.create_message(
+        conversation_id=conversation["id"],
+        source="weixin",
+        role="user",
+        text="之前的文档",
+        paths=paths,
+    )
+    attachment = daemon_client.attachments.register_uploaded_attachments(
+        message_id=source_message["id"],
+        conversation_id=conversation["id"],
+        files=[{"file_name": "wx.txt", "mime_type": "text/plain", "data": b"hello"}],
+        source="weixin",
+        paths=paths,
+    )[0]
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        return {
+            "ok": True,
+            "reply": "给你。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_weixin_doc_unit",
+                    "attachment_id": attachment["id"],
+                    "file_name": "wx.txt",
+                    "media_kind": "document",
+                }
+            ],
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    fake_adapter = FakeWeixinSendAdapter()
+    monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
+
+    result = asyncio.run(
+        daemon_client.weixin_runtime.handle_inbound_weixin_event(
+            SimpleNamespace(
+                text="把刚才的文档发给我",
+                media_urls=[],
+                media_types=[],
+                message_id="wx_doc_return",
+                source=SimpleNamespace(chat_id="wx_doc_user", user_id="wx_doc_user", chat_type="dm"),
+            )
+        )
+    )
+
+    assert result is None
+    assert fake_adapter.calls[0] == ("send", "wx_doc_user", "给你。")
+    assert fake_adapter.calls[1][0] == "document"
+    assert fake_adapter.calls[1][1] == "wx_doc_user"
+    assert fake_adapter.calls[1][2].endswith(".txt")
 
 
 def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(daemon_client, monkeypatch):

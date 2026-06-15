@@ -12,6 +12,8 @@ from . import provider_client as provider_http
 from .capabilities import capability_prompt_snapshot, enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .delivery_actions import delivery_turn_context
+from .delivery_tools import LILSUNSPOT_DELIVERY_TOOLSET, register_delivery_tools
 
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,14 @@ def _fallback_history_from_lilsunspot(
         exclude_message_ids=exclude_message_ids,
         paths=paths,
     )
+
+
+def _enabled_toolsets_for_lilsunspot_agent(paths: RuntimePaths) -> list[str]:
+    register_delivery_tools()
+    toolsets = list(enabled_toolsets_for_agent(paths))
+    if LILSUNSPOT_DELIVERY_TOOLSET not in toolsets:
+        toolsets.append(LILSUNSPOT_DELIVERY_TOOLSET)
+    return toolsets
 
 
 def _approval_notify_callback(session_id: str):
@@ -184,32 +194,39 @@ def _run_agent_turn(
     approval_token = set_current_session_key(session_id)
     register_gateway_notify(session_id, _approval_notify_callback(session_id))
     try:
-        agent = AIAgent(
-            model=settings["model"],
-            provider=settings["hermes_provider"],
-            base_url=settings["base_url"],
-            api_key=settings["api_key"],
-            enabled_toolsets=enabled_toolsets_for_agent(paths),
-            fallback_model=fallback_chain_for_agent(paths),
-            quiet_mode=True,
-            verbose_logging=False,
-            session_id=session_id,
-            session_db=session_db,
-            platform=platform_name,
-            user_id=str((route or {}).get("user_id") or ""),
-            chat_id=conversation_id,
-            chat_name=str(conversation.get("title") or ""),
-            chat_type=str((route or {}).get("chat_type") or ""),
-            gateway_session_key=session_id,
-            skip_context_files=True,
-            skip_memory=False,
-            ephemeral_system_prompt=str(settings.get("system_hint") or ""),
-        )
-        result = agent.run_conversation(
-            user_message=message,
-            conversation_history=history,
-            task_id=session_id,
-        )
+        with delivery_turn_context(
+            conversation_id=conversation_id,
+            source=platform_name,
+            route=route,
+            paths=paths,
+        ) as delivery_context:
+            agent = AIAgent(
+                model=settings["model"],
+                provider=settings["hermes_provider"],
+                base_url=settings["base_url"],
+                api_key=settings["api_key"],
+                enabled_toolsets=_enabled_toolsets_for_lilsunspot_agent(paths),
+                fallback_model=fallback_chain_for_agent(paths),
+                quiet_mode=True,
+                verbose_logging=False,
+                session_id=session_id,
+                session_db=session_db,
+                platform=platform_name,
+                user_id=str((route or {}).get("user_id") or ""),
+                chat_id=conversation_id,
+                chat_name=str(conversation.get("title") or ""),
+                chat_type=str((route or {}).get("chat_type") or ""),
+                gateway_session_key=session_id,
+                skip_context_files=True,
+                skip_memory=False,
+                ephemeral_system_prompt=str(settings.get("system_hint") or ""),
+            )
+            result = agent.run_conversation(
+                user_message=message,
+                conversation_history=history,
+                task_id=session_id,
+            )
+            delivery_actions = delivery_context.actions_for_result()
     finally:
         unregister_gateway_notify(session_id)
         reset_current_session_key(approval_token)
@@ -230,6 +247,7 @@ def _run_agent_turn(
         "hermes_session_id": session_id,
         "api_calls": int((result or {}).get("api_calls") or 0),
         "messages": (result or {}).get("messages") if isinstance(result, dict) else [],
+        "delivery_actions": delivery_actions,
     }
 
 

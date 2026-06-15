@@ -24,13 +24,20 @@ def test_release_check_covers_release_artifacts():
 
     required_fragments = [
         'Invoke-Native "git diff check" "git" @("diff", "--check")',
-        'Invoke-Native "daemon tests" "python" @("-m", "pytest", "lilsunspot/daemon/tests")',
+        'Invoke-Native "daemon tests" "python" @(',
+        '"lilsunspot/daemon/tests"',
+        '"--timeout-method=thread"',
+        '".tmp-pytest-lilsunspot-daemon-release"',
         'Invoke-Native "product tests" "python" @("-m", "pytest", "lilsunspot/tests", "--timeout-method=thread", "--basetemp", ".tmp-pytest-lilsunspot")',
         'Invoke-Native "secret guard" "python" @("scripts/guard_no_secrets.py")',
         'Invoke-Native "daemon sidecar build" (Join-Path $Root "scripts\\build_lilsunspotd_sidecar.ps1") @()',
         'Invoke-Native "desktop NSIS build" "npm" @("run", "tauri:build", "--prefix", $DesktopDir)',
         'Assert-Path $SidecarPath "daemon sidecar"',
+        '$SidecarPath = Join-Path $DesktopDir "src-tauri\\binaries\\lilsunspotd\\lilsunspotd.exe"',
         'throw "NSIS installer not found in $NsisDir."',
+        "Test-UpdaterArtifactsEnabled",
+        'throw "Updater signature not found for $($Installer.FullName)."',
+        "Updater artifacts disabled for local release check.",
     ]
 
     for fragment in required_fragments:

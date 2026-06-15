@@ -308,6 +308,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
             str(chat_result.get("reply") or ""),
             conversation_id=batch.conversation_id,
             paths=batch.paths,
+            delivery_actions=chat_result.get("delivery_actions") if isinstance(chat_result.get("delivery_actions"), list) else [],
             include_outbound_media=bool(batch.route),
         )
         delivery_metadata = prepared.metadata()
@@ -351,12 +352,17 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
                 paths=batch.paths,
             ) or updated
             prepared.outbound_text = prepared.visible_text
+            prepared.media_paths = []
+            prepared.media_items = []
         updated = conversations.get_message(batch.assistant_message_id, paths=batch.paths) or updated
         next_chat = {
             **chat_result,
-            "reply": prepared.outbound_text if batch.route else prepared.visible_text,
+            "reply": prepared.visible_text,
             "visible_reply": prepared.visible_text,
+            "_delivery_media": list(prepared.media_items) if batch.route else [],
+            "_delivery_media_paths": list(prepared.media_paths) if batch.route else [],
         }
+        next_chat.pop("delivery_actions", None)
         _set_future_result(
             batch,
             {

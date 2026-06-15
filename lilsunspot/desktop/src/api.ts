@@ -1,6 +1,8 @@
 import type {
   AppState,
   AppBootstrapState,
+  AppUpdateInstallResult,
+  AppUpdateStatus,
   CapabilitiesResult,
   Capability,
   CapabilityGraph,
@@ -508,6 +510,47 @@ export async function openAttachment(attachmentId: string): Promise<boolean> {
     throw new Error("正式版会从本机安全目录打开附件。");
   }
   return invokeTauri<boolean>("open_attachment", { attachmentId });
+}
+
+export async function checkUpdate(): Promise<AppUpdateStatus> {
+  if (!isTauriRuntime()) {
+    return {
+      state: "unavailable",
+      update: null,
+      message: "正式桌面版会从小黑子的更新源检查版本。"
+    };
+  }
+  try {
+    return await invokeTauri<AppUpdateStatus>("check_update");
+  } catch (error) {
+    return {
+      state: "failed",
+      update: null,
+      message: humanizeError(error)
+    };
+  }
+}
+
+export async function downloadAndInstallUpdate(): Promise<AppUpdateInstallResult> {
+  if (!isTauriRuntime()) {
+    throw new Error("正式桌面版才能安装更新。");
+  }
+  try {
+    return await invokeTauri<AppUpdateInstallResult>("download_and_install_update");
+  } catch (error) {
+    throw new Error(humanizeError(error));
+  }
+}
+
+export async function dismissUpdate(version: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    await invokeTauri<void>("dismiss_update_version", { version });
+  } catch (error) {
+    throw new Error(humanizeError(error));
+  }
 }
 
 export async function getModes(): Promise<ModeProfile[]> {

@@ -539,7 +539,13 @@ export type Capability = {
   config_keys: string[];
   tools: string[];
   source: string;
+  source_of_truth: string;
   configurable: boolean;
+  registered: boolean;
+  configured: boolean;
+  executable: boolean;
+  verified: boolean;
+  last_verified_at: string;
 };
 
 export type CapabilitiesResult = {
@@ -548,12 +554,22 @@ export type CapabilitiesResult = {
   enabled_toolsets: string[];
   default_toolsets: string[];
   config_keys: string[];
+  upstream_audit?: Record<string, unknown>;
+};
+
+export type CapabilityTestLayer = {
+  id: string;
+  label: string;
+  ok: boolean;
+  state: string;
+  message: string;
 };
 
 export type CapabilityTestResult = {
   ok: boolean;
   capability: Capability;
   message: string;
+  layers?: CapabilityTestLayer[];
   actions?: string[];
 };
 

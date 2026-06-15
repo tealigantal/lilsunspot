@@ -157,6 +157,24 @@ function Add-ReportLine {
     }
 }
 
+function Format-StringList {
+    param(
+        [AllowNull()]
+        [object] $Value
+    )
+
+    if ($null -eq $Value) {
+        return "None"
+    }
+    $Items = @(@($Value) |
+        ForEach-Object { "$_".Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($Items.Count -eq 0) {
+        return "None"
+    }
+    return (($Items | ForEach-Object { '`' + $_ + '`' }) -join ", ")
+}
+
 Push-Location $Root
 try {
     Assert-Command "git"
@@ -214,6 +232,22 @@ try {
         $CategoryCounts[$Category] = [int] $CategoryCounts[$Category] + 1
     }
 
+    $CapabilityAudit = $null
+    $CapabilityAuditError = ""
+    try {
+        $AuditJson = @(& python "-m" "lilsunspot.daemon.upstream_audit" "--repo-root" $Root "--upstream-ref" $RemoteRef 2>&1)
+        $AuditExitCode = $LASTEXITCODE
+        if ($AuditExitCode -eq 0 -and $AuditJson.Count -gt 0) {
+            $CapabilityAudit = ($AuditJson -join [Environment]::NewLine) | ConvertFrom-Json
+        }
+        else {
+            $CapabilityAuditError = "python upstream audit failed. Exit code: $AuditExitCode. $($AuditJson -join ' ')"
+        }
+    }
+    catch {
+        $CapabilityAuditError = "$_"
+    }
+
     New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
     $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
     $ReportPath = Join-Path $ReportDir "$Timestamp.md"
@@ -250,6 +284,24 @@ try {
     Add-ReportLine $Lines "- Comparison base source: $ComparisonBaseSource"
     Add-ReportLine $Lines "- Upstream commits since comparison base: $CommitCount"
     Add-ReportLine $Lines ""
+
+    Add-ReportLine $Lines "## Capability surface gaps"
+    Add-ReportLine $Lines ""
+    if ($null -eq $CapabilityAudit) {
+        Add-ReportLine $Lines "- Capability audit unavailable: $CapabilityAuditError"
+    }
+    else {
+        Add-ReportLine $Lines "- Latest upstream commit: $($CapabilityAudit.latest_commit)"
+        Add-ReportLine $Lines "- Recorded base: $($CapabilityAudit.recorded_base)"
+        Add-ReportLine $Lines "- Sync eligible: $($CapabilityAudit.sync_eligible)"
+        Add-ReportLine $Lines "- Missing TOOLSETS in current worktree: $(Format-StringList $CapabilityAudit.missing_toolsets)"
+        Add-ReportLine $Lines "- Missing CONFIGURABLE_TOOLSETS in current worktree: $(Format-StringList $CapabilityAudit.missing_configurable_toolsets)"
+        Add-ReportLine $Lines "- Missing /capabilities mappings: $(Format-StringList $CapabilityAudit.missing_capability_mappings)"
+        Add-ReportLine $Lines "- Missing DEFAULT_CONFIG keys in current worktree: $(Format-StringList $CapabilityAudit.missing_default_config_keys)"
+        Add-ReportLine $Lines "- Missing DEFAULT_CONFIG capability mappings: $(Format-StringList $CapabilityAudit.missing_config_mappings)"
+    }
+    Add-ReportLine $Lines ""
+
     Add-ReportLine $Lines "## Change categories"
     Add-ReportLine $Lines ""
     Add-ReportLine $Lines "| Category | Changed files |"

@@ -13,6 +13,9 @@ def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_cl
     assert response.status_code == 200
     body = response.json()
     ids = {item["id"] for item in body["capabilities"]}
+    truth_fields = {"registered", "configured", "executable", "verified", "source_of_truth", "last_verified_at"}
+    for capability in body["capabilities"]:
+        assert truth_fields <= set(capability)
 
     from hermes_cli.tools_config import CONFIGURABLE_TOOLSETS
     from toolsets import TOOLSETS
@@ -28,21 +31,81 @@ def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_cl
     assert "integration.mcp_servers" in ids
     assert "security.audit" in ids
     assert "runtime.upstream_sync" in ids
+    assert "runtime.doctor_repair" in ids
+    assert "product.reminders.crud" in ids
+    assert "product.reminders.scheduler" in ids
+    assert "product.memory.crud" in ids
+    assert "product.memory.prompt_injection" in ids
+    assert "product.capability_switches" in ids
     assert body["platform"] == "lilsunspot"
+    upstream_audit = body["upstream_audit"]
+    assert "missing_toolsets" in upstream_audit
+    if upstream_audit["available"]:
+        assert "context_engine" in upstream_audit["missing_toolsets"]
+        assert "context_engine" in upstream_audit["missing_configurable_toolsets"]
     hermes_weixin = next(item for item in body["capabilities"] if item["id"] == "toolset.hermes-weixin")
     assert hermes_weixin["configurable"] is False
     vision = next(item for item in body["capabilities"] if item["id"] == "toolset.vision")
     assert vision["status"] == "blocked"
     assert any("Hermes vision backend" in item for item in vision["dependencies"])
     assert vision["enabled"] is True
+    assert vision["registered"] is True
+    assert vision["configured"] is True
+    assert vision["executable"] is False
+    assert vision["verified"] is False
     desktop_upload = next(item for item in body["capabilities"] if item["id"] == "runtime.desktop_image_upload")
     assert desktop_upload["status"] == "enabled"
     assert desktop_upload["available"] is True
+    assert desktop_upload["executable"] is True
+    assert desktop_upload["verified"] is False
+    doctor_repair = next(item for item in body["capabilities"] if item["id"] == "runtime.doctor_repair")
+    assert doctor_repair["registered"] is True
+    assert doctor_repair["configured"] is False
+    assert doctor_repair["executable"] is False
+    assert doctor_repair["verified"] is False
+    reminder_scheduler = next(item for item in body["capabilities"] if item["id"] == "product.reminders.scheduler")
+    assert reminder_scheduler["status"] == "disabled"
+    assert reminder_scheduler["verified"] is False
+    product_memory = next(item for item in body["capabilities"] if item["id"] == "product.memory.prompt_injection")
+    assert product_memory["status"] == "disabled"
+    assert product_memory["verified"] is False
 
     snapshot = daemon_client.capabilities.capability_prompt_snapshot(daemon_client.config_paths.get_runtime_paths())
     assert "当前 lilsunspot 能力状态快照" in snapshot
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in snapshot
+    assert "verified=false" in snapshot
     assert "toolset.vision / 图片理解" in snapshot
+
+
+def test_capability_test_returns_layered_truth_state(daemon_client):
+    response = daemon_client.client.post(
+        "/capabilities/runtime.doctor_repair/test",
+        headers=daemon_client.headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    layers = {item["id"]: item for item in body["layers"]}
+    assert layers["registered"]["ok"] is True
+    assert layers["configured"]["ok"] is False
+    assert layers["executable"]["ok"] is False
+    assert layers["verified"]["ok"] is False
+    assert "占位" in body["capability"]["description"]
+
+    desktop = daemon_client.client.post(
+        "/capabilities/runtime.desktop_image_upload/test",
+        headers=daemon_client.headers,
+    )
+    assert desktop.status_code == 200
+    desktop_body = desktop.json()
+    assert desktop_body["ok"] is False
+    desktop_layers = {item["id"]: item for item in desktop_body["layers"]}
+    assert desktop_layers["registered"]["ok"] is True
+    assert desktop_layers["configured"]["ok"] is True
+    assert desktop_layers["executable"]["ok"] is True
+    assert desktop_layers["verified"]["ok"] is False
+    assert "真实 smoke" in desktop_body["message"]
 
 
 def test_capability_toggle_writes_lilsunspot_platform_toolsets(daemon_client):

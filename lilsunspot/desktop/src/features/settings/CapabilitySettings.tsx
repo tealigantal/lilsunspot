@@ -5,7 +5,13 @@ import { StatusBadge } from "../../shared/components/StatusBadge";
 import { TechnicalDetails } from "../../shared/components/TechnicalDetails";
 
 function toneFor(capability: Capability): "ok" | "warning" | "danger" | "neutral" {
-  if (!capability.available || capability.status === "blocked") {
+  if (!capability.registered || !capability.available || capability.status === "blocked") {
+    return "danger";
+  }
+  if (capability.verified) {
+    return "ok";
+  }
+  if (capability.executable || capability.configured) {
     return "warning";
   }
   if (capability.risk === "high") {
@@ -28,8 +34,14 @@ function riskText(risk: string) {
 }
 
 function statusText(capability: Capability) {
-  if (capability.status === "enabled") {
-    return "已启用";
+  if (capability.verified) {
+    return "已验证";
+  }
+  if (capability.executable) {
+    return "未验证";
+  }
+  if (capability.configured) {
+    return "待就绪";
   }
   if (capability.status === "blocked") {
     return "被依赖阻断";
@@ -41,6 +53,22 @@ function statusText(capability: Capability) {
     return "不支持";
   }
   return "未启用";
+}
+
+function truthText(capability: Capability) {
+  if (capability.verified) {
+    return capability.last_verified_at ? `已验证 ${capability.last_verified_at}` : "已验证";
+  }
+  if (capability.executable) {
+    return "可执行，未 smoke";
+  }
+  if (capability.configured) {
+    return "已配置，未就绪";
+  }
+  if (capability.registered) {
+    return "已注册";
+  }
+  return "未注册";
 }
 
 function safeStringList(value: unknown): string[] {
@@ -171,7 +199,7 @@ export function CapabilitySettings({
         <button type="button" className="secondaryButton" onClick={() => void load()} disabled={Boolean(busyId)}>
           重新读取
         </button>
-        <span>高风险能力启用后仍需要安全审批，缺账号或缺依赖会显示为不可用。</span>
+        <span>只有显示已验证的能力才代表真实调用通过；未验证能力会保留限制说明。</span>
       </div>
       {modelCapabilities?.capability_graph?.nodes?.length ? (
         <div className="capabilityGraphStrip" aria-label="产品能力状态">
@@ -209,7 +237,8 @@ export function CapabilitySettings({
                       <p>{capability.description || capability.status_text}</p>
                       <div className="capabilityMeta">
                         <span>{riskText(capability.risk)}</span>
-                        <span>{capability.source || "hermes"}</span>
+                        <span>{truthText(capability)}</span>
+                        <span>{capability.source_of_truth || capability.source || "hermes"}</span>
                         {dependencies.slice(0, 2).map((dependency, index) => (
                           <span key={`${dependency}-${index}`}>{dependency}</span>
                         ))}

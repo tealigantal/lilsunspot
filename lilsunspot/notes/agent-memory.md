@@ -1,5 +1,14 @@
 # Agent Memory
 
+## 2026-06-15 - capability truth audit and upstream gap report
+
+- Task: implement the first Hermes capability真实性 slice from the new audit plan.
+- Files touched: `lilsunspot/daemon/capabilities.py`, `lilsunspot/daemon/product_features.py`, new `lilsunspot/daemon/upstream_audit.py`, `scripts/hermes_upstream_check.ps1`, focused tests, `lilsunspot/notes/upstream-sync-reports/2026-06-15-041744.md`, and this memory file.
+- Decision/result: `/capabilities` now keeps existing status fields but adds `registered/configured/executable/verified/source_of_truth/last_verified_at`; `/capabilities/{id}/test` returns layered checks instead of generic success. Doctor repair, reminder scheduling, product memory prompt injection, and product capability switches are explicitly represented as placeholder/CRUD/unverified rather than real executable Hermes capabilities.
+- Decision/result: the upstream audit helper compares cached `upstream/main` against the local worktree without fetch or merge. The generated report confirms latest upstream `32899279a744805350be891ccf3ae08289efc702`, recorded base `2b768535c9ba2a8d3b2c23fae1ee3a2f827f7f49`, missing `context_engine`, and missing DEFAULT_CONFIG keys `gateway`, `tools`, and `paste_collapse_*`.
+- Validation: helper CLI and `py_compile` passed; focused capability/product/upstream pytest passed; script smoke generated the upstream report; `git diff --check`, secret guard, `scripts/check.ps1`, desktop build, sidecar build, and NSIS build passed.
+- Remaining risk: this did not sync Hermes core, update `UPSTREAM_COMMIT.txt`, add a controlled sync branch script, or implement the Tauri updater. Installed-app UI clicking and live capability smoke remain manual acceptance items.
+
 ## 2026-06-14 - save-success onboarding refresh is non-blocking
 
 - Task: re-locate and fix the first-start error shown after saving the main AI service.

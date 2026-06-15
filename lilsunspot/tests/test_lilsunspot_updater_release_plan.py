@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TAURI_CONFIG = ROOT / "lilsunspot" / "desktop" / "src-tauri" / "tauri.conf.json"
+INSTALLER_HOOKS = ROOT / "lilsunspot" / "desktop" / "src-tauri" / "nsis" / "installer-hooks.nsh"
 NSIS_BUILD_SCRIPT = ROOT / "scripts" / "build_lilsunspot_desktop_nsis.ps1"
 RELEASE_SCRIPT = ROOT / "scripts" / "build_lilsunspot_release.ps1"
 SYNC_SCRIPT = ROOT / "scripts" / "hermes_upstream_sync.ps1"
@@ -41,6 +42,18 @@ def test_nsis_build_keeps_updater_signing_key_optional_for_local_build():
     assert "TAURI_SIGNING_PRIVATE_KEY_PATH" in text
     assert "ReadAllText" in text
     assert "Updater signature not found" in text
+
+
+def test_installer_hooks_stop_running_app_and_sidecar_before_overwrite():
+    text = INSTALLER_HOOKS.read_text(encoding="utf-8")
+
+    assert "LILSUNSPOT_FORCE_TASKKILL" in text
+    assert "taskkill.exe" in text
+    assert "/F /T /IM" in text
+    assert text.count('!insertmacro LILSUNSPOT_STOP_OLD_MAIN "Lilsunspot.exe"') >= 2
+    assert text.count('!insertmacro LILSUNSPOT_STOP_SIDECAR "lilsunspotd.exe"') >= 2
+    assert "无法关闭旧版小黑子桌面程序" in text
+    assert "无法关闭旧版小黑子本地服务" in text
 
 
 def test_release_script_emits_manifest_checksum_and_authenticode_gate():

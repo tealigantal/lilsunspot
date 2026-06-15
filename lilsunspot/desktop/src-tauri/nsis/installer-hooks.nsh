@@ -8,6 +8,13 @@
   !undef UniqueID
 !macroend
 
+!macro LILSUNSPOT_FORCE_TASKKILL executableName
+  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /T /IM "${executableName}"'
+  Pop $R1
+  Pop $R2
+  Sleep 1200
+!macroend
+
 !macro LILSUNSPOT_STOP_SIDECAR executableName
   !if "${INSTALLMODE}" == "currentUser"
     nsis_tauri_utils::FindProcessCurrentUser "${executableName}"
@@ -28,6 +35,16 @@
     ${AndIf} $R0 != 2
       Abort "无法关闭旧版小黑子本地服务。请先退出小黑子，再重新运行安装包。"
     ${EndIf}
+  ${EndIf}
+  !insertmacro LILSUNSPOT_FORCE_TASKKILL "${executableName}"
+  !if "${INSTALLMODE}" == "currentUser"
+    nsis_tauri_utils::FindProcessCurrentUser "${executableName}"
+  !else
+    nsis_tauri_utils::FindProcess "${executableName}"
+  !endif
+  Pop $R0
+  ${If} $R0 = 0
+    Abort "无法关闭旧版小黑子本地服务。请先退出小黑子，再重新运行安装包。"
   ${EndIf}
 !macroend
 
@@ -52,15 +69,27 @@
       Abort "无法关闭旧版小黑子桌面程序。请先退出小黑子，再重新运行安装包。"
     ${EndIf}
   ${EndIf}
+  !insertmacro LILSUNSPOT_FORCE_TASKKILL "${executableName}"
+  !if "${INSTALLMODE}" == "currentUser"
+    nsis_tauri_utils::FindProcessCurrentUser "${executableName}"
+  !else
+    nsis_tauri_utils::FindProcess "${executableName}"
+  !endif
+  Pop $R0
+  ${If} $R0 = 0
+    Abort "无法关闭旧版小黑子桌面程序。请先退出小黑子，再重新运行安装包。"
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
+  !insertmacro LILSUNSPOT_STOP_OLD_MAIN "Lilsunspot.exe"
   !insertmacro LILSUNSPOT_STOP_OLD_MAIN "lilsunspot_desktop.exe"
   !insertmacro LILSUNSPOT_STOP_SIDECAR "lilsunspotd.exe"
   !insertmacro LILSUNSPOT_STOP_SIDECAR "lilsunspotd-x86_64-pc-windows-msvc.exe"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro LILSUNSPOT_STOP_OLD_MAIN "Lilsunspot.exe"
   !insertmacro LILSUNSPOT_STOP_OLD_MAIN "lilsunspot_desktop.exe"
   !insertmacro LILSUNSPOT_STOP_SIDECAR "lilsunspotd.exe"
   !insertmacro LILSUNSPOT_STOP_SIDECAR "lilsunspotd-x86_64-pc-windows-msvc.exe"

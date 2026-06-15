@@ -1,5 +1,13 @@
 # Agent Memory
 
+## 2026-06-16 - installer overwrite locked sidecar dll fix
+
+- Task: diagnose the NSIS overwrite error where `VCRUNTIME140.dll` under the installed `lilsunspotd` sidecar directory could not be written during setup.
+- Files touched: `lilsunspot/desktop/src-tauri/nsis/installer-hooks.nsh`, `lilsunspot/tests/test_lilsunspot_updater_release_plan.py`, and this memory file.
+- Decision/result: the installed `Lilsunspot.exe` and `lilsunspotd.exe` can remain running during a user-initiated reinstall, keeping sidecar DLLs locked. The installer hook now stops the current main app name as well as legacy names and sidecars, uses `taskkill /F /T` as a fallback, and verifies the processes are gone before overwrite.
+- Validation: focused updater/release pytest passed, fresh `npm run tauri:build --prefix lilsunspot/desktop` produced a new `Lilsunspot_0.1.0_x64-setup.exe`, overwrite-install smoke passed while both installed `Lilsunspot.exe` and `lilsunspotd.exe` were running, `scripts/check.ps1` passed, `python scripts/guard_no_secrets.py` passed, and `git diff --check` passed.
+- Remaining risk: the installer intentionally stops the running desktop app during upgrade; users must reopen 小黑子 after a manual reinstall if the installer does not auto-launch it.
+
 ## 2026-06-16 - attachment return installed-app screenshot verification
 
 - Task: complete screenshot-level verification for the attachment-return redesign and prepare the validated branch for PR.

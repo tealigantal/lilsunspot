@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   getCurrentMode,
@@ -16,8 +16,10 @@ type ModeStateValue = {
   current: CurrentMode | null;
   busy: boolean;
   status: string;
-  reload: () => Promise<void>;
-  saveMode: (mode: string, sliders: ModeSaveInput) => Promise<CurrentMode>;
+  activeConversationId: string;
+  setActiveConversationId: (conversationId: string) => void;
+  reload: (conversationId?: string) => Promise<void>;
+  saveMode: (mode: string, sliders: ModeSaveInput, conversationId?: string) => Promise<CurrentMode>;
   setStatus: (message: string) => void;
 };
 
@@ -28,12 +30,21 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<CurrentMode | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const [activeConversationId, setActiveConversationIdState] = useState("");
+  const activeConversationIdRef = useRef("");
 
-  const reload = useCallback(async () => {
+  const setActiveConversationId = useCallback((conversationId: string) => {
+    const value = conversationId || "";
+    activeConversationIdRef.current = value;
+    setActiveConversationIdState(value);
+  }, []);
+
+  const reload = useCallback(async (conversationId?: string) => {
+    const targetConversationId = conversationId ?? activeConversationIdRef.current;
     setBusy(true);
     setStatus("");
     const failures: string[] = [];
-    const [modeListResult, modeResult] = await Promise.allSettled([getModes(), getCurrentMode()]);
+    const [modeListResult, modeResult] = await Promise.allSettled([getModes(), getCurrentMode(targetConversationId)]);
     if (modeListResult.status === "fulfilled") {
       setModes(modeListResult.value);
     } else {
@@ -62,8 +73,12 @@ export function ModeProvider({ children }: { children: ReactNode }) {
       if (event.event !== "mode.changed" || !event.data?.mode) {
         return;
       }
-      setCurrent(event.data.mode as CurrentMode);
-      setStatus("");
+      const eventConversationId = typeof event.data.conversation_id === "string" ? event.data.conversation_id : "";
+      const activeId = activeConversationIdRef.current;
+      if (eventConversationId && eventConversationId !== activeId) {
+        return;
+      }
+      void reload(activeId);
     }
 
     async function subscribe() {
@@ -82,13 +97,18 @@ export function ModeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       cleanup?.();
     };
-  }, []);
+  }, [reload]);
 
-  const saveMode = useCallback(async (mode: string, sliders: ModeSaveInput) => {
+  const saveMode = useCallback(async (mode: string, sliders: ModeSaveInput, conversationId?: string) => {
+    const targetConversationId = conversationId ?? activeConversationIdRef.current;
     setBusy(true);
     setStatus("");
     try {
-      const result = await selectMode(mode, sliders);
+      const result = await selectMode(
+        mode,
+        sliders,
+        targetConversationId ? { conversationId: targetConversationId, scope: "conversation" } : { scope: "global" }
+      );
       setCurrent(result);
       setStatus(`已保存输出模式。`);
       return result;
@@ -102,8 +122,8 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ modes, current, busy, status, reload, saveMode, setStatus }),
-    [modes, current, busy, status, reload, saveMode]
+    () => ({ modes, current, busy, status, activeConversationId, setActiveConversationId, reload, saveMode, setStatus }),
+    [modes, current, busy, status, activeConversationId, setActiveConversationId, reload, saveMode]
   );
 
   return <ModeStateContext.Provider value={value}>{children}</ModeStateContext.Provider>;

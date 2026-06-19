@@ -169,7 +169,7 @@ def test_desktop_message_in_weixin_conversation_uses_weixin_turn_context(daemon_
 def test_desktop_slow_reply_returns_accepted_before_agent_finishes(daemon_client, monkeypatch):
     daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.2
 
-    async def fail_mode_router(text, paths):
+    async def fail_mode_router(text, paths, conversation_id=None):
         raise AssertionError("plain chat should not call the mode router before acceptance")
 
     async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
@@ -1796,7 +1796,7 @@ def test_attachment_source_rejects_credential_dir_and_csv_uses_structured_summar
 
 
 def test_natural_language_mode_intents_and_long_task_guard(daemon_client, monkeypatch):
-    async def fake_route(text, paths):
+    async def fake_route(text, paths, conversation_id=None):
         if text == "切到务实一点":
             return daemon_client.mode_intents.ModeIntent(kind="mode", mode="pragmatic")
         if text == "现在是什么风格":
@@ -1829,13 +1829,14 @@ def test_natural_language_mode_intents_and_long_task_guard(daemon_client, monkey
         json={"text": "详细解释一下这个合同"},
     )
     assert long_task.status_code == 200
-    current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
+    current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["current"] == "pragmatic"
 
 
 def test_weixin_semantic_mode_router_switches_emotional_and_emits_event(daemon_client, monkeypatch):
-    async def fake_route(text, paths):
+    async def fake_route(text, paths, conversation_id=None):
         assert text == "切换到感性模式"
+        assert conversation_id == "personal"
         return daemon_client.mode_intents.ModeIntent(kind="mode", mode="emotional")
 
     monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
@@ -1849,7 +1850,7 @@ def test_weixin_semantic_mode_router_switches_emotional_and_emits_event(daemon_c
     assert result.status_code == 200
     assert result.json()["ok"] is True
     assert result.json()["mode"]["current"] == "emotional"
-    current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
+    current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["current"] == "emotional"
     events = daemon_client.conversations.list_events_after(0)
     assert any(event["event"] == "mode.changed" for event in events)
@@ -1859,11 +1860,18 @@ def test_semantic_mode_switch_uses_target_profile_default_sliders(daemon_client,
     selected = daemon_client.client.post(
         "/modes/select",
         headers=daemon_client.headers,
-        json={"mode": "emotional", "style_axis": 80, "detail_level": 65, "autonomy_level": 45},
+        json={
+            "mode": "emotional",
+            "style_axis": 80,
+            "detail_level": 65,
+            "autonomy_level": 45,
+            "conversation_id": "personal",
+            "scope": "conversation",
+        },
     )
     assert selected.status_code == 200
 
-    async def fake_route(text, paths):
+    async def fake_route(text, paths, conversation_id=None):
         assert text == "切到均衡模式"
         return daemon_client.mode_intents.ModeIntent(kind="mode", mode="balanced")
 
@@ -1881,7 +1889,7 @@ def test_semantic_mode_switch_uses_target_profile_default_sliders(daemon_client,
     assert mode["profile"]["style_axis"] == 45
     assert mode["profile"]["detail_level"] == 60
     assert mode["profile"]["autonomy_level"] == 60
-    current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
+    current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["profile"]["style_axis"] == 45
     assert current["profile"]["detail_level"] == 60
     assert current["profile"]["autonomy_level"] == 60
@@ -1891,11 +1899,11 @@ def test_semantic_slider_adjustment_saves_custom_mode(daemon_client, monkeypatch
     selected = daemon_client.client.post(
         "/modes/select",
         headers=daemon_client.headers,
-        json={"mode": "balanced"},
+        json={"mode": "balanced", "conversation_id": "personal", "scope": "conversation"},
     )
     assert selected.status_code == 200
 
-    async def fake_route(text, paths):
+    async def fake_route(text, paths, conversation_id=None):
         assert text == "回答再详细一点"
         return daemon_client.mode_intents.ModeIntent(kind="slider", slider="detail_level", delta=20)
 
@@ -1913,13 +1921,14 @@ def test_semantic_slider_adjustment_saves_custom_mode(daemon_client, monkeypatch
     assert mode["profile"]["style_axis"] == 45
     assert mode["profile"]["detail_level"] == 80
     assert mode["profile"]["autonomy_level"] == 60
-    current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
+    current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["current"] == "custom"
 
 
 def test_desktop_semantic_mode_router_switches_mode_without_chat_reply(daemon_client, monkeypatch):
-    async def fake_route(text, paths):
+    async def fake_route(text, paths, conversation_id=None):
         assert text == "模式切换到感性"
+        assert conversation_id == "personal"
         return daemon_client.mode_intents.ModeIntent(kind="mode", mode="emotional")
 
     async def fail_chat(*args, **kwargs):
@@ -1939,23 +1948,28 @@ def test_desktop_semantic_mode_router_switches_mode_without_chat_reply(daemon_cl
     body = result.json()
     assert body["ok"] is True
     assert "已把回答风格调成" in body["assistant_message"]["text"]
+    assert body["assistant_message"]["role"] == "system"
+    assert body["assistant_message"]["metadata"]["control_event"] is True
     assert body["chat"]["mode_intent"]["kind"] == "mode"
     assert body["chat"]["mode"]["current"] == "emotional"
-    current = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()
+    current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["current"] == "emotional"
+    history = daemon_client.conversations.conversation_history_for_agent("personal")
+    assert all("模式切换到感性" not in item["content"] for item in history)
+    assert all("已把回答风格调成" not in item["content"] for item in history)
 
 
 def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
 
-    async def invalid_router_reply(text, paths):
+    async def invalid_router_reply(text, paths, conversation_id=None):
         return "我觉得应该切换。"
 
     monkeypatch.setattr(daemon_client.mode_intents, "_call_mode_router_model", invalid_router_reply)
     invalid = asyncio.run(daemon_client.mode_intents._route_mode_intent_with_model("切换到感性模式", paths))
     assert invalid is None
 
-    async def chat_route(text, paths):
+    async def chat_route(text, paths, conversation_id=None):
         assert text == "帮我写一个感性的文案"
         return None
 

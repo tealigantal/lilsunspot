@@ -4,8 +4,10 @@ import base64
 import binascii
 import platform
 import os
+import uuid
 import webbrowser
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -244,6 +246,8 @@ class SelectModeRequest(BaseModel):
     style_axis: int | None = None
     detail_level: int | None = None
     autonomy_level: int | None = None
+    conversation_id: str | None = None
+    scope: str | None = None
 
 
 class ApprovalPlaceholderRequest(BaseModel):
@@ -734,8 +738,8 @@ async def modes() -> dict[str, Any]:
 
 
 @app.get("/modes/current", dependencies=[Depends(require_token)])
-async def modes_current() -> dict[str, Any]:
-    return get_current_mode()
+async def modes_current(conversation_id: str | None = None) -> dict[str, Any]:
+    return get_current_mode(conversation_id=conversation_id)
 
 
 @app.post("/modes/select", dependencies=[Depends(require_token)])
@@ -746,6 +750,8 @@ async def modes_select(payload: SelectModeRequest) -> dict[str, Any]:
             style_axis=payload.style_axis,
             detail_level=payload.detail_level,
             autonomy_level=payload.autonomy_level,
+            conversation_id=payload.conversation_id,
+            scope=payload.scope,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -818,6 +824,25 @@ def _assistant_message_from_chat_result(
     return assistant_message, next_chat
 
 
+def _mode_control_response_message(
+    *,
+    conversation_id: str,
+    text: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": f"mode-control-{uuid.uuid4().hex}",
+        "conversation_id": conversation_id,
+        "source": "system",
+        "role": "system",
+        "text": text,
+        "attachments": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "sent",
+        "metadata": {"control_event": True, **(metadata or {})},
+    }
+
+
 async def _send_conversation_message(
     message: str,
     *,
@@ -832,15 +857,18 @@ async def _send_conversation_message(
         text=message,
         status="sent",
         metadata={"entry": source},
+        paths=runtime_paths,
     )
-    mode_intent = await apply_mode_intent(message, runtime_paths)
+    mode_intent = await apply_mode_intent(message, runtime_paths, conversation_id=conversation_id, scope="conversation")
     if mode_intent is not None:
-        assistant_message = conversations.create_message(
+        user_message = conversations.update_message(
+            user_message["id"],
+            metadata_patch={"kind": "mode_intent_user", "control_event": True},
+            paths=runtime_paths,
+        ) or user_message
+        assistant_message = _mode_control_response_message(
             conversation_id=conversation_id,
-            source="assistant",
-            role="assistant",
             text=str(mode_intent.get("message") or ""),
-            status="sent",
             metadata={
                 "kind": "mode_intent",
                 "changed": mode_intent.get("changed"),
@@ -964,20 +992,21 @@ async def _accept_conversation_message(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         user_message = conversations.get_message(user_message["id"], paths=runtime_paths) or user_message
 
-    mode_intent = None if attachments else await apply_mode_intent(message, runtime_paths)
+    mode_intent = None if attachments else await apply_mode_intent(message, runtime_paths, conversation_id=conversation_id, scope="conversation")
     if mode_intent is not None:
-        assistant_message = conversations.create_message(
+        user_message = conversations.update_message(
+            user_message["id"],
+            metadata_patch={"kind": "mode_intent_user", "control_event": True},
+            paths=runtime_paths,
+        ) or user_message
+        assistant_message = _mode_control_response_message(
             conversation_id=conversation_id,
-            source=assistant_source,
-            role="assistant",
             text=str(mode_intent.get("message") or ""),
-            status="sent",
             metadata={
                 "kind": "mode_intent",
                 "changed": mode_intent.get("changed"),
                 "mode": (mode_intent.get("mode") or {}).get("current") if isinstance(mode_intent.get("mode"), dict) else None,
             },
-            paths=runtime_paths,
         )
         runtime_model = current_runtime_model(runtime_paths)
         return {

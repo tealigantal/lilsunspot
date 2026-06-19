@@ -866,6 +866,21 @@ def _finish_weixin_reply(
     return _store_weixin_reply(text, metadata, paths, conversation_id=conversation_id)
 
 
+def _mark_weixin_control_message(
+    message_id: str | None,
+    *,
+    kind: str,
+    paths: RuntimePaths | None = None,
+) -> None:
+    if not message_id:
+        return
+    conversations.update_message(
+        message_id,
+        metadata_patch={"kind": kind, "control_event": True},
+        paths=paths,
+    )
+
+
 def _weixin_reply_cancelled() -> dict[str, Any]:
     return {
         "ok": False,
@@ -918,11 +933,12 @@ async def _handle_weixin_after_store(
             "conversations": switch_intent.get("conversations") or [],
         }
 
-    mode_intent = await apply_mode_intent(text, runtime_paths)
+    mode_intent = await apply_mode_intent(text, runtime_paths, conversation_id=conversation_id, scope="conversation")
     if mode_intent is not None:
+        _mark_weixin_control_message(current_message_id, kind="mode_intent_user", paths=runtime_paths)
         reply = _finish_weixin_reply(
             mode_intent["message"],
-            {"kind": "mode_intent", "changed": mode_intent["changed"]},
+            {"kind": "mode_intent", "changed": mode_intent["changed"], "control_event": True},
             runtime_paths,
             conversation_id=conversation_id,
             reply_message_id=reply_message_id,
@@ -957,6 +973,7 @@ async def _handle_weixin_after_store(
             return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": intent["message"], "commands": weixin_commands()["commands"]}
     if kind == "list_modes":
+        _mark_weixin_control_message(current_message_id, kind="list_modes_user", paths=runtime_paths)
         reply = _finish_weixin_reply(
             intent["message"],
             {"kind": "list_modes"},
@@ -968,12 +985,13 @@ async def _handle_weixin_after_store(
             return _weixin_reply_cancelled()
         return {"ok": True, "intent": intent, "message": intent["message"], "modes": load_mode_profiles()}
     if kind == "select_mode":
+        _mark_weixin_control_message(current_message_id, kind="select_mode_user", paths=runtime_paths)
         try:
-            result = select_mode(str(intent["mode"]), runtime_paths)
+            result = select_mode(str(intent["mode"]), runtime_paths, conversation_id=conversation_id, scope="conversation")
         except ValueError as exc:
             reply = _finish_weixin_reply(
                 str(exc),
-                {"kind": "select_mode_error"},
+                {"kind": "select_mode_error", "control_event": True},
                 runtime_paths,
                 conversation_id=conversation_id,
                 reply_message_id=reply_message_id,
@@ -985,7 +1003,7 @@ async def _handle_weixin_after_store(
         message = "输出风格已切换。"
         reply = _finish_weixin_reply(
             message,
-            {"kind": "select_mode", "mode": result.get("current")},
+            {"kind": "select_mode", "mode": result.get("current"), "control_event": True},
             runtime_paths,
             conversation_id=conversation_id,
             reply_message_id=reply_message_id,

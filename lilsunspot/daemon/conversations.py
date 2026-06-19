@@ -411,6 +411,10 @@ def conversation_history_for_agent(
             continue
         if str(message.get("status") or "") == "generating":
             continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        kind = str(metadata.get("kind") or "")
+        if metadata.get("control_event") is True or kind in {"mode_intent", "mode.changed", "select_mode", "list_modes"}:
+            continue
         role = str(message.get("role") or "")
         text = str(message.get("text") or "").strip()
         if role not in {"user", "assistant", "system"} or not text:

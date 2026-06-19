@@ -11,10 +11,12 @@ from .providers import MODE_PROFILES_FILE, load_yaml_resource
 
 
 MODE_STATE_FILE_NAME = "mode-profile.json"
+MODE_METADATA_KEY = "mode_profile"
 SLIDER_KEYS = ("style_axis", "detail_level", "autonomy_level")
 DEFAULT_MODE_ID = "balanced"
 CUSTOM_MODE_ID = "custom"
 FIXED_PRESET_IDS = {"pragmatic", "balanced", "emotional"}
+MODE_SCOPES = {"global", "conversation", "turn"}
 MODE_LABELS = {
     "pragmatic": "务实",
     "balanced": "均衡",
@@ -65,23 +67,60 @@ def _sliders_match(left: dict[str, int], right: dict[str, int]) -> bool:
     return all(left.get(key) == right.get(key) for key in SLIDER_KEYS)
 
 
-def get_current_mode(paths: RuntimePaths | None = None) -> dict[str, Any]:
-    paths = paths or ensure_runtime_dirs()
-    selected = DEFAULT_MODE_ID
+def _normalize_mode_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    selected = str(payload.get("mode") or "").strip()
+    if not selected:
+        return None
+    raw_sliders = payload.get("sliders") if isinstance(payload.get("sliders"), dict) else {}
     sliders: dict[str, int] = {}
+    for key in SLIDER_KEYS:
+        value = _coerce_slider(raw_sliders.get(key))
+        if value is not None:
+            sliders[key] = value
+    result: dict[str, Any] = {"mode": selected}
+    if sliders:
+        result["sliders"] = sliders
+    updated_at = str(payload.get("updated_at") or "").strip()
+    if updated_at:
+        result["updated_at"] = updated_at
+    return result
+
+
+def _read_global_mode_payload(paths: RuntimePaths) -> dict[str, Any]:
     state_path = _mode_state_path(paths)
     if state_path.exists():
         try:
             payload = json.loads(state_path.read_text(encoding="utf-8"))
-            selected = str(payload.get("mode") or selected)
-            raw_sliders = payload.get("sliders") if isinstance(payload.get("sliders"), dict) else {}
-            sliders = {
-                key: value
-                for key in SLIDER_KEYS
-                if (value := _coerce_slider(raw_sliders.get(key))) is not None
-            }
+            normalized = _normalize_mode_payload(payload)
+            if normalized is not None:
+                return normalized
         except (OSError, json.JSONDecodeError):
-            selected = DEFAULT_MODE_ID
+            pass
+    return {"mode": DEFAULT_MODE_ID}
+
+
+def _write_global_mode_payload(paths: RuntimePaths, payload: dict[str, Any]) -> None:
+    state_path = _mode_state_path(paths)
+    tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(state_path)
+
+
+def _mode_from_payload(
+    payload: dict[str, Any],
+    *,
+    scope: str,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
+    selected = str(payload.get("mode") or DEFAULT_MODE_ID).strip() or DEFAULT_MODE_ID
+    raw_sliders = payload.get("sliders") if isinstance(payload.get("sliders"), dict) else {}
+    sliders = {
+        key: value
+        for key in SLIDER_KEYS
+        if (value := _coerce_slider(raw_sliders.get(key))) is not None
+    }
 
     profiles = load_mode_profiles()
     profile = _profile_by_id(profiles, selected)
@@ -102,18 +141,62 @@ def get_current_mode(paths: RuntimePaths | None = None) -> dict[str, Any]:
         profile[key] = value
     prompt = compile_mode_prompt(profile)
     profile["system_hint"] = prompt["system_hint"]
-    return {"current": profile["id"], "profile": profile, "prompt": prompt}
+    result: dict[str, Any] = {
+        "current": profile["id"],
+        "profile": profile,
+        "prompt": prompt,
+        "scope": scope,
+    }
+    if conversation_id:
+        result["conversation_id"] = conversation_id
+    return result
 
 
-def select_mode(
-    mode: str,
+def _conversation_mode_payload(conversation_id: str, paths: RuntimePaths) -> dict[str, Any] | None:
+    from . import conversations
+
+    conversation = conversations.get_conversation(conversation_id, paths)
+    metadata = conversation.get("metadata") if conversation and isinstance(conversation.get("metadata"), dict) else {}
+    return _normalize_mode_payload(metadata.get(MODE_METADATA_KEY) if isinstance(metadata, dict) else None)
+
+
+def get_current_mode(
     paths: RuntimePaths | None = None,
     *,
+    conversation_id: str | None = None,
+    turn_override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    paths = paths or ensure_runtime_dirs()
+    selected_payload = _read_global_mode_payload(paths)
+    selected_scope = "global"
+    resolved_conversation_id = (conversation_id or "").strip()
+
+    if resolved_conversation_id:
+        conversation_payload = _conversation_mode_payload(resolved_conversation_id, paths)
+        if conversation_payload is not None:
+            selected_payload = conversation_payload
+            selected_scope = "conversation"
+
+    turn_payload = _normalize_mode_payload(turn_override)
+    if turn_payload is not None:
+        selected_payload = turn_payload
+        selected_scope = "turn"
+
+    return _mode_from_payload(
+        selected_payload,
+        scope=selected_scope,
+        conversation_id=resolved_conversation_id or None,
+    )
+
+
+def _selection_payload(
+    mode: str,
+    *,
+    base_profile: dict[str, Any],
     style_axis: int | None = None,
     detail_level: int | None = None,
     autonomy_level: int | None = None,
 ) -> dict[str, Any]:
-    paths = paths or ensure_runtime_dirs()
     mode = mode.strip()
     profiles = load_mode_profiles()
     requested_profile = _profile_by_id(profiles, mode)
@@ -133,12 +216,7 @@ def select_mode(
     saved_sliders: dict[str, int] = {}
 
     if mode == CUSTOM_MODE_ID:
-        current_profile = get_current_mode(paths).get("profile")
-        current_defaults = (
-            _profile_defaults(current_profile)
-            if isinstance(current_profile, dict)
-            else _profile_defaults(requested_profile)
-        )
+        current_defaults = _profile_defaults(base_profile)
         saved_sliders = _complete_sliders(current_defaults, supplied_sliders)
     elif mode in FIXED_PRESET_IDS:
         completed = _complete_sliders(requested_defaults, supplied_sliders)
@@ -151,22 +229,67 @@ def select_mode(
     payload: dict[str, Any] = {"mode": selected, "updated_at": datetime.now(timezone.utc).isoformat()}
     if selected == CUSTOM_MODE_ID or saved_sliders:
         payload["sliders"] = saved_sliders
-    state_path = _mode_state_path(paths)
-    tmp = state_path.with_suffix(state_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(state_path)
-    result = get_current_mode(paths)
+    return payload
+
+
+def _normalize_scope(scope: str | None, conversation_id: str | None) -> str:
+    requested = (scope or "").strip().lower()
+    if not requested:
+        return "conversation" if (conversation_id or "").strip() else "global"
+    if requested not in MODE_SCOPES:
+        raise ValueError("输出模式作用域不正确。")
+    if requested in {"conversation", "turn"} and not (conversation_id or "").strip():
+        raise ValueError("请选择一个对话后再设置会话输出模式。")
+    return requested
+
+
+def select_mode(
+    mode: str,
+    paths: RuntimePaths | None = None,
+    *,
+    style_axis: int | None = None,
+    detail_level: int | None = None,
+    autonomy_level: int | None = None,
+    conversation_id: str | None = None,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    paths = paths or ensure_runtime_dirs()
+    resolved_conversation_id = (conversation_id or "").strip()
+    resolved_scope = _normalize_scope(scope, resolved_conversation_id)
+    base = get_current_mode(paths, conversation_id=resolved_conversation_id or None) if resolved_scope != "global" else get_current_mode(paths)
+    payload = _selection_payload(
+        mode,
+        base_profile=base["profile"],
+        style_axis=style_axis,
+        detail_level=detail_level,
+        autonomy_level=autonomy_level,
+    )
+
     from . import conversations
 
-    label = MODE_LABELS.get(str(result.get("current") or mode), mode)
-    message = conversations.create_system_message(
-        f"已把回答风格调成：{label}",
-        metadata={"kind": "mode.changed", "mode": result.get("current")},
-        paths=paths,
-    )
+    if resolved_scope == "global":
+        _write_global_mode_payload(paths, payload)
+        result = get_current_mode(paths)
+    elif resolved_scope == "conversation":
+        updated = conversations.update_conversation(
+            resolved_conversation_id,
+            metadata_patch={MODE_METADATA_KEY: payload},
+            paths=paths,
+        )
+        if updated is None:
+            raise ValueError("没有找到这个对话。")
+        result = get_current_mode(paths, conversation_id=resolved_conversation_id)
+    else:
+        result = get_current_mode(paths, conversation_id=resolved_conversation_id, turn_override=payload)
+
     conversations.append_event(
         "mode.changed",
-        {"mode": result, "message": message},
+        {
+            "mode": result,
+            "conversation_id": resolved_conversation_id or None,
+            "scope": result.get("scope"),
+            "control_event": True,
+        },
         paths=paths,
     )
     return result

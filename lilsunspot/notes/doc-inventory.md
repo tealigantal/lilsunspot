@@ -8,6 +8,10 @@
 | lilsunspot/desktop/README.md | lilsunspot 开发文档 | 桌面端启动和打包说明 | 高 | 辅助文档 | 有用但不是总入口 | 保留 |
 | lilsunspot/notes/mvp-p0-status.md | lilsunspot 状态文档 | P0 当前状态和阻断 | 高 | 主文档 | 当前状态入口 | 保留 |
 | lilsunspot/notes/architecture.md | lilsunspot 架构文档 | 产品层边界和数据流 | 高 | 主文档 | 当前架构入口 | 保留 |
+| lilsunspot/notes/hermes-feature-inventory.md | lilsunspot 能力文档 | Hermes 能力盘点与产品复用边界 | 高 | 主文档 | 当前能力参考 | 更新 |
+| lilsunspot/notes/hermes-merge-plan.md | lilsunspot 计划文档 | Hermes 能力合并路线 | 高 | 主文档 | 当前总体计划 | 更新 |
+| lilsunspot/notes/model-capability-ux-plan.md | lilsunspot 计划文档 | 模型能力和产品编排规划 | 高 | 主文档 | 当前能力编排依据 | 更新 |
+| lilsunspot/notes/mode-hermes-parity-plan.md | lilsunspot 计划文档 | Mode 与 Hermes Prompt、工具、会话、文件和记忆能力对齐 | 高 | 专项主文档 | 当前实施计划/source of truth | 按阶段更新 |
 | lilsunspot/notes/qa-checklist.md | lilsunspot 验收文档 | P0/P1/P2/发布 QA 清单 | 高 | 主文档 | 待执行验收 | 保留 |
 | lilsunspot/notes/decision-log.md | lilsunspot 架构文档 | 关键决策记录 | 高 | 主文档 | 当前决策入口 | 保留 |
 | lilsunspot/notes/doc-index.md | lilsunspot 入口文档 | 文档阅读顺序 | 高 | 主文档 | 当前索引入口 | 保留 |

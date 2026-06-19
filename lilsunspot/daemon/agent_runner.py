@@ -16,6 +16,7 @@ from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .delivery_actions import deliverable_dir_for_turn, delivery_turn_context
 from .delivery_tools import LILSUNSPOT_DELIVERY_TOOLSET, register_delivery_tools
 from .media_delivery import generated_file_delivery_prompt
+from .mode_tools import LILSUNSPOT_MODE_TOOLSET, register_mode_tools
 from .prompt_layers import compile_product_prompt_layers
 
 
@@ -101,11 +102,14 @@ def _fallback_history_from_lilsunspot(
 
 def _enabled_toolsets_for_lilsunspot_agent(paths: RuntimePaths) -> list[str]:
     register_delivery_tools()
+    register_mode_tools()
     toolsets = list(enabled_toolsets_for_agent(paths))
     if "file" not in toolsets:
         toolsets.append("file")
     if LILSUNSPOT_DELIVERY_TOOLSET not in toolsets:
         toolsets.append(LILSUNSPOT_DELIVERY_TOOLSET)
+    if LILSUNSPOT_MODE_TOOLSET not in toolsets:
+        toolsets.append(LILSUNSPOT_MODE_TOOLSET)
     return toolsets
 
 

@@ -169,9 +169,6 @@ def test_desktop_message_in_weixin_conversation_uses_weixin_turn_context(daemon_
 def test_desktop_slow_reply_returns_accepted_before_agent_finishes(daemon_client, monkeypatch):
     daemon_client.turn_coalescer.TEXT_BATCH_DELAY_SECONDS = 0.2
 
-    async def fail_mode_router(text, paths, conversation_id=None):
-        raise AssertionError("plain chat should not call the mode router before acceptance")
-
     async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
         await asyncio.sleep(0.2)
         return {
@@ -185,7 +182,7 @@ def test_desktop_slow_reply_returns_accepted_before_agent_finishes(daemon_client
             "conversation_id_requested": True,
         }
 
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fail_mode_router)
+    assert daemon_client.mode_intents.is_mode_intent_candidate("调试这个报错") is False
     monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     started = time.time()
@@ -1402,8 +1399,10 @@ def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_clie
     enabled_toolsets = daemon_client.agent_runner._enabled_toolsets_for_lilsunspot_agent(paths)
     assert "file" in enabled_toolsets
     assert "lilsunspot_delivery" in enabled_toolsets
+    assert "lilsunspot_mode" in enabled_toolsets
     assert "file" in daemon_client.capabilities.enabled_toolsets_for_agent(paths)
     assert "lilsunspot_delivery" not in daemon_client.capabilities.enabled_toolsets_for_agent(paths)
+    assert "lilsunspot_mode" not in daemon_client.capabilities.enabled_toolsets_for_agent(paths)
 
     from model_tools import get_tool_definitions
 
@@ -1411,6 +1410,12 @@ def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_clie
     assert any(item["function"]["name"] == "lilsunspot_return_attachment" for item in tool_defs)
     assert any(item["function"]["name"] == "lilsunspot_deliver_file" for item in tool_defs)
     assert any(item["function"]["name"] == "lilsunspot_create_deliverable_file" for item in tool_defs)
+
+    mode_tool_defs = get_tool_definitions(enabled_toolsets=["lilsunspot_mode"], quiet_mode=True)
+    mode_tool_names = {item["function"]["name"] for item in mode_tool_defs}
+    assert {"lilsunspot_get_mode", "lilsunspot_set_mode"} <= mode_tool_names
+    set_schema = next(item["function"]["parameters"] for item in mode_tool_defs if item["function"]["name"] == "lilsunspot_set_mode")
+    assert "conversation_id" not in set_schema["properties"]
 
     no_context = json.loads(daemon_client.delivery_tools.return_attachment_handler({"attachment_id": attachment["id"]}))
     assert no_context["ok"] is False
@@ -1520,6 +1525,47 @@ def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_clie
     assert unsafe["reason_code"] == "unsafe_path"
 
 
+def test_lilsunspot_mode_tools_use_current_turn_context_only(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    other = daemon_client.conversations.create_conversation(title="Other", paths=paths)
+    daemon_client.agent_runner._enabled_toolsets_for_lilsunspot_agent(paths)
+
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from model_tools import handle_function_call
+
+    no_context = json.loads(daemon_client.mode_tools.get_mode_handler({}))
+    assert no_context["ok"] is False
+    assert no_context["error_code"] == "no_active_conversation"
+
+    tokens = set_session_vars(platform="lilsunspot", chat_id="personal", session_key="personal")
+    try:
+        rejected = json.loads(
+            handle_function_call(
+                "lilsunspot_set_mode",
+                {"conversation_id": other["id"], "mode": "emotional", "scope": "conversation"},
+            )
+        )
+        assert rejected["ok"] is False
+        assert rejected["error_code"] == "target_not_allowed"
+
+        changed = json.loads(
+            handle_function_call(
+                "lilsunspot_set_mode",
+                {"mode": "pragmatic", "scope": "conversation"},
+            )
+        )
+        current = json.loads(handle_function_call("lilsunspot_get_mode", {}))
+    finally:
+        clear_session_vars(tokens)
+
+    assert changed["ok"] is True
+    assert changed["mode"]["current"] == "pragmatic"
+    assert changed["mode"]["conversation_id"] == "personal"
+    assert current["mode"]["current"] == "pragmatic"
+    assert daemon_client.modes.get_current_mode(paths, conversation_id="personal")["current"] == "pragmatic"
+    assert daemon_client.modes.get_current_mode(paths, conversation_id=other["id"])["current"] == "balanced"
+
+
 def test_agent_turn_enables_file_toolset_and_scopes_write_root(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     seen: dict[str, object] = {}
@@ -1570,6 +1616,7 @@ def test_agent_turn_enables_file_toolset_and_scopes_write_root(daemon_client, mo
     assert isinstance(enabled, list)
     assert "file" in enabled
     assert "lilsunspot_delivery" in enabled
+    assert "lilsunspot_mode" in enabled
     safe_root = Path(str(seen["safe_root"]))
     assert safe_root.is_dir()
     safe_root.relative_to(paths.hermes_home / "cache" / "documents" / "personal" / "msg_file_turn")
@@ -1796,14 +1843,22 @@ def test_attachment_source_rejects_credential_dir_and_csv_uses_structured_summar
 
 
 def test_natural_language_mode_intents_and_long_task_guard(daemon_client, monkeypatch):
-    async def fake_route(text, paths, conversation_id=None):
-        if text == "切到务实一点":
-            return daemon_client.mode_intents.ModeIntent(kind="mode", mode="pragmatic")
-        if text == "现在是什么风格":
-            return daemon_client.mode_intents.ModeIntent(kind="query")
-        return None
+    seen_chat = {}
 
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        seen_chat["message"] = message
+        return {
+            "ok": True,
+            "reply": "合同解释。",
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     pragmatic = daemon_client.client.post(
         "/gateway/weixin/commands/handle",
@@ -1829,18 +1884,13 @@ def test_natural_language_mode_intents_and_long_task_guard(daemon_client, monkey
         json={"text": "详细解释一下这个合同"},
     )
     assert long_task.status_code == 200
+    assert long_task.json()["chat"]["reply"] == "合同解释。"
+    assert "详细解释一下这个合同" in seen_chat["message"]
     current = daemon_client.client.get("/modes/current?conversation_id=personal", headers=daemon_client.headers).json()
     assert current["current"] == "pragmatic"
 
 
 def test_weixin_semantic_mode_router_switches_emotional_and_emits_event(daemon_client, monkeypatch):
-    async def fake_route(text, paths, conversation_id=None):
-        assert text == "切换到感性模式"
-        assert conversation_id == "personal"
-        return daemon_client.mode_intents.ModeIntent(kind="mode", mode="emotional")
-
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
-
     result = daemon_client.client.post(
         "/gateway/weixin/commands/handle",
         headers=daemon_client.headers,
@@ -1871,12 +1921,6 @@ def test_semantic_mode_switch_uses_target_profile_default_sliders(daemon_client,
     )
     assert selected.status_code == 200
 
-    async def fake_route(text, paths, conversation_id=None):
-        assert text == "切到均衡模式"
-        return daemon_client.mode_intents.ModeIntent(kind="mode", mode="balanced")
-
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
-
     result = daemon_client.client.post(
         "/gateway/weixin/commands/handle",
         headers=daemon_client.headers,
@@ -1903,12 +1947,6 @@ def test_semantic_slider_adjustment_saves_custom_mode(daemon_client, monkeypatch
     )
     assert selected.status_code == 200
 
-    async def fake_route(text, paths, conversation_id=None):
-        assert text == "回答再详细一点"
-        return daemon_client.mode_intents.ModeIntent(kind="slider", slider="detail_level", delta=20)
-
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
-
     result = daemon_client.client.post(
         "/gateway/weixin/commands/handle",
         headers=daemon_client.headers,
@@ -1926,15 +1964,9 @@ def test_semantic_slider_adjustment_saves_custom_mode(daemon_client, monkeypatch
 
 
 def test_desktop_semantic_mode_router_switches_mode_without_chat_reply(daemon_client, monkeypatch):
-    async def fake_route(text, paths, conversation_id=None):
-        assert text == "模式切换到感性"
-        assert conversation_id == "personal"
-        return daemon_client.mode_intents.ModeIntent(kind="mode", mode="emotional")
-
     async def fail_chat(*args, **kwargs):
         raise AssertionError("mode routing should not fall through to normal chat")
 
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", fake_route)
     monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fail_chat)
     monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fail_chat)
 
@@ -1959,19 +1991,14 @@ def test_desktop_semantic_mode_router_switches_mode_without_chat_reply(daemon_cl
     assert all("已把回答风格调成" not in item["content"] for item in history)
 
 
-def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemon_client, monkeypatch):
-    paths = daemon_client.config_paths.get_runtime_paths()
-
-    async def invalid_router_reply(text, paths, conversation_id=None):
-        return "我觉得应该切换。"
-
-    monkeypatch.setattr(daemon_client.mode_intents, "_call_mode_router_model", invalid_router_reply)
-    invalid = asyncio.run(daemon_client.mode_intents._route_mode_intent_with_model("切换到感性模式", paths))
-    assert invalid is None
-
-    async def chat_route(text, paths, conversation_id=None):
-        assert text == "帮我写一个感性的文案"
-        return None
+def test_semantic_mode_router_ignores_normal_task_and_has_no_hidden_model_call(daemon_client, monkeypatch):
+    source = Path(daemon_client.mode_intents.__file__).read_text(encoding="utf-8")
+    assert not hasattr(daemon_client.mode_intents, "_call_mode_router_model")
+    assert not hasattr(daemon_client.mode_intents, "_route_mode_intent_with_model")
+    assert "httpx.AsyncClient" not in source
+    assert "chat/completions" not in source
+    assert daemon_client.mode_intents.is_mode_intent_candidate("帮我写一个感性的文案") is False
+    assert daemon_client.mode_intents.is_mode_intent_candidate("帮我写详细一点的文案") is False
 
     seen_chat = {}
 
@@ -1988,7 +2015,6 @@ def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemo
             "conversation_id_requested": True,
         }
 
-    monkeypatch.setattr(daemon_client.mode_intents, "_route_mode_intent_with_model", chat_route)
     monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
 
     result = daemon_client.client.post(
@@ -2000,7 +2026,7 @@ def test_semantic_mode_router_ignores_normal_task_and_invalid_model_output(daemo
     assert result.status_code == 200
     assert result.json()["accepted"] is True
     assert result.json()["assistant_message"]["status"] == "generating"
-    _wait_until(lambda: seen_chat.get("message") == "帮我写一个感性的文案")
+    _wait_until(lambda: "帮我写一个感性的文案" in seen_chat.get("message", ""))
     _wait_until(
         lambda: any(
             item["text"] == "文案草稿。" and item["status"] == "sent"

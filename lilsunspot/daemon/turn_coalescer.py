@@ -286,6 +286,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
             batch.conversation_id,
             batch.paths,
             current_message_id=current_message_id,
+            host_message_id=batch.assistant_message_id,
             exclude_message_ids=message_ids,
             route=batch.route,
             require_existing_conversation=True,

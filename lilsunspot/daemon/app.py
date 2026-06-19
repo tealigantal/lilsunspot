@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from lilsunspot import __version__
 
 from . import conversations, product_features, turn_coalescer
+from .agent_host import interrupt_active_turn, steer_active_turn, submit_clarify_answer
 from .audit import ensure_audit_schema, list_audit_events, record_audit_event
 from .capability_graph import build_capability_graph
 from .attachments import (
@@ -227,6 +228,14 @@ class ConversationUploadAttachmentRequest(BaseModel):
 class ConversationMessageRequest(BaseModel):
     message: str = ""
     attachments: list[ConversationUploadAttachmentRequest] = Field(default_factory=list)
+
+
+class ConversationTurnStopRequest(BaseModel):
+    message: str | None = None
+
+
+class ConversationTurnSteerRequest(BaseModel):
+    message: str = Field(..., min_length=1)
 
 
 class ConversationCreateRequest(BaseModel):
@@ -773,6 +782,7 @@ def _assistant_message_from_chat_result(
     conversation_id: str,
     source: str,
     paths: Any,
+    message_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     prepared = prepare_assistant_delivery(
         str(chat_result.get("reply") or ""),
@@ -782,21 +792,41 @@ def _assistant_message_from_chat_result(
         include_outbound_media=False,
     )
     metadata = {
+        "kind": "chat_reply",
         "engine": chat_result.get("engine"),
         "provider": chat_result.get("provider"),
         "model": chat_result.get("model"),
         "hermes_session_id": chat_result.get("hermes_session_id"),
         "delivery": prepared.metadata(),
     }
-    assistant_message = conversations.create_message(
-        conversation_id=conversation_id,
-        source=source,
-        role="assistant",
-        text=prepared.visible_text,
-        status="sent",
-        metadata=metadata,
-        paths=paths,
-    )
+    if message_id:
+        assistant_message = conversations.update_message(
+            message_id,
+            text=prepared.visible_text,
+            status="sent",
+            metadata_patch=metadata,
+            paths=paths,
+        )
+        if assistant_message is None:
+            assistant_message = conversations.create_message(
+                conversation_id=conversation_id,
+                source=source,
+                role="assistant",
+                text=prepared.visible_text,
+                status="sent",
+                metadata=metadata,
+                paths=paths,
+            )
+    else:
+        assistant_message = conversations.create_message(
+            conversation_id=conversation_id,
+            source=source,
+            role="assistant",
+            text=prepared.visible_text,
+            status="sent",
+            metadata=metadata,
+            paths=paths,
+        )
     try:
         register_prepared_delivery(
             prepared,
@@ -843,6 +873,39 @@ def _mode_control_response_message(
     }
 
 
+def _clarify_answer_response(
+    *,
+    conversation_id: str,
+    user_message: dict[str, Any],
+    clarify_result: dict[str, Any],
+    runtime_paths: Any,
+) -> dict[str, Any]:
+    runtime_model = current_runtime_model(runtime_paths)
+    assistant_message = clarify_result.get("assistant_message") or _mode_control_response_message(
+        conversation_id=conversation_id,
+        text="已收到，我继续处理。",
+        metadata={"kind": "clarify_answer_ack"},
+    )
+    return {
+        "ok": True,
+        "accepted": False,
+        "turn_id": assistant_message["id"],
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+        "chat": {
+            "ok": True,
+            "reply": "已收到，我继续处理。",
+            "engine": "lilsunspot_hermes_host",
+            "provider": runtime_model.get("provider") or "",
+            "model": runtime_model.get("model") or "",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": bool(conversation_id),
+            "clarify_answer": True,
+        },
+    }
+
+
 async def _send_conversation_message(
     message: str,
     *,
@@ -859,6 +922,19 @@ async def _send_conversation_message(
         metadata={"entry": source},
         paths=runtime_paths,
     )
+    clarify_result = submit_clarify_answer(
+        conversation_id,
+        message,
+        message_id=user_message["id"],
+        paths=runtime_paths,
+    )
+    if clarify_result is not None:
+        return _clarify_answer_response(
+            conversation_id=conversation_id,
+            user_message=conversations.get_message(user_message["id"], paths=runtime_paths) or user_message,
+            clarify_result=clarify_result,
+            runtime_paths=runtime_paths,
+        )
     mode_intent = await apply_mode_intent(message, runtime_paths, conversation_id=conversation_id, scope="conversation")
     if mode_intent is not None:
         user_message = conversations.update_message(
@@ -992,6 +1068,22 @@ async def _accept_conversation_message(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         user_message = conversations.get_message(user_message["id"], paths=runtime_paths) or user_message
 
+    if message and not attachments:
+        clarify_result = submit_clarify_answer(
+            conversation_id,
+            message,
+            message_id=user_message["id"],
+            paths=runtime_paths,
+        )
+        if clarify_result is not None:
+            user_message = conversations.get_message(user_message["id"], paths=runtime_paths) or user_message
+            return _clarify_answer_response(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                clarify_result=clarify_result,
+                runtime_paths=runtime_paths,
+            )
+
     mode_intent = None if attachments else await apply_mode_intent(message, runtime_paths, conversation_id=conversation_id, scope="conversation")
     if mode_intent is not None:
         user_message = conversations.update_message(
@@ -1039,11 +1131,24 @@ async def _accept_conversation_message(
             conversation_id=conversation_id,
             paths=runtime_paths,
         )
+        assistant_placeholder = conversations.create_message(
+            conversation_id=conversation_id,
+            source=assistant_source,
+            role="assistant",
+            text="正在回复...",
+            status="generating",
+            metadata={
+                "kind": "chat_reply_pending",
+                "in_reply_to": user_message["id"],
+            },
+            paths=runtime_paths,
+        )
         chat_result = await send_agent_message(
             prompt_text,
             conversation_id,
             runtime_paths,
             current_message_id=user_message["id"],
+            host_message_id=assistant_placeholder["id"],
             route=route,
         )
         if chat_result.get("ok"):
@@ -1052,17 +1157,16 @@ async def _accept_conversation_message(
                 conversation_id=conversation_id,
                 source=assistant_source,
                 paths=runtime_paths,
+                message_id=assistant_placeholder["id"],
             )
         else:
-            assistant_message = conversations.create_message(
-                conversation_id=conversation_id,
-                source=assistant_source,
-                role="assistant",
+            assistant_message = conversations.update_message(
+                assistant_placeholder["id"],
                 text=f"{chat_result.get('message', '聊天请求没有成功。')}\n{chat_result.get('suggestion', '')}".strip(),
                 status="error",
-                metadata={"error_code": chat_result.get("error_code")},
+                metadata_patch={"error_code": chat_result.get("error_code")},
                 paths=runtime_paths,
-            )
+            ) or assistant_placeholder
         return {
             "ok": bool(chat_result.get("ok")),
             "accepted": False,
@@ -1158,6 +1262,28 @@ async def api_conversation_message_send(
         source="desktop",
         attachments_payload=payload.attachments,
     )
+
+
+@app.post("/conversations/{conversation_id}/turns/stop", dependencies=[Depends(require_token)])
+async def api_conversation_turn_stop(
+    conversation_id: str,
+    payload: ConversationTurnStopRequest,
+) -> dict[str, Any]:
+    result = interrupt_active_turn(conversation_id, payload.message)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=str(result.get("message") or "当前没有正在执行的任务。"))
+    return result
+
+
+@app.post("/conversations/{conversation_id}/turns/steer", dependencies=[Depends(require_token)])
+async def api_conversation_turn_steer(
+    conversation_id: str,
+    payload: ConversationTurnSteerRequest,
+) -> dict[str, Any]:
+    result = steer_active_turn(conversation_id, payload.message)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=str(result.get("message") or "当前没有正在执行的任务。"))
+    return result
 
 
 @app.patch("/conversations/{conversation_id}", dependencies=[Depends(require_token)])

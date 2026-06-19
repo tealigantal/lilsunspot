@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -122,6 +123,57 @@ def test_conversation_routes_store_messages_and_replay_events(daemon_client, mon
     assert "id:" in sse
     assert "event:" in sse
     assert "data:" in sse
+
+
+def test_weixin_clarify_answer_completes_pending_question(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    result_holder: dict[str, str] = {}
+    host = daemon_client.agent_host.AgentHostCallbacks(
+        conversation_id=daemon_client.conversations.PERSONAL_CONVERSATION_ID,
+        message_id=None,
+        source="weixin",
+        paths=paths,
+    )
+
+    def ask_question():
+        result_holder["answer"] = host.clarify_callback("要按哪种方式处理？", ["整理", "执行"])
+
+    worker = threading.Thread(target=ask_question, daemon=True)
+    worker.start()
+    deadline = time.time() + 3
+    pending = None
+    while time.time() < deadline:
+        pending = daemon_client.agent_host.pending_clarify_for_conversation(
+            daemon_client.conversations.PERSONAL_CONVERSATION_ID
+        )
+        if pending:
+            break
+        time.sleep(0.02)
+    assert pending is not None
+
+    event = SimpleNamespace(
+        text="整理",
+        media_urls=[],
+        media_types=[],
+        message_id="wx-clarify-answer",
+        source=SimpleNamespace(chat_id="", user_id=""),
+    )
+    result = asyncio.run(daemon_client.gateway.handle_weixin_message_event(event, paths=paths))
+
+    assert result["ok"] is True
+    assert result["intent"]["kind"] == "clarify_answer"
+    assert result["message"] == "已收到，我继续处理。"
+    worker.join(timeout=3)
+    assert not worker.is_alive()
+    assert result_holder["answer"] == "整理"
+    messages = daemon_client.conversations.list_messages(
+        daemon_client.conversations.PERSONAL_CONVERSATION_ID,
+        paths=paths,
+    )
+    answer_messages = [message for message in messages if message["metadata"].get("kind") == "clarify_answer"]
+    assert answer_messages[-1]["text"] == "整理"
+    request_message = daemon_client.conversations.get_message(pending["message_id"], paths=paths)
+    assert request_message["metadata"]["clarify"]["status"] == "answered"
 
 
 def test_desktop_message_in_weixin_conversation_uses_weixin_turn_context(daemon_client, monkeypatch):

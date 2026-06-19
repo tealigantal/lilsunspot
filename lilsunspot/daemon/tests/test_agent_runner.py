@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 
 
 LOCAL_PROVIDER = {
@@ -173,6 +175,162 @@ def test_agent_runner_mode_runtime_policy_maps_sliders_to_agent_limits(daemon_cl
     assert "目标约 3000 tokens" in high["ephemeral_system_prompt"]
     assert "完成完整任务链" in high["ephemeral_system_prompt"]
     assert low["enabled_toolsets"] == high["enabled_toolsets"]
+
+
+def test_agent_runner_host_callbacks_update_phase_and_control_active_turn(daemon_client, monkeypatch):
+    _save_local_provider(daemon_client)
+    paths = daemon_client.config_paths.get_runtime_paths()
+    conversation = daemon_client.conversations.create_conversation(title="Host callbacks", paths=paths)
+    assistant = daemon_client.conversations.create_message(
+        conversation_id=conversation["id"],
+        source="assistant",
+        role="assistant",
+        text="正在回复...",
+        status="generating",
+        paths=paths,
+    )
+    seen: dict[str, object] = {}
+
+    class CallbackAIAgent:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.model = kwargs["model"]
+            self.provider = kwargs["provider"]
+            self.interrupts: list[str] = []
+            self.steers: list[str] = []
+            seen["agent"] = self
+
+        def interrupt(self, message=None):
+            self.interrupts.append(message)
+
+        def steer(self, text):
+            self.steers.append(text)
+            return True
+
+        def run_conversation(self, user_message, conversation_history=None, task_id=None):
+            stop_result = daemon_client.agent_host.interrupt_active_turn(conversation["id"], "请停止")
+            steer_result = daemon_client.agent_host.steer_active_turn(conversation["id"], "补充一点上下文")
+            assert stop_result["ok"] is True
+            assert steer_result["ok"] is True
+            self.kwargs["status_callback"]("lifecycle", "正在分析任务")
+            self.kwargs["tool_start_callback"]("tool-1", "lilsunspot_get_mode", {})
+            self.kwargs["tool_complete_callback"]("tool-1", "lilsunspot_get_mode", {}, "{}")
+            self.kwargs["stream_delta_callback"]("片段不应写入消息")
+            return {
+                "final_response": f"reply:{user_message}",
+                "messages": [],
+                "api_calls": 1,
+                "model": self.model,
+                "provider": self.provider,
+            }
+
+    monkeypatch.setattr(
+        daemon_client.agent_runner,
+        "_load_hermes_classes",
+        lambda _paths: (CallbackAIAgent, FakeSessionDB),
+    )
+
+    result = asyncio.run(
+        daemon_client.agent_runner.send_agent_message(
+            "需要工具",
+            conversation["id"],
+            paths,
+            host_message_id=assistant["id"],
+        )
+    )
+
+    assert result["ok"] is True
+    agent = seen["agent"]
+    assert agent.interrupts == ["请停止"]
+    assert agent.steers == ["补充一点上下文"]
+    updated = daemon_client.conversations.get_message(assistant["id"], paths=paths)
+    assert updated["status"] == "generating"
+    assert updated["text"] == "正在整理回复..."
+    assert updated["metadata"]["host_status"]["phase"] == "streaming"
+    events = daemon_client.conversations.list_events_after(0, paths=paths)
+    assert any(event["event"] == "agent.interrupt.requested" for event in events)
+    assert any(event["event"] == "agent.steer.received" for event in events)
+    assert any(event["event"] == "agent.status" and event["data"]["phase"] == "tool_complete" for event in events)
+    assert daemon_client.agent_host.interrupt_active_turn(conversation["id"], "再停一次")["ok"] is False
+
+
+def test_agent_runner_clarify_callback_completes_desktop_question_answer(daemon_client, monkeypatch):
+    _save_local_provider(daemon_client)
+    paths = daemon_client.config_paths.get_runtime_paths()
+    conversation = daemon_client.conversations.create_conversation(title="Clarify desktop", paths=paths)
+    assistant = daemon_client.conversations.create_message(
+        conversation_id=conversation["id"],
+        source="assistant",
+        role="assistant",
+        text="正在回复...",
+        status="generating",
+        paths=paths,
+    )
+    result_holder: dict[str, object] = {}
+
+    class ClarifyAIAgent:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.model = kwargs["model"]
+            self.provider = kwargs["provider"]
+
+        def run_conversation(self, user_message, conversation_history=None, task_id=None):
+            answer = self.kwargs["clarify_callback"]("请选择执行路线", ["先整理", "直接执行"])
+            return {
+                "final_response": f"收到：{answer}",
+                "messages": [],
+                "api_calls": 1,
+                "model": self.model,
+                "provider": self.provider,
+            }
+
+    monkeypatch.setattr(
+        daemon_client.agent_runner,
+        "_load_hermes_classes",
+        lambda _paths: (ClarifyAIAgent, FakeSessionDB),
+    )
+
+    def run_turn():
+        result_holder["result"] = asyncio.run(
+            daemon_client.agent_runner.send_agent_message(
+                "需要确认",
+                conversation["id"],
+                paths,
+                host_message_id=assistant["id"],
+            )
+        )
+
+    worker = threading.Thread(target=run_turn, daemon=True)
+    worker.start()
+    deadline = time.time() + 3
+    pending = None
+    while time.time() < deadline:
+        pending = daemon_client.agent_host.pending_clarify_for_conversation(conversation["id"])
+        if pending:
+            break
+        time.sleep(0.02)
+    assert pending is not None
+    question_message = daemon_client.conversations.get_message(pending["message_id"], paths=paths)
+    assert "请选择执行路线" in question_message["text"]
+    assert question_message["metadata"]["clarify"]["status"] == "waiting"
+
+    response = daemon_client.client.post(
+        f"/conversations/{conversation['id']}/messages",
+        headers=daemon_client.headers,
+        json={"message": "先整理"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["accepted"] is False
+    assert body["chat"]["clarify_answer"] is True
+    worker.join(timeout=3)
+    assert not worker.is_alive()
+    assert result_holder["result"]["reply"] == "收到：先整理"
+    answer_message = daemon_client.conversations.get_message(body["user_message"]["id"], paths=paths)
+    assert answer_message["metadata"]["kind"] == "clarify_answer"
+    answered = daemon_client.conversations.get_message(assistant["id"], paths=paths)
+    assert answered["metadata"]["clarify"]["status"] == "answered"
 
 
 def test_agent_runner_falls_back_to_lilsunspot_mirror_only_when_hermes_history_empty(daemon_client, monkeypatch):

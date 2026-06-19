@@ -61,7 +61,8 @@ def test_chat_runtime_cloud_provider_uses_hermes_agent_loop_without_leaking(daem
     default_hint = daemon_client.client.get("/modes/current", headers=daemon_client.headers).json()["prompt"][
         "system_hint"
     ]
-    assert seen["settings"]["system_hint"].startswith(default_hint)
+    assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
+    assert default_hint in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
     assert "provider=deepseek；model=deepseek-chat" in seen["settings"]["system_hint"]
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]

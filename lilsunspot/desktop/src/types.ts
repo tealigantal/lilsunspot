@@ -460,7 +460,7 @@ export type ModeProfile = {
   system_hint: string;
 };
 
-export type ModePromptLayerId = "product_baseline" | "mode_profile" | "slider_overrides";
+export type ModePromptLayerId = "mode_profile" | "slider_overrides";
 
 export type ModePromptLayer = {
   id: ModePromptLayerId;

@@ -5,7 +5,7 @@ from typing import Any
 from .providers import MODE_PROMPT_FILE, load_yaml_resource
 
 
-PROMPT_LAYER_IDS = ("product_baseline", "mode_profile", "slider_overrides")
+PROMPT_LAYER_IDS = ("mode_profile", "slider_overrides")
 
 
 def _as_text(value: Any) -> str:
@@ -29,9 +29,6 @@ def _load_prompt_config() -> dict[str, Any]:
     data = load_yaml_resource(MODE_PROMPT_FILE)
     if not isinstance(data, dict):
         raise ValueError("default_mode_prompt.yaml must contain a mapping")
-    baseline = data.get("product_baseline")
-    if not isinstance(baseline, dict) or not _as_text(baseline.get("system_hint")):
-        raise ValueError("default_mode_prompt.yaml must contain product_baseline.system_hint")
     return data
 
 
@@ -54,9 +51,6 @@ def slider_summary(profile: dict[str, Any]) -> str:
 
 def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
     config = _load_prompt_config()
-    baseline = config["product_baseline"]
-    baseline_hint = _as_text(baseline.get("system_hint"))
-    baseline_summary = _as_text(baseline.get("summary"))
     mode_hint = _as_text(profile.get("system_hint"))
     mode_summary = _as_text(profile.get("description")) or f"使用 {profile.get('id', 'balanced')} 输出模式。"
     current_slider_summary = slider_summary(profile)
@@ -64,7 +58,6 @@ def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
     system_hint = "\n\n".join(
         item
         for item in (
-            baseline_hint,
             f"当前输出模式：{_as_text(profile.get('id')) or 'balanced'}。\n{mode_hint}",
             f"当前输出偏好：{current_slider_summary}",
         )
@@ -74,11 +67,6 @@ def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
     return {
         "system_hint": system_hint,
         "layers": [
-            {
-                "id": "product_baseline",
-                "label": _layer_label(config, "product_baseline", "产品基线"),
-                "summary": baseline_summary,
-            },
             {
                 "id": "mode_profile",
                 "label": _layer_label(config, "mode_profile", "模式预设"),

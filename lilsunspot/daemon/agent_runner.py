@@ -10,12 +10,13 @@ from typing import Any
 
 from . import conversations
 from . import provider_client as provider_http
-from .capabilities import capability_prompt_snapshot, enabled_toolsets_for_agent, fallback_chain_for_agent
+from .capabilities import enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .delivery_actions import deliverable_dir_for_turn, delivery_turn_context
 from .delivery_tools import LILSUNSPOT_DELIVERY_TOOLSET, register_delivery_tools
 from .media_delivery import generated_file_delivery_prompt
+from .prompt_layers import compile_product_prompt_layers
 
 
 logger = logging.getLogger(__name__)
@@ -58,16 +59,14 @@ def _settings_for_agent(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
         return _agent_error("provider_required"), None
     provider_config = settings["provider_config"]
     hermes_provider = str(provider_config.get("hermes_provider") or settings["provider"]).strip() or "custom"
-    capability_hint = capability_prompt_snapshot(paths)
-    system_hint = "\n\n".join(
-        part
-        for part in (
-            str(settings.get("system_hint") or "").strip(),
-            capability_hint,
-        )
-        if part
-    )
-    settings = {**settings, "system_hint": system_hint}
+    mode_overlay = str(settings.get("system_hint") or "").strip()
+    prompt_layers = compile_product_prompt_layers(paths, mode_overlay=mode_overlay)
+    settings = {
+        **settings,
+        "mode_overlay": mode_overlay,
+        "system_hint": prompt_layers.compile(),
+        "prompt_layers": prompt_layers.summaries(),
+    }
     return None, {**settings, "base_url": base_url, "hermes_provider": hermes_provider}
 
 
@@ -215,14 +214,12 @@ def _run_agent_turn(
         turn_id = current_message_id or f"turn_{session_id}"
         deliverable_dir = deliverable_dir_for_turn(paths, conversation_id, turn_id)
         deliverable_dir.mkdir(parents=True, exist_ok=True)
-        system_prompt = "\n\n".join(
-            part
-            for part in (
-                str(settings.get("system_hint") or "").strip(),
-                generated_file_delivery_prompt(deliverable_dir),
-            )
-            if part
+        prompt_layers = compile_product_prompt_layers(
+            paths,
+            mode_overlay=str(settings.get("mode_overlay") or "").strip(),
+            delivery_overlay=generated_file_delivery_prompt(deliverable_dir),
         )
+        system_prompt = prompt_layers.compile()
         with _AGENT_TURN_LOCK:
             with _temporary_env("HERMES_WRITE_SAFE_ROOT", str(deliverable_dir)):
                 with delivery_turn_context(
@@ -250,6 +247,7 @@ def _run_agent_turn(
                         chat_type=str((route or {}).get("chat_type") or ""),
                         gateway_session_key=session_id,
                         skip_context_files=True,
+                        load_soul_identity=True,
                         skip_memory=False,
                         ephemeral_system_prompt=system_prompt,
                     )

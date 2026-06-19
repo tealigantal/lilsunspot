@@ -102,10 +102,11 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     current_mode = client.get("/modes/current", headers=headers).json()
     default_hint = current_mode["prompt"]["system_hint"]
     assert current_mode["profile"]["system_hint"] == default_hint
-    assert _prompt_layer_ids(current_mode) == ["product_baseline", "mode_profile", "slider_overrides"]
-    assert "普通中文" in default_hint
+    assert _prompt_layer_ids(current_mode) == ["mode_profile", "slider_overrides"]
+    assert "当前输出模式" in default_hint
     assert "当前输出偏好" in default_hint
-    assert seen["settings"]["system_hint"].startswith(default_hint)
+    assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
+    assert default_hint in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
     assert seen["message"] == "你好"
@@ -127,7 +128,7 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     selected_mode = selected.json()
     selected_hint = selected_mode["prompt"]["system_hint"]
     assert selected_mode["profile"]["system_hint"] == selected_hint
-    assert selected_mode["prompt"]["layers"][1]["summary"] == "偏务实执行，减少铺垫，优先给出可运行结果。"
+    assert selected_mode["prompt"]["layers"][0]["summary"] == "偏务实执行，减少铺垫，优先给出可运行结果。"
     seen = _mock_agent_turn(agent_runner, monkeypatch, "已按务实模式回复。")
 
     response = client.post("/chat/send", headers=headers, json={"message": "帮我整理下一步"})
@@ -137,7 +138,8 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     assert paths.data_dir == (tmp_path / "data").resolve()
     assert (paths.data_dir / "mode-profile.json").exists()
     assert not (paths.hermes_home / "mode-profile.json").exists()
-    assert seen["settings"]["system_hint"].startswith(selected_hint)
+    assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
+    assert selected_hint in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
     assert seen["message"] == "帮我整理下一步"
@@ -162,7 +164,7 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert selected.json()["current"] == "custom"
     assert selected.json()["profile"]["style_axis"] == 80
     assert "当前输出偏好" in selected.json()["profile"]["system_hint"]
-    assert selected.json()["prompt"]["slider_summary"] == selected.json()["prompt"]["layers"][2]["summary"]
+    assert selected.json()["prompt"]["slider_summary"] == selected.json()["prompt"]["layers"][1]["summary"]
     seen = _mock_agent_turn(agent_runner, monkeypatch, "已按滑杆偏好回复。")
 
     response = client.post("/chat/send", headers=headers, json={"message": "下一步做什么"})
@@ -186,7 +188,7 @@ def test_mode_prompt_compiles_defaults_and_clamps_saved_sliders(tmp_path, monkey
     assert default_mode["profile"]["style_axis"] == 45
     assert default_mode["profile"]["detail_level"] == 60
     assert default_mode["profile"]["autonomy_level"] == 60
-    assert _prompt_layer_ids(default_mode) == ["product_baseline", "mode_profile", "slider_overrides"]
+    assert _prompt_layer_ids(default_mode) == ["mode_profile", "slider_overrides"]
     assert "表达平衡清楚" in default_mode["prompt"]["slider_summary"]
     assert default_mode["profile"]["system_hint"] == default_mode["prompt"]["system_hint"]
 

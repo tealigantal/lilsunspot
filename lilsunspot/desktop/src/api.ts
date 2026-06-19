@@ -558,17 +558,29 @@ export async function getModes(): Promise<ModeProfile[]> {
   return body.modes;
 }
 
-export async function getCurrentMode(): Promise<CurrentMode> {
-  return requestJson<CurrentMode>("/modes/current");
+export async function getCurrentMode(conversationId = ""): Promise<CurrentMode> {
+  const params = new URLSearchParams();
+  if (conversationId) {
+    params.set("conversation_id", conversationId);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<CurrentMode>(`/modes/current${suffix}`);
 }
 
 export async function selectMode(
   mode: string,
-  sliders?: Pick<ModeProfile, "style_axis" | "detail_level" | "autonomy_level">
+  sliders?: Pick<ModeProfile, "style_axis" | "detail_level" | "autonomy_level">,
+  options?: { conversationId?: string; scope?: "global" | "conversation" | "turn" }
 ): Promise<CurrentMode> {
+  const conversationId = options?.conversationId || "";
   return requestJson<CurrentMode>("/modes/select", {
     method: "POST",
-    body: JSON.stringify({ mode, ...(sliders || {}) })
+    body: JSON.stringify({
+      mode,
+      ...(sliders || {}),
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(options?.scope ? { scope: options.scope } : {})
+    })
   });
 }
 

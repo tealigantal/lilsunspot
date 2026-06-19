@@ -195,11 +195,11 @@ def _coerce_router_intent(payload: dict[str, Any], modes: list[dict[str, Any]]) 
     return None
 
 
-async def _call_mode_router_model(text: str, paths: RuntimePaths) -> str | None:
+async def _call_mode_router_model(text: str, paths: RuntimePaths, conversation_id: str | None = None) -> str | None:
     from . import chat_client
     from . import provider_client as provider_http
 
-    error, settings = chat_client._load_chat_settings(paths)
+    error, settings = chat_client._load_chat_settings(paths, conversation_id=conversation_id)
     if error is not None or settings is None:
         return None
 
@@ -216,7 +216,7 @@ async def _call_mode_router_model(text: str, paths: RuntimePaths) -> str | None:
     except provider_http.ProviderValidationError:
         return None
 
-    current = get_current_mode(paths)
+    current = get_current_mode(paths, conversation_id=conversation_id)
     modes = load_mode_profiles_for_router()
     timeout = httpx.Timeout(MODE_ROUTER_TIMEOUT_SECONDS, connect=5.0)
     try:
@@ -253,11 +253,11 @@ def _profile_defaults(mode_id: str, modes: list[dict[str, Any]]) -> dict[str, in
     }
 
 
-async def _route_mode_intent_with_model(text: str, paths: RuntimePaths) -> ModeIntent | None:
+async def _route_mode_intent_with_model(text: str, paths: RuntimePaths, conversation_id: str | None = None) -> ModeIntent | None:
     if not _is_short_router_candidate(text):
         return None
     modes = load_mode_profiles_for_router()
-    reply = await _call_mode_router_model(text, paths)
+    reply = await _call_mode_router_model(text, paths, conversation_id=conversation_id)
     if reply is None:
         return None
     payload = _extract_json_object(reply)
@@ -266,10 +266,15 @@ async def _route_mode_intent_with_model(text: str, paths: RuntimePaths) -> ModeI
     return _coerce_router_intent(payload, modes)
 
 
-async def detect_mode_intent(text: str, paths: RuntimePaths | None = None) -> ModeIntent | None:
+async def detect_mode_intent(
+    text: str,
+    paths: RuntimePaths | None = None,
+    *,
+    conversation_id: str | None = None,
+) -> ModeIntent | None:
     if not is_mode_intent_candidate(text):
         return None
-    return await _route_mode_intent_with_model(text, paths or ensure_runtime_dirs())
+    return await _route_mode_intent_with_model(text, paths or ensure_runtime_dirs(), conversation_id=conversation_id)
 
 
 def mode_status_message(mode: dict[str, Any]) -> str:
@@ -287,13 +292,19 @@ def mode_status_message(mode: dict[str, Any]) -> str:
     )
 
 
-async def apply_mode_intent(text: str, paths: RuntimePaths | None = None) -> dict[str, Any] | None:
+async def apply_mode_intent(
+    text: str,
+    paths: RuntimePaths | None = None,
+    *,
+    conversation_id: str | None = None,
+    scope: str | None = None,
+) -> dict[str, Any] | None:
     runtime_paths = paths or ensure_runtime_dirs()
-    intent = await detect_mode_intent(text, runtime_paths)
+    intent = await detect_mode_intent(text, runtime_paths, conversation_id=conversation_id)
     if intent is None:
         return None
 
-    current = get_current_mode(runtime_paths)
+    current = get_current_mode(runtime_paths, conversation_id=conversation_id)
     if intent.kind == "query":
         return {
             "ok": True,
@@ -328,6 +339,8 @@ async def apply_mode_intent(text: str, paths: RuntimePaths | None = None) -> dic
         style_axis=sliders["style_axis"],
         detail_level=sliders["detail_level"],
         autonomy_level=sliders["autonomy_level"],
+        conversation_id=conversation_id,
+        scope=scope,
     )
     label = MODE_LABELS.get(str(updated.get("current") or selected_mode), selected_mode)
     if intent.kind == "slider":

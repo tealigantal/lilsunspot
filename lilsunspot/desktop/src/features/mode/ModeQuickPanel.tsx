@@ -55,7 +55,7 @@ function sliderSummary(styleAxis: number, detailLevel: number, autonomyLevel: nu
   return `${style}；${detail}；${autonomy}。`;
 }
 
-export function ModeQuickPanel() {
+export function ModeQuickPanel({ conversationId = "" }: { conversationId?: string }) {
   const { modes, current, busy, status, saveMode, setStatus } = useModeState();
   const [selectedMode, setSelectedMode] = useState("balanced");
   const [styleAxis, setStyleAxis] = useState(45);
@@ -125,11 +125,15 @@ export function ModeQuickPanel() {
   async function save() {
     setStatus("");
     try {
-      const result = await saveMode(selectedMode, {
-        style_axis: styleAxis,
-        detail_level: detailLevel,
-        autonomy_level: autonomyLevel
-      });
+      const result = await saveMode(
+        selectedMode,
+        {
+          style_axis: styleAxis,
+          detail_level: detailLevel,
+          autonomy_level: autonomyLevel
+        },
+        conversationId
+      );
       applyMode(result.profile, result.current);
       setStatus(`已保存为${modeName(result.current)}输出模式。`);
     } catch (error) {

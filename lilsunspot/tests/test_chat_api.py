@@ -145,6 +145,114 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     assert seen["message"] == "帮我整理下一步"
 
 
+def test_conversation_mode_override_persists_and_stays_isolated(tmp_path, monkeypatch):
+    agent_runner, config_paths, hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+    provider = {
+        "id": "ollama",
+        "type": "local",
+        "env_key": "OLLAMA_API_KEY",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "hermes_provider": "custom",
+    }
+    paths = config_paths.get_runtime_paths()
+    hermes_runtime.save_provider_credentials(provider, "llama3.2", "", paths=paths)
+    first = client.post("/conversations", headers=headers, json={"title": "A"}).json()["conversation"]
+    second = client.post("/conversations", headers=headers, json={"title": "B"}).json()["conversation"]
+
+    selected = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "pragmatic", "conversation_id": first["id"], "scope": "conversation"},
+    )
+
+    assert selected.status_code == 200
+    assert selected.json()["current"] == "pragmatic"
+    assert selected.json()["scope"] == "conversation"
+    assert selected.json()["conversation_id"] == first["id"]
+    assert client.get(f"/modes/current?conversation_id={first['id']}", headers=headers).json()["current"] == "pragmatic"
+    assert client.get(f"/modes/current?conversation_id={second['id']}", headers=headers).json()["current"] == "balanced"
+    assert client.get("/modes/current", headers=headers).json()["current"] == "balanced"
+
+    seen = _mock_agent_turn(agent_runner, monkeypatch, "会话模式回复。")
+    response = client.post(
+        "/chat/send",
+        headers=headers,
+        json={"conversation_id": first["id"], "message": "帮我整理下一步"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert "当前输出模式：pragmatic" in seen["settings"]["system_hint"]
+
+    _agent_runner, _config_paths, _hermes_runtime, reloaded_client, reloaded_headers = _load_test_app(tmp_path, monkeypatch)
+    persisted = reloaded_client.get(f"/modes/current?conversation_id={first['id']}", headers=reloaded_headers)
+    assert persisted.status_code == 200
+    assert persisted.json()["current"] == "pragmatic"
+
+    deleted = reloaded_client.delete(f"/conversations/{first['id']}", headers=reloaded_headers)
+    assert deleted.status_code == 200
+    fallback = reloaded_client.get(f"/modes/current?conversation_id={first['id']}", headers=reloaded_headers)
+    assert fallback.status_code == 200
+    assert fallback.json()["current"] == "balanced"
+    assert fallback.json()["scope"] == "global"
+
+
+def test_weixin_conversation_modes_are_independent(tmp_path, monkeypatch):
+    _agent_runner, _config_paths, _hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+    first = client.post(
+        "/conversations",
+        headers=headers,
+        json={
+            "title": "微信 A",
+            "kind": "weixin",
+            "metadata": {"weixin_route": {"account_id": "unit", "chat_id": "wx-a", "user_id": "wx-a"}},
+        },
+    ).json()["conversation"]
+    second = client.post(
+        "/conversations",
+        headers=headers,
+        json={
+            "title": "微信 B",
+            "kind": "weixin",
+            "metadata": {"weixin_route": {"account_id": "unit", "chat_id": "wx-b", "user_id": "wx-b"}},
+        },
+    ).json()["conversation"]
+
+    first_result = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "pragmatic", "conversation_id": first["id"], "scope": "conversation"},
+    )
+    second_result = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "emotional", "conversation_id": second["id"], "scope": "conversation"},
+    )
+
+    assert first_result.status_code == 200
+    assert second_result.status_code == 200
+    assert client.get(f"/modes/current?conversation_id={first['id']}", headers=headers).json()["current"] == "pragmatic"
+    assert client.get(f"/modes/current?conversation_id={second['id']}", headers=headers).json()["current"] == "emotional"
+
+
+def test_turn_mode_override_does_not_persist(tmp_path, monkeypatch):
+    _agent_runner, _config_paths, _hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
+
+    turn = client.post(
+        "/modes/select",
+        headers=headers,
+        json={"mode": "pragmatic", "conversation_id": "personal", "scope": "turn"},
+    )
+
+    assert turn.status_code == 200
+    assert turn.json()["current"] == "pragmatic"
+    assert turn.json()["scope"] == "turn"
+    persisted = client.get("/modes/current?conversation_id=personal", headers=headers)
+    assert persisted.status_code == 200
+    assert persisted.json()["current"] == "balanced"
+    assert persisted.json()["scope"] == "global"
+
+
 def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     agent_runner, config_paths, hermes_runtime, client, headers = _load_test_app(tmp_path, monkeypatch)
     provider = {

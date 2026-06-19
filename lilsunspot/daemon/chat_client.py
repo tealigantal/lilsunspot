@@ -453,7 +453,12 @@ def current_runtime_model(paths: RuntimePaths | None = None) -> dict[str, Any]:
     }
 
 
-def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _load_chat_settings(
+    paths: RuntimePaths,
+    *,
+    conversation_id: str | None = None,
+    turn_override: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     config_path = paths.hermes_home / "config.yaml"
     if not config_path.exists():
         return _chat_error("setup_required"), None
@@ -481,7 +486,7 @@ def _load_chat_settings(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dic
     if not api_key and provider_type != "local":
         return _chat_error("missing_api_key"), None
 
-    current_mode = get_current_mode(paths)
+    current_mode = get_current_mode(paths, conversation_id=conversation_id, turn_override=turn_override)
     prompt = current_mode.get("prompt") if isinstance(current_mode.get("prompt"), dict) else {}
     system_hint = str(prompt.get("system_hint") or "").strip()
     image_status = image_recognition_status(provider_id, model, config=config, paths=paths)
@@ -513,7 +518,7 @@ async def send_chat_message(
         return _chat_error("empty_message")
 
     paths = paths or ensure_runtime_dirs()
-    error, settings = _load_chat_settings(paths)
+    error, settings = _load_chat_settings(paths, conversation_id=conversation_id)
     if error is not None:
         return error
     assert settings is not None

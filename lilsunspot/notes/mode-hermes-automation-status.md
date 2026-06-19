@@ -2,8 +2,8 @@
 
 | 阶段 | 状态 | 分支/PR | 测试 | 未验证项 |
 | --- | --- | --- | --- | --- |
-| 1 Prompt | pr_open | codex/mode-hermes-stage-1-prompt / PR #25 | focused 18 passed；daemon 125 passed；product 44 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed | 等待 PR 合并；真实 Provider smoke 未运行；安装包/NSIS 不在本阶段范围 |
-| 2 Scope | pending | | | |
+| 1 Prompt | merged | codex/mode-hermes-stage-1-prompt / PR #25 | focused 18 passed；daemon 125 passed；product 44 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed | 真实 Provider smoke 未运行；安装包/NSIS 不在本阶段范围 |
+| 2 Scope | in_progress | codex/mode-hermes-stage-2-scope | focused 17 passed；daemon 125 passed；product 47 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed | PR 尚未创建；真实 Provider/微信账号 smoke 未运行；Tauri/NSIS 按阶段规则未运行 |
 | 3 Tools | pending | | | |
 | 4 Policy | pending | | | |
 | 5 Host | pending | | | |
@@ -17,3 +17,12 @@
 - PR：`https://github.com/tealigantal/lilsunspot/pull/25`，base=`develop`，head=`codex/mode-hermes-stage-1-prompt`。
 - 验证：`python -m pytest lilsunspot/daemon/tests/test_agent_runner.py lilsunspot/daemon/tests/test_api_skeleton.py lilsunspot/daemon/tests/test_chat_runtime.py lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-mode-stage1-focused` 18 passed；`python -m pytest lilsunspot/daemon/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-daemon` 125 passed；`python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot` 44 passed；`python scripts/guard_no_secrets.py` passed；`npm run build --prefix lilsunspot/desktop` passed；`git diff --check` passed with LF/CRLF working-copy warnings only；`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed。
 - 未验证：未运行真实 Provider smoke；未运行安装包/NSIS 构建，因为本阶段不修改桌面 UI、Tauri、sidecar、installer 或安装版交付链路。
+
+## 2026-06-19 Stage 2 记录
+
+- 任务：按 `mode-hermes-parity-plan.md` 阶段 B 建立全局默认、会话覆盖、单 turn 覆盖的 Mode 作用域。
+- 范围：只处理 Mode 状态作用域、API 参数、桌面当前会话读写、微信会话隔离、控制事件历史过滤和回归测试；不处理 Mode 工具、三滑杆运行策略、宿主回调、安装包或发布构建。
+- 结果：旧 `mode-profile.json` 继续作为全局默认；会话 Mode 写入 conversation metadata；`/modes/current` 和 `/modes/select` 支持 `conversation_id`；桌面 Mode 面板按当前会话读写；微信 `/mode` 与自然语言 Mode 意图按当前微信 conversation 生效；Mode 控制消息标记为 `control_event`，不进入 Hermes 普通语义历史。
+- PR：待创建，base=`develop`，head=`codex/mode-hermes-stage-2-scope`。
+- 验证：`python -m pytest lilsunspot/tests/test_chat_api.py lilsunspot/daemon/tests/test_conversation_sync.py::test_natural_language_mode_intents_and_long_task_guard lilsunspot/daemon/tests/test_conversation_sync.py::test_weixin_semantic_mode_router_switches_emotional_and_emits_event lilsunspot/daemon/tests/test_conversation_sync.py::test_semantic_mode_switch_uses_target_profile_default_sliders lilsunspot/daemon/tests/test_conversation_sync.py::test_semantic_slider_adjustment_saves_custom_mode lilsunspot/daemon/tests/test_conversation_sync.py::test_desktop_semantic_mode_router_switches_mode_without_chat_reply lilsunspot/daemon/tests/test_conversation_sync.py::test_semantic_mode_router_ignores_normal_task_and_invalid_model_output lilsunspot/daemon/tests/test_safety_approvals.py::test_weixin_command_help_hides_approval_commands_but_hidden_decision_still_works --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-stage2-narrow` 17 passed；`python -m pytest lilsunspot/daemon/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-daemon` 125 passed；`python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot` 47 passed；`python scripts/guard_no_secrets.py` passed；`npm run build --prefix lilsunspot/desktop` passed；`git diff --check` passed with LF/CRLF working-copy warnings only；`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed。
+- 未验证：未运行真实 Provider smoke；未运行真实微信账号多联系人 smoke；未运行 Tauri/NSIS 发布构建，因为阶段说明明确不运行安装包、更新器或发布构建。

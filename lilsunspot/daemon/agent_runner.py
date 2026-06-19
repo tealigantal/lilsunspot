@@ -48,8 +48,13 @@ def _agent_error(error_code: str) -> dict[str, Any]:
     return _chat_error("unknown")
 
 
-def _settings_for_agent(paths: RuntimePaths) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    error, settings = _load_chat_settings(paths)
+def _settings_for_agent(
+    paths: RuntimePaths,
+    *,
+    conversation_id: str | None = None,
+    turn_override: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    error, settings = _load_chat_settings(paths, conversation_id=conversation_id, turn_override=turn_override)
     if error is not None:
         return error, None
     assert settings is not None
@@ -289,6 +294,7 @@ async def send_agent_message(
     current_message_id: str | None = None,
     exclude_message_ids: list[str] | None = None,
     route: dict[str, str] | None = None,
+    turn_override: dict[str, Any] | None = None,
     require_existing_conversation: bool = False,
 ) -> dict[str, Any]:
     conversation_id = (conversation_id or conversations.PERSONAL_CONVERSATION_ID).strip() or conversations.PERSONAL_CONVERSATION_ID
@@ -296,7 +302,7 @@ async def send_agent_message(
     if not message:
         return _agent_error("empty_message")
     runtime_paths = paths or ensure_runtime_dirs()
-    error, settings = _settings_for_agent(runtime_paths)
+    error, settings = _settings_for_agent(runtime_paths, conversation_id=conversation_id, turn_override=turn_override)
     if error is not None:
         return error
     assert settings is not None

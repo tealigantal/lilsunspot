@@ -193,6 +193,14 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
   }, [bootstrap.stage, bootstrap.runtime.configured, activeConversationId]);
 
   useEffect(() => {
+    if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured || !activeConversationId) {
+      return;
+    }
+    modeState.setActiveConversationId(activeConversationId);
+    void modeState.reload(activeConversationId);
+  }, [bootstrap.stage, bootstrap.runtime.configured, activeConversationId, modeState.setActiveConversationId, modeState.reload]);
+
+  useEffect(() => {
     if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
       return;
     }
@@ -541,7 +549,7 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
         />
       </article>
       <aside className="chatSidePanel" aria-label="输出模式">
-        <ModeQuickPanel />
+        <ModeQuickPanel conversationId={activeConversationId} />
       </aside>
     </section>
   );

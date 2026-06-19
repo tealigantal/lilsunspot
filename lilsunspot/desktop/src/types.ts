@@ -478,6 +478,8 @@ export type CurrentMode = {
   current: string;
   profile: ModeProfile;
   prompt: ModePrompt;
+  scope?: "global" | "conversation" | "turn" | string;
+  conversation_id?: string;
 };
 
 export type WeixinStatus = {

@@ -132,6 +132,49 @@ def test_agent_runner_mode_overlay_does_not_change_tools_memory_or_soul(daemon_c
     assert "当前 lilsunspot 能力状态快照" in second["ephemeral_system_prompt"]
 
 
+def test_agent_runner_mode_runtime_policy_maps_sliders_to_agent_limits(daemon_client, monkeypatch):
+    _install_fake_hermes(daemon_client, monkeypatch)
+    _save_local_provider(daemon_client)
+    paths = daemon_client.config_paths.get_runtime_paths()
+    conversation = daemon_client.conversations.create_conversation(title="Mode runtime", paths=paths)
+
+    daemon_client.modes.select_mode(
+        "custom",
+        paths,
+        style_axis=10,
+        detail_level=20,
+        autonomy_level=10,
+        conversation_id=conversation["id"],
+        scope="conversation",
+    )
+    asyncio.run(daemon_client.agent_runner.send_agent_message("低自主", conversation["id"], paths))
+
+    daemon_client.modes.select_mode(
+        "custom",
+        paths,
+        style_axis=80,
+        detail_level=85,
+        autonomy_level=85,
+        conversation_id=conversation["id"],
+        scope="conversation",
+    )
+    asyncio.run(daemon_client.agent_runner.send_agent_message("高自主", conversation["id"], paths))
+
+    low = FakeAIAgent.calls[-2]["kwargs"]
+    high = FakeAIAgent.calls[-1]["kwargs"]
+    assert low["max_tokens"] == 300
+    assert low["max_iterations"] == 8
+    assert low["reasoning_config"] == {"enabled": True, "effort": "low"}
+    assert "目标约 300 tokens" in low["ephemeral_system_prompt"]
+    assert "非明确任务先询问用户" in low["ephemeral_system_prompt"]
+    assert high["max_tokens"] == 3000
+    assert high["max_iterations"] == 75
+    assert high["reasoning_config"] == {"enabled": True, "effort": "high"}
+    assert "目标约 3000 tokens" in high["ephemeral_system_prompt"]
+    assert "完成完整任务链" in high["ephemeral_system_prompt"]
+    assert low["enabled_toolsets"] == high["enabled_toolsets"]
+
+
 def test_agent_runner_falls_back_to_lilsunspot_mirror_only_when_hermes_history_empty(daemon_client, monkeypatch):
     _install_fake_hermes(daemon_client, monkeypatch)
     _save_local_provider(daemon_client)

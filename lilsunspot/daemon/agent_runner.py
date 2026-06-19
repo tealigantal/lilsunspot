@@ -16,6 +16,7 @@ from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .delivery_actions import deliverable_dir_for_turn, delivery_turn_context
 from .delivery_tools import LILSUNSPOT_DELIVERY_TOOLSET, register_delivery_tools
 from .media_delivery import generated_file_delivery_prompt
+from .mode_runtime_policy import compile_mode_runtime_policy, runtime_policy_prompt
 from .mode_tools import LILSUNSPOT_MODE_TOOLSET, register_mode_tools
 from .prompt_layers import compile_product_prompt_layers
 
@@ -66,10 +67,25 @@ def _settings_for_agent(
     provider_config = settings["provider_config"]
     hermes_provider = str(provider_config.get("hermes_provider") or settings["provider"]).strip() or "custom"
     mode_overlay = str(settings.get("system_hint") or "").strip()
-    prompt_layers = compile_product_prompt_layers(paths, mode_overlay=mode_overlay)
+    mode_profile = settings.get("mode_profile") if isinstance(settings.get("mode_profile"), dict) else {}
+    mode_runtime_policy = compile_mode_runtime_policy(mode_profile)
+    runtime_policy_overlay = runtime_policy_prompt(mode_runtime_policy)
+    reasoning_config = (
+        {"enabled": True, "effort": mode_runtime_policy.reasoning_effort}
+        if mode_runtime_policy.reasoning_effort
+        else None
+    )
+    prompt_layers = compile_product_prompt_layers(
+        paths,
+        mode_overlay=mode_overlay,
+        runtime_policy_overlay=runtime_policy_overlay,
+    )
     settings = {
         **settings,
         "mode_overlay": mode_overlay,
+        "mode_runtime_policy": mode_runtime_policy.as_dict(),
+        "runtime_policy_overlay": runtime_policy_overlay,
+        "mode_reasoning_config": reasoning_config,
         "system_hint": prompt_layers.compile(),
         "prompt_layers": prompt_layers.summaries(),
     }
@@ -226,9 +242,11 @@ def _run_agent_turn(
         prompt_layers = compile_product_prompt_layers(
             paths,
             mode_overlay=str(settings.get("mode_overlay") or "").strip(),
+            runtime_policy_overlay=str(settings.get("runtime_policy_overlay") or "").strip(),
             delivery_overlay=generated_file_delivery_prompt(deliverable_dir),
         )
         system_prompt = prompt_layers.compile()
+        runtime_policy = settings.get("mode_runtime_policy") if isinstance(settings.get("mode_runtime_policy"), dict) else {}
         with _AGENT_TURN_LOCK:
             with _temporary_env("HERMES_WRITE_SAFE_ROOT", str(deliverable_dir)):
                 with delivery_turn_context(
@@ -247,6 +265,9 @@ def _run_agent_turn(
                         fallback_model=fallback_chain_for_agent(paths),
                         quiet_mode=True,
                         verbose_logging=False,
+                        max_iterations=int(runtime_policy.get("max_iterations") or 90),
+                        max_tokens=int(runtime_policy.get("target_answer_tokens") or 1000),
+                        reasoning_config=settings.get("mode_reasoning_config"),
                         session_id=session_id,
                         session_db=session_db,
                         platform=platform_name,

@@ -284,6 +284,11 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert "表达更有陪伴感" in system_hint
     assert "回答保持简短" in system_hint
     assert "风险或不确定时优先确认" in system_hint
+    assert "当前 Mode 运行策略" in system_hint
+    assert "目标约 600 tokens" in system_hint
+    assert seen["settings"]["mode_runtime_policy"]["target_answer_tokens"] == 600
+    assert seen["settings"]["mode_runtime_policy"]["max_iterations"] == 8
+    assert seen["settings"]["mode_reasoning_config"] == {"enabled": True, "effort": "low"}
 
 
 def test_mode_prompt_compiles_defaults_and_clamps_saved_sliders(tmp_path, monkeypatch):

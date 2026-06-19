@@ -498,6 +498,7 @@ def _load_chat_settings(
         "provider_config": provider_config,
         "api_key": api_key,
         "mode": str(current_mode.get("current") or "balanced"),
+        "mode_profile": current_mode.get("profile") if isinstance(current_mode.get("profile"), dict) else {},
         "system_hint": system_hint,
         "image_supports_native": image_status["backend"] == "main_model",
         "image_backend": image_status["backend"],

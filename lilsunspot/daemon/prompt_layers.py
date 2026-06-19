@@ -13,6 +13,7 @@ class ProductPromptLayers:
     product_baseline: str
     capability_snapshot: str = ""
     mode_overlay: str = ""
+    runtime_policy_overlay: str = ""
     delivery_overlay: str = ""
 
     def compile(self) -> str:
@@ -22,6 +23,7 @@ class ProductPromptLayers:
                 self.product_baseline,
                 self.capability_snapshot,
                 self.mode_overlay,
+                self.runtime_policy_overlay,
                 self.delivery_overlay,
             )
             if part and part.strip()
@@ -32,6 +34,7 @@ class ProductPromptLayers:
             {"id": "product_baseline", "summary": _first_line(self.product_baseline)},
             {"id": "capability_snapshot", "summary": _first_line(self.capability_snapshot)},
             {"id": "mode_overlay", "summary": _first_line(self.mode_overlay)},
+            {"id": "runtime_policy_overlay", "summary": _first_line(self.runtime_policy_overlay)},
             {"id": "delivery_overlay", "summary": _first_line(self.delivery_overlay)},
         ]
 
@@ -58,11 +61,13 @@ def compile_product_prompt_layers(
     paths: RuntimePaths,
     *,
     mode_overlay: str,
+    runtime_policy_overlay: str = "",
     delivery_overlay: str = "",
 ) -> ProductPromptLayers:
     return ProductPromptLayers(
         product_baseline=product_baseline_prompt(),
         capability_snapshot=capability_prompt_snapshot(paths),
         mode_overlay=mode_overlay,
+        runtime_policy_overlay=runtime_policy_overlay,
         delivery_overlay=delivery_overlay,
     )

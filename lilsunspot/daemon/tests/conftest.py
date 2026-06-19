@@ -29,6 +29,7 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.hermes_runtime as hermes_runtime
     import lilsunspot.daemon.logging_utils as logging_utils
     import lilsunspot.daemon.mode_intents as mode_intents
+    import lilsunspot.daemon.mode_tools as mode_tools
     import lilsunspot.daemon.product_features as product_features
     import lilsunspot.daemon.modes as modes
     import lilsunspot.daemon.provider_client as provider_client
@@ -46,7 +47,6 @@ def daemon_client(tmp_path, monkeypatch):
     conversations = importlib.reload(conversations)
     delivery_actions = importlib.reload(delivery_actions)
     delivery_tools = importlib.reload(delivery_tools)
-    agent_runner = importlib.reload(agent_runner)
     attachments = importlib.reload(attachments)
     capabilities = importlib.reload(capabilities)
     providers = importlib.reload(providers)
@@ -56,6 +56,8 @@ def daemon_client(tmp_path, monkeypatch):
     chat_client = importlib.reload(chat_client)
     modes = importlib.reload(modes)
     mode_intents = importlib.reload(mode_intents)
+    mode_tools = importlib.reload(mode_tools)
+    agent_runner = importlib.reload(agent_runner)
     hermes_compat = importlib.reload(hermes_compat)
     gateway = importlib.reload(gateway)
     safety = importlib.reload(safety)
@@ -91,6 +93,7 @@ def daemon_client(tmp_path, monkeypatch):
         diagnostics=diagnostics,
         modes=modes,
         mode_intents=mode_intents,
+        mode_tools=mode_tools,
         product_features=product_features,
         token=token,
         turn_coalescer=turn_coalescer,

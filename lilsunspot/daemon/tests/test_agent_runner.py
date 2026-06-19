@@ -96,8 +96,40 @@ def test_agent_runner_uses_independent_hermes_sessions_per_conversation(daemon_c
     assert FakeAIAgent.calls[0]["kwargs"]["session_id"] == first["id"]
     assert FakeAIAgent.calls[1]["kwargs"]["session_id"] == second["id"]
     assert FakeAIAgent.calls[0]["kwargs"]["ephemeral_system_prompt"]
+    system_prompt = FakeAIAgent.calls[0]["kwargs"]["ephemeral_system_prompt"]
+    assert "你是 Lilsunspot 小黑子" in system_prompt
+    assert "当前 lilsunspot 能力状态快照" in system_prompt
+    assert "当前输出模式" in system_prompt
+    assert "用户要求生成新文件" in system_prompt
     assert FakeAIAgent.calls[0]["kwargs"]["skip_memory"] is False
     assert FakeAIAgent.calls[0]["kwargs"]["skip_context_files"] is True
+    assert FakeAIAgent.calls[0]["kwargs"]["load_soul_identity"] is True
+
+
+def test_agent_runner_mode_overlay_does_not_change_tools_memory_or_soul(daemon_client, monkeypatch):
+    _install_fake_hermes(daemon_client, monkeypatch)
+    _save_local_provider(daemon_client)
+    paths = daemon_client.config_paths.get_runtime_paths()
+    conversation = daemon_client.conversations.create_conversation(title="Mode parity", paths=paths)
+
+    daemon_client.modes.select_mode("pragmatic", paths)
+    asyncio.run(daemon_client.agent_runner.send_agent_message("第一轮", conversation["id"], paths))
+    daemon_client.modes.select_mode("emotional", paths)
+    asyncio.run(daemon_client.agent_runner.send_agent_message("第二轮", conversation["id"], paths))
+
+    first = FakeAIAgent.calls[-2]["kwargs"]
+    second = FakeAIAgent.calls[-1]["kwargs"]
+    assert first["enabled_toolsets"] == second["enabled_toolsets"]
+    assert first["skip_memory"] is False
+    assert second["skip_memory"] is False
+    assert first["skip_context_files"] is True
+    assert second["skip_context_files"] is True
+    assert first["load_soul_identity"] is True
+    assert second["load_soul_identity"] is True
+    assert "当前输出模式：pragmatic" in first["ephemeral_system_prompt"]
+    assert "当前输出模式：emotional" in second["ephemeral_system_prompt"]
+    assert "当前 lilsunspot 能力状态快照" in first["ephemeral_system_prompt"]
+    assert "当前 lilsunspot 能力状态快照" in second["ephemeral_system_prompt"]
 
 
 def test_agent_runner_falls_back_to_lilsunspot_mirror_only_when_hermes_history_empty(daemon_client, monkeypatch):

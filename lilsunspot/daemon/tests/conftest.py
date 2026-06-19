@@ -89,6 +89,7 @@ def daemon_client(tmp_path, monkeypatch):
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,
         diagnostics=diagnostics,
+        modes=modes,
         mode_intents=mode_intents,
         product_features=product_features,
         token=token,

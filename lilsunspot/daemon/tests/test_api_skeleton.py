@@ -21,11 +21,7 @@ def test_runtime_mode_gateway_safety_and_doctor_skeletons(daemon_client):
     assert selected.status_code == 200
     assert selected.json()["current"] == "balanced"
     assert selected.json()["profile"]["system_hint"] == selected.json()["prompt"]["system_hint"]
-    assert [layer["id"] for layer in selected.json()["prompt"]["layers"]] == [
-        "product_baseline",
-        "mode_profile",
-        "slider_overrides",
-    ]
+    assert [layer["id"] for layer in selected.json()["prompt"]["layers"]] == ["mode_profile", "slider_overrides"]
 
     weixin = client.get("/gateway/weixin/status", headers=headers)
     assert weixin.status_code == 200
@@ -114,7 +110,8 @@ def test_chat_runtime_after_provider_save(daemon_client, monkeypatch):
     assert seen["settings"]["model"] == "llama3.2"
     assert seen["settings"]["hermes_provider"] == "custom"
     default_hint = client.get("/modes/current", headers=headers).json()["prompt"]["system_hint"]
-    assert seen["settings"]["system_hint"].startswith(default_hint)
+    assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
+    assert default_hint in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]
 

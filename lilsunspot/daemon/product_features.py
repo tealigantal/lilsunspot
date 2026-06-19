@@ -240,6 +240,10 @@ def delete_reminder(reminder_id: str, paths: RuntimePaths | None = None) -> bool
 
 
 def _memory_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    metadata = _json_loads(row["metadata"])
+    metadata.setdefault("memory_scope", "local_record")
+    metadata.setdefault("scope_label", "本地记录")
+    metadata.setdefault("agent_memory_synced", False)
     return {
         "id": str(row["id"]),
         "text": str(row["text"]),
@@ -247,7 +251,10 @@ def _memory_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "enabled": bool(row["enabled"]),
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
-        "metadata": _json_loads(row["metadata"]),
+        "metadata": metadata,
+        "memory_scope": "local_record",
+        "scope_label": "本地记录",
+        "agent_memory_synced": False,
     }
 
 
@@ -272,7 +279,21 @@ def create_memory(*, text: str, source: str = "manual", paths: RuntimePaths | No
             INSERT INTO product_memories(id, text, source, enabled, created_at, updated_at, metadata)
             VALUES (?, ?, ?, 1, ?, ?, ?)
             """,
-            (memory_id, text, source, now, now, _json_dumps({"source": source})),
+            (
+                memory_id,
+                text,
+                source,
+                now,
+                now,
+                _json_dumps(
+                    {
+                        "source": source,
+                        "memory_scope": "local_record",
+                        "scope_label": "本地记录",
+                        "agent_memory_synced": False,
+                    }
+                ),
+            ),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM product_memories WHERE id = ?", (memory_id,)).fetchone()

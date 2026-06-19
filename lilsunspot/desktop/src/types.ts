@@ -338,6 +338,9 @@ export type ProductMemory = {
   text: string;
   source: string;
   enabled: boolean;
+  memory_scope?: string;
+  scope_label?: string;
+  agent_memory_synced?: boolean;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;

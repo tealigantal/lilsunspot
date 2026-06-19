@@ -16,6 +16,7 @@ from .upstream_audit import safe_upstream_capability_audit
 
 LILSUNSPOT_PLATFORM = "lilsunspot"
 DEFAULT_LILSUNSPOT_TOOLSETS = ["web", "vision", "file", "todo", "memory", "session_search", "skills", "clarify"]
+REQUIRED_LILSUNSPOT_TOOLSETS = {"file"}
 MODEL_CONFIG_KEYS = [
     "fallback_providers",
     "provider_routing",
@@ -209,7 +210,11 @@ def _platform_toolsets(config: dict[str, Any]) -> list[str]:
     raw = platform_toolsets.get(LILSUNSPOT_PLATFORM)
     if not isinstance(raw, list):
         return list(DEFAULT_LILSUNSPOT_TOOLSETS)
-    return [str(item) for item in raw]
+    toolsets = [str(item) for item in raw]
+    for toolset in REQUIRED_LILSUNSPOT_TOOLSETS:
+        if toolset not in toolsets:
+            toolsets.append(toolset)
+    return toolsets
 
 
 def enabled_toolsets_for_agent(paths: RuntimePaths | None = None) -> list[str]:
@@ -856,7 +861,7 @@ def save_platform_toolsets(toolsets: list[str], paths: RuntimePaths | None = Non
     if not isinstance(platform_cfg, dict):
         platform_cfg = {}
         config["platform_toolsets"] = platform_cfg
-    platform_cfg[LILSUNSPOT_PLATFORM] = sorted(set(requested))
+    platform_cfg[LILSUNSPOT_PLATFORM] = sorted(set(requested) | REQUIRED_LILSUNSPOT_TOOLSETS)
     write_hermes_config(config, runtime_paths)
     return get_platform_toolsets(runtime_paths)
 

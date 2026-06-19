@@ -9,10 +9,11 @@
 5. lilsunspot/notes/hermes-feature-inventory.md
 6. lilsunspot/notes/hermes-merge-plan.md
 7. lilsunspot/notes/model-capability-ux-plan.md
-8. lilsunspot/README-dev.md
-9. lilsunspot/notes/qa-checklist.md
-10. lilsunspot/notes/decision-log.md
-11. lilsunspot/notes/doc-inventory.md
+8. lilsunspot/notes/mode-hermes-parity-plan.md
+9. lilsunspot/README-dev.md
+10. lilsunspot/notes/qa-checklist.md
+11. lilsunspot/notes/decision-log.md
+12. lilsunspot/notes/doc-inventory.md
 
 ## 主文档
 
@@ -23,6 +24,7 @@
 - `lilsunspot/notes/hermes-feature-inventory.md`：Hermes 现成功能盘点，记录 Web Dashboard、TUI、gateway、tools、cron、memory 等能力如何为小黑子复用或产品化。
 - `lilsunspot/notes/hermes-merge-plan.md`：Hermes 能力合并路线，包含微信/诊断/搜索/模型/cron/memory/toolsets 的阶段计划，以及后续自动同步官方更新的预留设计。
 - `lilsunspot/notes/model-capability-ux-plan.md`：模型能力、用户意图、辅助模型、错误解释和全链路验收的产品级规划；后续不要再用单点关键词或局部补丁替代能力编排。
+- `lilsunspot/notes/mode-hermes-parity-plan.md`：Mode 与 Hermes 能力对齐专项计划；定义 Prompt 分层、会话级 Mode、Mode 工具、三滑杆运行策略和文件/对话/记忆 parity 契约，是后续 Mode 完善的 source of truth。
 - `lilsunspot/README-dev.md`：本地开发入口，记录 daemon、desktop、检查和构建命令。
 - `lilsunspot/notes/qa-checklist.md`：发布前 QA 清单，未实际通过的项目保持未勾选。
 - `lilsunspot/notes/decision-log.md`：关键产品和工程决策记录。
@@ -45,6 +47,7 @@
 - 先读 doc-index。
 - 再读 mvp-p0-status。
 - 再读 TASKS。
+- 涉及 Mode、Prompt、会话策略或 Hermes 能力退化时，先读 `mode-hermes-parity-plan.md`。
 - 不要直接根据历史记录判断当前状态。
 - 不要大面积修改 Hermes 核心。
 - 新增代码优先放 lilsunspot/。

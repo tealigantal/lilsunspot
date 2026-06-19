@@ -10,6 +10,7 @@ from typing import Any
 
 from . import conversations
 from . import provider_client as provider_http
+from .agent_host import AgentHostCallbacks, clear_active_turn, register_active_turn
 from .capabilities import enabled_toolsets_for_agent, fallback_chain_for_agent
 from .chat_client import CHAT_ERROR_MESSAGES, _chat_error, _load_chat_settings
 from .config_paths import RuntimePaths, ensure_runtime_dirs
@@ -194,6 +195,7 @@ def _run_agent_turn(
     paths: RuntimePaths,
     settings: dict[str, Any],
     require_existing_conversation: bool = False,
+    host_message_id: str | None = None,
 ) -> dict[str, Any]:
     AIAgent, SessionDB = _load_hermes_classes(paths)
     conversation = conversations.get_conversation(conversation_id, paths)
@@ -247,6 +249,12 @@ def _run_agent_turn(
         )
         system_prompt = prompt_layers.compile()
         runtime_policy = settings.get("mode_runtime_policy") if isinstance(settings.get("mode_runtime_policy"), dict) else {}
+        host_callbacks = AgentHostCallbacks(
+            conversation_id=conversation_id,
+            message_id=host_message_id,
+            source=platform_name,
+            paths=paths,
+        )
         with _AGENT_TURN_LOCK:
             with _temporary_env("HERMES_WRITE_SAFE_ROOT", str(deliverable_dir)):
                 with delivery_turn_context(
@@ -280,12 +288,22 @@ def _run_agent_turn(
                         load_soul_identity=True,
                         skip_memory=False,
                         ephemeral_system_prompt=system_prompt,
+                        tool_progress_callback=host_callbacks.tool_progress_callback,
+                        tool_start_callback=host_callbacks.tool_start_callback,
+                        tool_complete_callback=host_callbacks.tool_complete_callback,
+                        clarify_callback=host_callbacks.clarify_callback,
+                        stream_delta_callback=host_callbacks.stream_delta_callback,
+                        status_callback=host_callbacks.status_callback,
                     )
-                    result = agent.run_conversation(
-                        user_message=message,
-                        conversation_history=history,
-                        task_id=session_id,
-                    )
+                    register_active_turn(conversation_id, agent=agent, message_id=host_message_id, paths=paths)
+                    try:
+                        result = agent.run_conversation(
+                            user_message=message,
+                            conversation_history=history,
+                            task_id=session_id,
+                        )
+                    finally:
+                        clear_active_turn(conversation_id, agent)
                     delivery_actions = delivery_context.actions_for_result()
     finally:
         unregister_gateway_notify(session_id)
@@ -317,6 +335,7 @@ async def send_agent_message(
     paths: RuntimePaths | None = None,
     *,
     current_message_id: str | None = None,
+    host_message_id: str | None = None,
     exclude_message_ids: list[str] | None = None,
     route: dict[str, str] | None = None,
     turn_override: dict[str, Any] | None = None,
@@ -337,6 +356,7 @@ async def send_agent_message(
             message=message,
             conversation_id=conversation_id,
             current_message_id=current_message_id,
+            host_message_id=host_message_id,
             exclude_message_ids=exclude_message_ids,
             route=route,
             paths=runtime_paths,

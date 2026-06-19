@@ -9,6 +9,7 @@ from typing import Any
 import base64
 
 from . import conversations, turn_coalescer
+from .agent_host import submit_clarify_answer
 from .attachments import (
     AttachmentError,
     attachment_summaries_for_prompt,
@@ -914,6 +915,21 @@ async def _handle_weixin_after_store(
 
     runtime_paths = paths or ensure_runtime_dirs()
     attachments = attachments or []
+    if text.strip() and not attachments:
+        clarify_result = submit_clarify_answer(
+            conversation_id,
+            text,
+            message_id=current_message_id,
+            paths=runtime_paths,
+        )
+        if clarify_result is not None:
+            return {
+                "ok": True,
+                "intent": {"kind": "clarify_answer"},
+                "message": "已收到，我继续处理。",
+                "assistant_message": clarify_result.get("assistant_message"),
+            }
+
     switch_intent = _maybe_handle_weixin_conversation_switch(text, route=route, paths=runtime_paths)
     if switch_intent is not None:
         reply = _finish_weixin_reply(
@@ -1093,6 +1109,7 @@ async def _handle_weixin_after_store(
             conversation_id,
             runtime_paths,
             current_message_id=current_message_id,
+            host_message_id=reply_message_id,
             route=route,
             require_existing_conversation=True,
         )

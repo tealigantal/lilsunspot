@@ -14,6 +14,7 @@ def daemon_client(tmp_path, monkeypatch):
 
     import lilsunspot.daemon.auth as auth
     import lilsunspot.daemon.audit as audit
+    import lilsunspot.daemon.agent_host as agent_host
     import lilsunspot.daemon.agent_runner as agent_runner
     import lilsunspot.daemon.attachments as attachments
     import lilsunspot.daemon.capabilities as capabilities
@@ -45,6 +46,8 @@ def daemon_client(tmp_path, monkeypatch):
     auth = importlib.reload(auth)
     audit = importlib.reload(audit)
     conversations = importlib.reload(conversations)
+    agent_host = importlib.reload(agent_host)
+    agent_host.reset_for_tests()
     delivery_actions = importlib.reload(delivery_actions)
     delivery_tools = importlib.reload(delivery_tools)
     attachments = importlib.reload(attachments)
@@ -76,6 +79,7 @@ def daemon_client(tmp_path, monkeypatch):
     headers = {auth.TOKEN_HEADER: token}
     return SimpleNamespace(
         app_module=app_module,
+        agent_host=agent_host,
         agent_runner=agent_runner,
         audit=audit,
         auth=auth,
@@ -88,6 +92,7 @@ def daemon_client(tmp_path, monkeypatch):
         delivery_actions=delivery_actions,
         delivery_tools=delivery_tools,
         headers=headers,
+        gateway=gateway,
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,
         diagnostics=diagnostics,

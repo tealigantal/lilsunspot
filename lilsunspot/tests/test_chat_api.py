@@ -8,6 +8,7 @@ def _load_test_app(tmp_path, monkeypatch):
     monkeypatch.setenv("LILSUNSPOT_DATA_DIR", str(tmp_path / "data"))
 
     import lilsunspot.daemon.auth as auth
+    import lilsunspot.daemon.agent_host as agent_host
     import lilsunspot.daemon.agent_runner as agent_runner
     import lilsunspot.daemon.chat_client as chat_client
     import lilsunspot.daemon.config_paths as config_paths
@@ -17,6 +18,8 @@ def _load_test_app(tmp_path, monkeypatch):
 
     importlib.reload(config_paths)
     importlib.reload(auth)
+    agent_host = importlib.reload(agent_host)
+    agent_host.reset_for_tests()
     importlib.reload(provider_client)
     chat_client = importlib.reload(chat_client)
     agent_runner = importlib.reload(agent_runner)

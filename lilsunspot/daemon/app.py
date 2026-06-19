@@ -783,7 +783,9 @@ def _assistant_message_from_chat_result(
     source: str,
     paths: Any,
     message_id: str | None = None,
+    source_message_ids: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    source_ids = [str(item) for item in (source_message_ids or []) if str(item).strip()]
     prepared = prepare_assistant_delivery(
         str(chat_result.get("reply") or ""),
         conversation_id=conversation_id,
@@ -798,6 +800,9 @@ def _assistant_message_from_chat_result(
         "model": chat_result.get("model"),
         "hermes_session_id": chat_result.get("hermes_session_id"),
         "delivery": prepared.metadata(),
+        "source_message_ids": source_ids,
+        "source_message_count": len(source_ids),
+        "visible_reply": prepared.visible_text,
     }
     if message_id:
         assistant_message = conversations.update_message(
@@ -982,6 +987,7 @@ async def _send_conversation_message(
             conversation_id=conversation_id,
             source="assistant",
             paths=runtime_paths,
+            source_message_ids=[user_message["id"]],
         )
     else:
         assistant_message = conversations.create_message(
@@ -1158,6 +1164,7 @@ async def _accept_conversation_message(
                 source=assistant_source,
                 paths=runtime_paths,
                 message_id=assistant_placeholder["id"],
+                source_message_ids=[user_message["id"]],
             )
         else:
             assistant_message = conversations.update_message(

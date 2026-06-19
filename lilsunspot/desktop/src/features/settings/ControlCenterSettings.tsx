@@ -298,15 +298,15 @@ export function ControlCenterSettings({
       <article className="controlPanelCard">
         <h4>记忆</h4>
         <div className="controlFormGrid single">
-          <textarea value={memoryText} onChange={(event) => setMemoryText(event.target.value)} placeholder="想让小黑子记住的偏好或事实" />
+          <textarea value={memoryText} onChange={(event) => setMemoryText(event.target.value)} placeholder="本地记录的偏好或事实" />
           <button type="button" onClick={() => void addMemory()} disabled={busy}>
-            保存记忆
+            保存本地记录
           </button>
         </div>
         <div className="productList">
           {memories.map((memory) => (
             <div key={memory.id}>
-              <strong>{memory.enabled ? "启用" : "暂停"}</strong>
+              <strong>{memory.enabled ? "本地记录 · 启用" : "本地记录 · 暂停"}</strong>
               <p>{memory.text}</p>
               <div>
                 <button type="button" className="secondaryButton compactButton" onClick={() => void toggleMemory(memory)}>

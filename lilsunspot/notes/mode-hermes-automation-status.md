@@ -7,7 +7,7 @@
 | 3 Tools | merged | codex/mode-hermes-stage-3-tools / PR #27 | focused 11 passed；focused rerun 3 passed；tool rerun 2 passed；daemon 126 passed；product 47 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed；GitHub checks passed | 真实 Provider/微信账号 smoke 未运行；Tauri/NSIS 按阶段规则未运行 |
 | 4 Policy | merged | codex/mode-hermes-stage-4-policy / PR #28 | focused 10 passed；focused rerun 3 passed；daemon 127 passed；product 47 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed；GitHub checks passed | 真实 Provider/微信账号 smoke 未运行；Tauri/NSIS 按阶段规则未运行；Clarify UI/宿主回调留到 Stage 5 |
 | 5 Host | merged | codex/mode-hermes-stage-5-host / PR #29 | focused 3 passed；focused files 59 passed；daemon 130 passed；product 47 passed；chat API 10 passed；secret guard passed；desktop build passed；check.ps1 passed；git diff --check passed；GitHub checks passed | 真实 Provider/微信账号 smoke 未运行；Tauri/NSIS 按阶段规则未运行 |
-| 6 Parity | pr_open | codex/mode-hermes-stage-6-parity / PR #30 | parity 6 passed；related 29 passed；daemon 136 passed；product 47 passed；slow-reply rerun 1 passed；secret guard passed；desktop build passed；check.ps1 clean passed；git diff --check passed | 等待 GitHub checks；真实 Provider/微信账号 smoke 未运行；Tauri/NSIS 按阶段规则未运行 |
+| 6 Parity | merged | codex/mode-hermes-stage-6-parity / PR #30 | parity 6 passed；related 29 passed；daemon 136 passed；product 47 passed；slow-reply rerun 1 passed；secret guard passed；desktop build passed；check.ps1 clean passed；git diff --check passed；GitHub checks passed | 阶段内未运行真实 Provider/微信账号 smoke；Tauri/NSIS 按阶段规则未运行 |
 
 ## 2026-06-19 Stage 1 记录
 
@@ -61,4 +61,12 @@
 - 范围：新增 parity 契约测试；修正 `file` toolset 配置展示与实际 Agent 强制启用不一致；把 `product_memories` API/桌面文案明确为“本地记录”；为 assistant 回复 metadata 补充 source message 映射和最终 visible reply。
 - PR：`https://github.com/tealigantal/lilsunspot/pull/30`，base=`develop`，head=`codex/mode-hermes-stage-6-parity`。
 - 已验证：`python -m pytest lilsunspot/daemon/tests/test_mode_hermes_parity.py --timeout-method=thread --basetemp .tmp-pytest-mode-stage6-parity-rerun` 6 passed；`python -m pytest lilsunspot/daemon/tests/test_capabilities.py lilsunspot/daemon/tests/test_product_features.py lilsunspot/daemon/tests/test_conversation_sync.py::test_weixin_media_event_registers_attachment_summary_and_ai_prompt lilsunspot/tests/test_chat_api.py --timeout-method=thread --basetemp .tmp-pytest-mode-stage6-related-rerun` 29 passed；`python -m pytest lilsunspot/daemon/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-daemon-stage6-final-rerun` 136 passed；`python -m pytest lilsunspot/tests --timeout-method=thread --basetemp .tmp-pytest-lilsunspot-stage6-final-rerun` 47 passed；`python scripts/guard_no_secrets.py` passed；`npm run build --prefix lilsunspot/desktop` passed；`git diff --check` passed with LF/CRLF working-copy warnings only；`python -m pytest lilsunspot/daemon/tests/test_conversation_sync.py::test_desktop_slow_reply_returns_accepted_before_agent_finishes --timeout-method=thread --basetemp .tmp-pytest-mode-stage6-slow-reply-rerun` 1 passed；`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` clean passed（daemon 136 passed + secret guard + desktop build）。
-- 待验证：GitHub checks。真实 Provider 与真实微信账号 smoke 不在本阶段自动化验证范围；Tauri/NSIS 发布构建按阶段规则未运行。
+- GitHub：checks passed，PR #30 已合并到 `develop`，merge commit `526d8dbfeaa83228c8f152f19e94a7545a144c33`。
+- 未验证：真实 Provider 与真实微信账号 smoke 不在本阶段自动化验证范围；Tauri/NSIS 发布构建按阶段规则未运行。
+
+## 2026-06-20 安装版微信现场验收记录
+
+- 范围：基于最新 `develop` 重新构建 NSIS，静默覆盖安装到 `%LOCALAPPDATA%\Lilsunspot`，启动真实安装版并连接真实微信账号；不记录 runtime token、微信凭据、私聊正文、二维码或附件原文。
+- 已通过：安装版 `/health` ready；`Lilsunspot.exe` 与 onedir `lilsunspotd.exe` 均从安装目录运行；微信 runtime connected/running；真实微信文本回合收发通过；微信请求生成 TXT 文件并发回通过；微信图片入站保存为 `image/jpeg` 并完成识别；微信请求“把图发回我”后同图返还通过。
+- 已发现问题：表格请求生成的 `.xlsx` 可传输到微信，但本地字节是 24 bytes UTF-8 文本 `文件传输测试通过`，不是合法 Excel/OpenXML 文件；微信原生预览打不开是合理表现。该问题已转入 `TASKS.md` Next 的 `LIL-WEIXIN-FILE-FORMAT-HARDENING`。
+- 后续测试计划：暂停继续现场测试，后续由用户辅助分步验证。下一轮优先覆盖真实 `.csv/.xlsx/.docx/.pdf` 生成与打开、PDF/docx/xlsx/csv 发回微信、断线重连、二维码过期、多 route、删除当前微信对话后的下一条入站、大文件/多文件，以及能力中心/附件卡桌面和移动视口验收。

@@ -23,17 +23,19 @@ LIL-CAPABILITY-ORCHESTRATION-01B：迁移 Hermes 本地能力并修复重配/图
 
 ## Next
 
-1. LIL-HERMES-FULL-01-INSTALL-QA：安装版全链路人工验收。覆盖 `Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> /capabilities -> chat/Weixin/tools`，真实微信发图片/PDF/docx/xlsx/csv 后桌面实时显示，生成文件经审批发回微信，能力中心/附件卡在 960x680 和 390x760 下无重叠或横向溢出，关窗进托盘、托盘打开、托盘退出。
-2. LIL-WEIXIN-MEDIA-STABILITY-QA：微信 live 稳定性复验。重点覆盖扫码误操作、二维码过期、断线重连、多个微信 route、删除当前微信对话后的下一条入站、微信端自然语言切换会话，以及安装版 runtime 断线后的恢复状态。
-3. LIL-CREDENTIAL-CAPABILITY-QA：外部账号/凭据依赖能力验收。用安全测试凭据验证 MCP server、browser、x_search、image/video/tts、Home Assistant、Spotify、Discord/Yuanbao 等能力从“需配置”到“可用/失败原因”的状态闭环；不得记录任何 secret、私聊正文、附件内容或二维码。
-4. LIL-UPSTREAM-SYNC-REMOTE-QA：GitHub Actions 首次远程验收。手动触发 `lilsunspot-upstream-sync.yml` 的 `workflow_dispatch`，确认 upstream 变更时能创建草稿 PR，冲突时能创建 issue，PR 检查和能力覆盖测试按预期执行。
-5. LIL-RELEASE-CANDIDATE-HARDENING：发布候选收口。跑 `scripts/check_release.ps1`、安装版 smoke、真实 provider smoke、secret guard、NSIS 产物确认，并整理最终已知风险；必要时补一个“普通用户验收清单”。
+1. LIL-WEIXIN-FILE-FORMAT-HARDENING：修复并复验生成文件真实格式。2026-06-20 安装版真实微信现场已验证：文本回合通过、TXT 文件生成并发回微信通过、微信图片入站识别通过、图片按请求发回微信通过；但“表格文件”请求生成的 `.xlsx` 实际只有 24 bytes，内容是 UTF-8 文本 `文件传输测试通过`，不是合法 Excel/OpenXML 文件。后续应先修复：普通“表格”默认生成 `.csv`，明确要求 Excel 时生成真实 `.xlsx`；`.xlsx/.docx/.pdf` 必须做格式签名/打开校验，不能把纯文本伪装成 Office/PDF 后交付。
+2. LIL-HERMES-FULL-01-INSTALL-QA：继续安装版全链路人工验收。已覆盖 `Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Weixin text/file/image` 的部分主链路；待补 `/capabilities` 页面、能力中心/附件卡在 960x680 和 390x760 下无重叠或横向溢出、PDF/docx/xlsx/csv 真实格式、生成文件经审批发回微信、关窗进托盘、托盘打开、托盘退出。
+3. LIL-WEIXIN-MEDIA-STABILITY-QA：微信 live 稳定性复验。重点覆盖扫码误操作、二维码过期、断线重连、多个微信 route、删除当前微信对话后的下一条入站、微信端自然语言切换会话、大文件/多文件、以及安装版 runtime 断线后的恢复状态。
+4. LIL-CREDENTIAL-CAPABILITY-QA：外部账号/凭据依赖能力验收。用安全测试凭据验证 MCP server、browser、x_search、image/video/tts、Home Assistant、Spotify、Discord/Yuanbao 等能力从“需配置”到“可用/失败原因”的状态闭环；不得记录任何 secret、私聊正文、附件内容或二维码。
+5. LIL-UPSTREAM-SYNC-REMOTE-QA：GitHub Actions 首次远程验收。手动触发 `lilsunspot-upstream-sync.yml` 的 `workflow_dispatch`，确认 upstream 变更时能创建草稿 PR，冲突时能创建 issue，PR 检查和能力覆盖测试按预期执行。
+6. LIL-RELEASE-CANDIDATE-HARDENING：发布候选收口。跑 `scripts/check_release.ps1`、安装版 smoke、真实 provider smoke、secret guard、NSIS 产物确认，并整理最终已知风险；必要时补一个“普通用户验收清单”。
 
 ## Blocked / Unknown
 
 - 2026-06-13：定向 live smoke 已跑到“DeepSeek 文本主模型 -> Qwen 辅助视觉”真实链路，但本机 DashScope Key 被服务端归类为 `invalid_key`，所以真实 `recognized` 成功仍需一个有效视觉 Key 复验；mock pytest 已覆盖辅助视觉成功闭环和脱敏错误分类。
 - 真实外部账号能力仍依赖安全测试凭据；没有凭据时只能验配置状态、脱敏和失败原因。
 - 真实微信扫码、二维码过期、断线重连和多账号 route 仍需要 live 微信环境人工复验，自动测试只能覆盖 fake runtime 和产品层状态机。
+- 2026-06-20 安装版真实微信现场验收确认传输链路可用，但生成 Office/PDF 真实格式尚未闭环；当前发现 `.xlsx` 可被发送到手机，但文件实际是纯文本伪装，属于产品生成/格式校验问题，不是微信传输失败。
 - Browser IAB、CodeRabbit 等外部工具在本机不总是可用；截图级 UI 和外部 review 需要在工具可用时补跑，或采用本地 headless/CDP/manual 兜底。
 - 视觉模型推荐、价格和可用模型会随服务商变化；后续实现只能跳转官方页面并复用 Hermes/model metadata 判断能力，不应在产品层写死 provider 名或价格承诺。
 

@@ -1,5 +1,14 @@
 # Agent Memory
 
+## 2026-06-20 - installed Weixin file and image transfer live QA
+
+- Task: verify installed-app Weixin file and image transfer after Mode/Hermes Stage 6.
+- Files touched: `lilsunspot/notes/mode-hermes-automation-status.md` and this memory file.
+- Decision/result: rebuilt the latest `develop` NSIS installer, silently installed it to `%LOCALAPPDATA%\Lilsunspot`, launched the installed app, and verified `/health` ready with Weixin runtime connected. Real Weixin text roundtrip passed. A Weixin request to generate and send a text file returned a safe `text/plain` attachment and the user confirmed receipt. A Weixin image upload was stored as `image/jpeg`, recognized, and a later request returned the same image to Weixin; the user confirmed receipt.
+- Decision/result: the transfer channel works, but Office generation is not yet correct. A requested spreadsheet was sent with `.xlsx` extension and Excel MIME type, but local bytes were plain UTF-8 text (`文件传输测试通过`) and only 24 bytes, so Weixin native preview could not open it. This is a product generation/format-validation issue, not a Weixin transport failure.
+- Validation: installed app process and onedir sidecar ran from `%LOCALAPPDATA%\Lilsunspot`; `/gateway/weixin/status` reported connected/running with no runtime error; txt delivery had `delivery.status=delivered`; image inbound stored one `image/jpeg` attachment with recognized summary, and image return had `delivery.status=delivered`.
+- Remaining risk: generated Office formats need a guard or real writer path so `.xlsx`/`.docx`/`.pdf` cannot be created from plain text bytes with a fake extension; broader Weixin stability cases such as disconnect/reconnect, QR expiry, multi-route, and large files still need live QA. Follow-up testing is now tracked in `TASKS.md` Next under `LIL-WEIXIN-FILE-FORMAT-HARDENING`, `LIL-HERMES-FULL-01-INSTALL-QA`, and `LIL-WEIXIN-MEDIA-STABILITY-QA`.
+
 ## 2026-06-16 - generated file delivery acceptance recheck
 
 - Task: rerun acceptance-level validation for generated file/image delivery and the fresh setup.exe.

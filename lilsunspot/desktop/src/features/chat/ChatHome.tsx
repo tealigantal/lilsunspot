@@ -545,7 +545,7 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
           imageCapability={capabilityNode(modelCapabilities, "image.read")}
           onOpenVisionSettings={() => onOpenSettings("model")}
           busy={busy}
-          placeholder="输入你想问的内容，Ctrl+Enter 发送"
+          placeholder="输入你想问的内容"
         />
       </article>
       <aside className="chatSidePanel" aria-label="输出模式">

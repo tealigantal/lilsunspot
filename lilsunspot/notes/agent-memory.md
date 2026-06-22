@@ -8,6 +8,29 @@
 - Validation: `python -m pytest lilsunspot/daemon/tests/test_conversation_sync.py -q` passed with 56 tests.
 - Remaining risk: this was local automated coverage only. A rebuilt installed app still needs live Weixin verification for real `.csv/.xlsx/.docx/.pdf` generation, phone-side opening/preview behavior, and approval-to-Weixin delivery.
 
+## 2026-06-21 - desktop Enter-to-send shortcut and installer memory boundary
+
+- Task: add a desktop chat shortcut so Enter sends a message while Shift+Enter keeps multiline input, and answer whether user memory is bundled into `setup.exe`.
+- Files touched: `lilsunspot/desktop/src/features/chat/ChatComposer.tsx`, `lilsunspot/desktop/src/features/chat/ChatHome.tsx`, and this memory file.
+- Decision/result: the main desktop chat composer now sends on Enter unless the user is composing IME text or holding Shift. The placeholder no longer advertises a keyboard shortcut. Installer memory boundary was rechecked: Tauri bundles `binaries/lilsunspotd`, while runtime data and `product_memories` live under the per-user data dir such as `%LOCALAPPDATA%\Lilsunspot\data`, so another user receiving only the installer gets a fresh local data directory without this machine's memories.
+- Remaining risk: existing users reinstalling over their own `%LOCALAPPDATA%\Lilsunspot\data` keep their local data unless they explicitly reset or uninstall/remove data.
+
+## 2026-06-21 - memory reset truthfulness issue
+
+- Task: inspect the latest installed-app conversation after a user-requested memory reset and add the issue to the next plan without changing code.
+- Files touched: `TASKS.md`, `lilsunspot/notes/mode-hermes-automation-status.md`, and this memory file.
+- Decision/result: the latest sanitized message check matched the screenshot: after a user asked to delete a specific topic from memory and then confirm local cleanup, the assistant claimed cleanup while exposing internal tool names and environment assumptions. This is a product truthfulness and privacy-boundary problem, not only a wording issue. Memory reset must distinguish product local memory, Hermes agent memory, conversation history, Weixin route/session context, and installed-app local files.
+- Implementation note: record the user's preferred fix as part of the plan. The installed build should include the local search dependency used for filesystem verification, such as `ripgrep`/`rg`, and release smoke should confirm it is available in the packaged app. This supports verification, but the actual reset must still call structured memory/session cleanup paths instead of treating search as the deletion mechanism.
+- Validation: documentation-only change. The conversation inspection recorded only message lengths, roles, timestamps, statuses, metadata keys, and boolean flags for internal-tool exposure or deletion claims; no private names, Weixin credentials, runtime tokens, private message text, QR data, screenshots, or attachment contents were written to repo docs.
+- Remaining risk: until implemented, the app should not promise verified memory deletion or local cleanup from chat alone; it needs a real clear/reset path with a Chinese confirmation summary and a clear "cannot verify" response when the boundary is incomplete.
+
+## 2026-06-21 - Weixin new account memory carryover issue
+
+- Task: inspect the latest installed-app Weixin conversation state and record the user's concern without changing product code.
+- Files touched: `TASKS.md`, `lilsunspot/notes/mode-hermes-automation-status.md`, and this memory file.
+- Decision/result: the latest sanitized local inspection found one active Weixin conversation and Hermes state still organized around shared local session/message storage, while the local Weixin accounts directory can retain more than one account credential/sync file. The user observed that logging in with a new Weixin account can still carry over past memory/context. Until account-scoped credentials, routes, conversations, Hermes sessions, Mode state, and memory are isolated end to end, the initial product scope should not promise multiple Weixin accounts.
+- Validation: documentation-only change; no code was modified. The inspection intentionally recorded only counts, timestamps, metadata keys, message lengths, and hashed route/account identifiers, not Weixin credentials, runtime tokens, private message text, QR data, screenshots, or attachment contents.
+- Remaining risk: single-account Weixin still needs live disconnect/reconnect, QR expiry, same-account multi-contact route, deletion race, file/media, and installed-app recovery QA.
 
 ## 2026-06-20 - installed Weixin file and image transfer live QA
 

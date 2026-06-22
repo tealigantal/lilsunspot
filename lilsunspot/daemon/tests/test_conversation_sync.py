@@ -1432,6 +1432,52 @@ def test_desktop_generated_file_delivery_action_registers_attachment_card(daemon
     assert "safe_path" not in returned
 
 
+def test_desktop_generated_office_delivery_rejects_fake_xlsx(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    generated_dir = paths.hermes_home / "cache" / "documents" / "personal" / "fake_office"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = generated_dir / "fake.xlsx"
+    generated_file.write_text("文件传输测试通过", encoding="utf-8")
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        return {
+            "ok": True,
+            "reply": "表格生成好了。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_fake_xlsx",
+                    "safe_path": str(generated_file),
+                    "file_name": generated_file.name,
+                    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "media_kind": "document",
+                }
+            ],
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    monkeypatch.setattr(daemon_client.app_module, "send_agent_message", fake_send_agent_message)
+
+    response = daemon_client.client.post(
+        "/chat/send",
+        headers=daemon_client.headers,
+        json={"message": "生成一份表格文件给我", "conversation_id": "personal"},
+    )
+
+    assert response.status_code == 200
+    messages = daemon_client.client.get("/conversations/personal/messages", headers=daemon_client.headers).json()["messages"]
+    assistant = next(item for item in reversed(messages) if item["role"] == "assistant" and item["status"] == "sent")
+    assert assistant["metadata"]["delivery"]["status"] == "rejected"
+    assert assistant["metadata"]["delivery"]["reason_code"] == "invalid_file_format"
+    assert assistant["attachments"] == []
+
+
 def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_client):
     paths = daemon_client.config_paths.get_runtime_paths()
     source_message = daemon_client.conversations.create_message(
@@ -1575,6 +1621,80 @@ def test_lilsunspot_delivery_tool_registers_and_records_turn_actions(daemon_clie
         )
     assert unsafe["ok"] is False
     assert unsafe["reason_code"] == "unsafe_path"
+
+
+def test_lilsunspot_delivery_tool_creates_real_office_and_rejects_fake_binary_formats(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    deliverable_dir = paths.hermes_home / "cache" / "documents" / "personal" / "office_formats"
+    with daemon_client.delivery_actions.delivery_turn_context(
+        conversation_id="personal",
+        source="lilsunspot",
+        route=None,
+        paths=paths,
+        deliverable_dir=deliverable_dir,
+    ) as context:
+        xlsx = json.loads(
+            daemon_client.delivery_tools.create_deliverable_file_handler(
+                {
+                    "file_name": "成绩表.xlsx",
+                    "content_text": "name,score\n小黑子,100\n",
+                    "mime_type": "text/plain",
+                }
+            )
+        )
+        docx = json.loads(
+            daemon_client.delivery_tools.create_deliverable_file_handler(
+                {"file_name": "说明.docx", "content_text": "第一段\n第二段"}
+            )
+        )
+        fake_pdf = json.loads(
+            daemon_client.delivery_tools.create_deliverable_file_handler(
+                {"file_name": "说明.pdf", "content_text": "不是 PDF"}
+            )
+        )
+        fake_xlsx = json.loads(
+            daemon_client.delivery_tools.create_deliverable_file_handler(
+                {
+                    "file_name": "坏表格.xlsx",
+                    "content_base64": base64.b64encode("文件传输测试通过".encode("utf-8")).decode("ascii"),
+                }
+            )
+        )
+        actions = context.actions_for_result()
+
+    assert xlsx["ok"] is True
+    assert xlsx["file_name"] == "成绩表.xlsx"
+    assert xlsx["mime_type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert docx["ok"] is True
+    assert docx["file_name"] == "说明.docx"
+    assert docx["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert fake_pdf["ok"] is False
+    assert fake_pdf["reason_code"] == "unsupported_generated_format"
+    assert fake_xlsx["ok"] is False
+    assert fake_xlsx["reason_code"] == "invalid_file_format"
+
+    xlsx_action = next(item for item in actions if item.get("file_name") == "成绩表.xlsx")
+    docx_action = next(item for item in actions if item.get("file_name") == "说明.docx")
+    assert Path(xlsx_action["safe_path"]).read_bytes().startswith(b"PK")
+    assert Path(docx_action["safe_path"]).read_bytes().startswith(b"PK")
+
+    import zipfile
+
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(xlsx_action["safe_path"], read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        assert sheet["A1"].value == "name"
+        assert sheet["B2"].value == "100"
+    finally:
+        workbook.close()
+    with zipfile.ZipFile(docx_action["safe_path"]) as package:
+        names = set(package.namelist())
+        assert "[Content_Types].xml" in names
+        document_xml = package.read("word/document.xml").decode("utf-8")
+    assert "第一段" in document_xml
+    assert "第二段" in document_xml
 
 
 def test_lilsunspot_mode_tools_use_current_turn_context_only(daemon_client):
@@ -2379,6 +2499,61 @@ def test_weixin_same_channel_generated_document_delivery_uses_send_document(daem
     assert fake_adapter.calls[1][2].endswith(".csv")
 
 
+def test_weixin_same_channel_generated_document_rejects_fake_xlsx_before_text_send(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    route = {"chat_id": "wx_fake_doc", "user_id": "wx_fake_doc", "chat_type": "dm"}
+    conversation = daemon_client.conversations.create_weixin_conversation(route, title="微信假表格", paths=paths)
+    generated_dir = paths.hermes_home / "cache" / "documents" / conversation["id"] / "fake_xlsx_turn"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = generated_dir / "fake.xlsx"
+    generated_file.write_text("文件传输测试通过", encoding="utf-8")
+
+    async def fake_send_agent_message(message, conversation_id=None, paths=None, **kwargs):
+        return {
+            "ok": True,
+            "reply": "表格生成好了。",
+            "delivery_actions": [
+                {
+                    "ok": True,
+                    "action_id": "da_generated_fake_xlsx",
+                    "safe_path": str(generated_file),
+                    "file_name": generated_file.name,
+                    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "media_kind": "document",
+                }
+            ],
+            "engine": "hermes_agent_loop",
+            "provider": "unit",
+            "model": "unit-model",
+            "conversation_id": conversation_id,
+            "conversation_id_supported": True,
+            "conversation_id_requested": True,
+        }
+
+    monkeypatch.setattr(daemon_client.agent_runner, "send_agent_message", fake_send_agent_message)
+    fake_adapter = FakeWeixinSendAdapter()
+    monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
+
+    result = asyncio.run(
+        daemon_client.weixin_runtime.handle_inbound_weixin_event(
+            SimpleNamespace(
+                text="生成一份表格发给我",
+                media_urls=[],
+                media_types=[],
+                message_id="wx_generated_fake_doc_msg",
+                source=SimpleNamespace(chat_id="wx_fake_doc", user_id="wx_fake_doc", chat_type="dm"),
+            )
+        )
+    )
+
+    assert "扩展名" in result
+    assert fake_adapter.calls == []
+    messages = daemon_client.client.get(f"/conversations/{conversation['id']}/messages", headers=daemon_client.headers).json()["messages"]
+    assistant = next(item for item in reversed(messages) if item["role"] == "assistant" and item["status"] == "sent")
+    assert assistant["metadata"]["delivery"]["status"] == "rejected"
+    assert assistant["metadata"]["delivery"]["reason_code"] == "invalid_file_format"
+
+
 def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     cache_dir = paths.hermes_home / "cache" / "documents"
@@ -2508,6 +2683,49 @@ def test_weixin_approval_rejects_unsafe_attachment_path_before_sending_text(daem
     assert approved.status_code == 200
     assert approved.json()["delivery"]["ok"] is False
     assert "附件" in approved.json()["delivery"]["message"]
+    assert fake_adapter.calls == []
+
+
+def test_weixin_approval_rejects_fake_office_attachment_before_sending_text(daemon_client, monkeypatch):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    generated_file = daemon_client.attachments.attachment_storage_root(paths) / "fake.xlsx"
+    generated_file.write_text("文件传输测试通过", encoding="utf-8")
+    user_message = daemon_client.conversations.create_message(
+        source="assistant",
+        role="assistant",
+        text="生成了一个假表格",
+        paths=paths,
+    )
+    attachment = daemon_client.conversations.create_attachment_record(
+        attachment_id="att_fake_office_unit",
+        message_id=user_message["id"],
+        conversation_id="personal",
+        safe_path=generated_file,
+        file_name="fake.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size_bytes=generated_file.stat().st_size,
+        summary_status="ready",
+        metadata={"source": "generated"},
+        paths=paths,
+    )
+
+    fake_adapter = FakeWeixinSendAdapter()
+    monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
+
+    approval = daemon_client.client.post(
+        "/gateway/weixin/send",
+        headers=daemon_client.headers,
+        json={"recipient": "wx_user", "message": "看附件", "attachment_ids": [attachment["id"]]},
+    ).json()["approval"]
+    approved = daemon_client.client.post(
+        f"/safety/approvals/{approval['id']}/decide",
+        headers=daemon_client.headers,
+        json={"decision": "approved"},
+    )
+
+    assert approved.status_code == 200
+    assert approved.json()["delivery"]["ok"] is False
+    assert "格式不正确" in approved.json()["delivery"]["message"]
     assert fake_adapter.calls == []
 
 

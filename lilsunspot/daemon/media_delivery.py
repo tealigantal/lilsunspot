@@ -8,6 +8,7 @@ from typing import Any
 from . import conversations
 from .attachments import assert_safe_attachment_path, is_safe_stored_attachment, register_message_attachments
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .delivery_actions import validate_deliverable_file_for_delivery
 
 
 ATTACHMENT_MEDIA_PREFIX = "lilsunspot-attachment://"
@@ -142,6 +143,8 @@ def generated_file_delivery_prompt(deliverable_dir: Path) -> str:
             "用户要求生成新文件、报告、表格、图片文件或把新文件发给当前聊天时，必须创建真实文件并交付。",
             f"本轮唯一允许写入和交付新文件的目录：{deliverable_dir}",
             "优先流程：直接调用 lilsunspot_create_deliverable_file(file_name, content_text?, content_base64?, mime_type?, caption?) 创建并交付单个文件。",
+            "普通“表格/清单/数据表”默认生成 .csv；只有用户明确要求 Excel 或 xlsx 时才生成真实 .xlsx。",
+            ".xlsx/.docx/.pdf 不能把纯文本换扩展名伪装成文件；需要 Excel/Word 时生成真实 Office 文件，PDF 需要真实 PDF 二进制内容。",
             "兼容流程：如果已经用 Hermes write_file 写入上面目录内的真实文件，再调用 lilsunspot_deliver_file(path, caption?)。",
             "已有附件返还只使用 lilsunspot_return_attachment(att_...)；新生成文件绝不能把任务名、todo id、文件名或 write_work 当作 attachment_id。",
             "最终可见回复只写自然中文；不要在正文里显示本地路径、URL、MEDIA 标记或 lilsunspot-attachment 内部 URI。",
@@ -193,7 +196,10 @@ def prepare_assistant_delivery(
     rejected_count = len(rejections)
     status = _delivery_status(delivered_count, rejected_count)
     reason_code = rejections[0] if rejections else ""
-    if not visible_text and delivered_count:
+    if rejected_count and not delivered_count:
+        reason_text = _reason_message(reason_code)
+        visible_text = f"{visible_text}\n\n{reason_text}".strip() if visible_text else reason_text
+    elif not visible_text and delivered_count:
         visible_text = DELIVERY_EMPTY_TEXT
     elif not visible_text and rejected_count:
         visible_text = _reason_message(reason_code)
@@ -375,6 +381,9 @@ def _resolve_attachment_ref(
         resolved = is_safe_stored_attachment(str(attachment.get("safe_path") or ""), paths)
     except Exception:
         return None, "unsafe_path"
+    format_reason = validate_deliverable_file_for_delivery(resolved)
+    if format_reason:
+        return None, format_reason
     return str(resolved), ""
 
 
@@ -393,6 +402,9 @@ def _resolve_media_path(
         return None, "cross_conversation"
     if _looks_like_stored_attachment_path(resolved, paths) and stored_attachment is None:
         return None, "missing_attachment"
+    format_reason = validate_deliverable_file_for_delivery(resolved)
+    if format_reason:
+        return None, format_reason
     return str(resolved), ""
 
 
@@ -418,6 +430,9 @@ def _resolve_generated_delivery_path(
         return None, "cross_conversation"
     if not resolved.is_file():
         return None, "missing_file"
+    format_reason = validate_deliverable_file_for_delivery(resolved)
+    if format_reason:
+        return None, format_reason
     return str(resolved), ""
 
 
@@ -493,6 +508,8 @@ def _reason_message(reason_code: str) -> str:
         "ambiguous_file_content": "文件内容只能使用文本或 base64 其中一种。",
         "invalid_base64": "文件内容不是有效的 base64。",
         "file_write_failed": "文件写入失败。",
+        "invalid_file_format": "生成的文件格式和扩展名不一致，已拒绝发送。表格默认请生成 CSV；需要 Excel 时必须生成真实 .xlsx 文件。",
+        "unsupported_generated_format": "这个格式暂时不能从纯文本直接生成。请改成 CSV、TXT、Markdown，或生成真实二进制文件后再发送。",
         "missing_file_path": "没有收到要发送的文件路径。",
         "missing_attachment": "没有找到要返还的附件。",
         "cross_conversation": "这个附件属于另一个对话，不能在当前对话里返还。",

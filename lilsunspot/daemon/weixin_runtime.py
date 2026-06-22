@@ -8,6 +8,7 @@ from hermes_constants import reset_hermes_home_override, set_hermes_home_overrid
 
 from .attachments import AttachmentError, is_safe_stored_attachment
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .delivery_actions import validate_deliverable_file_for_delivery
 from .gateway import handle_weixin_message_event, load_weixin_credentials
 
 
@@ -106,6 +107,12 @@ async def _send_same_channel_delivery(adapter: Any, recipient: str, text: str, m
     if not recipient:
         return "没有找到当前微信会话，暂时不能发送附件。"
 
+    for item in media_items:
+        media_path = str(item.get("path") or "")
+        format_reason = validate_deliverable_file_for_delivery(media_path)
+        if format_reason:
+            return _file_delivery_error_message(format_reason)
+
     if text:
         result = await adapter.send(recipient, text)
         if not getattr(result, "success", False):
@@ -196,6 +203,9 @@ async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any
             path = is_safe_stored_attachment(str(attachment.get("safe_path") or ""))
         except AttachmentError as exc:
             return {"ok": False, "message": str(exc)}
+        format_reason = validate_deliverable_file_for_delivery(path)
+        if format_reason:
+            return {"ok": False, "message": _file_delivery_error_message(format_reason)}
         suffix = path.suffix.lower()
         kind = "image" if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"} else "document"
         files_to_send.append((kind, str(path)))
@@ -221,6 +231,16 @@ async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any
         "sent_text": bool(message),
         "sent_files": sent_files,
     }
+
+
+def _file_delivery_error_message(reason_code: str) -> str:
+    return {
+        "missing_file": "没有找到要发送的文件。",
+        "empty_file": "生成的文件是空的，已拒绝发送。",
+        "file_too_large": "生成的文件超过 25 MB，暂时不能发送。",
+        "invalid_file_format": "生成的文件格式不正确，已拒绝发送。表格默认请生成 CSV；需要 Excel 时必须生成真实 .xlsx 文件。",
+        "unsupported_generated_format": "这个格式暂时不能从纯文本直接生成，请改成 CSV、TXT、Markdown，或生成真实文件后再发送。",
+    }.get(reason_code, "生成的文件暂时不能发送。")
 
 
 def _make_weixin_adapter(credentials: dict[str, str]) -> Any:

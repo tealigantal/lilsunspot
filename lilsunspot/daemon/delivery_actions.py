@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 import secrets
+import zipfile
 from base64 import b64decode
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
+from xml.sax.saxutils import escape as xml_escape
 
 from . import conversations
 from .attachments import DESKTOP_UPLOAD_MAX_BYTES, is_safe_stored_attachment
@@ -18,6 +22,23 @@ _CURRENT_TURN: ContextVar["DeliveryTurnContext | None"] = ContextVar("lilsunspot
 _ATTACHMENT_ID_RE = re.compile(r"^att_[A-Za-z0-9_-]+$")
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 _SAFE_FILE_NAME_RE = re.compile(r"[^A-Za-z0-9._\-\u4e00-\u9fff ]+")
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PDF_MIME = "application/pdf"
+_STRICT_FORMAT_MIME_BY_EXT = {
+    ".xlsx": _XLSX_MIME,
+    ".docx": _DOCX_MIME,
+    ".pdf": _PDF_MIME,
+}
+_TEXT_MIME_BY_EXT = {
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".log": "text/plain",
+}
 
 
 @dataclass
@@ -144,6 +165,9 @@ def deliver_file_action(path: str, caption: str = "") -> dict[str, Any]:
         return context.add_file_action(_failed_file_action(path, "empty_file", target=context.target))
     if size_bytes > DESKTOP_UPLOAD_MAX_BYTES:
         return context.add_file_action(_failed_file_action(path, "file_too_large", target=context.target))
+    format_reason = validate_deliverable_file_for_delivery(safe_path)
+    if format_reason:
+        return context.add_file_action(_failed_file_action(path, format_reason, target=context.target))
     return context.add_file_action(_file_action_for_path(safe_path, context, caption=caption))
 
 
@@ -167,10 +191,13 @@ def create_deliverable_file_action(
     if content_text is None and content_base64 is None:
         return context.add_file_action(_failed_action("", "missing_file_content", target=context.target))
 
-    try:
-        data = str(content_text).encode("utf-8") if content_text is not None else _decode_base64_payload(content_base64)
-    except Exception:
-        return context.add_file_action(_failed_action("", "invalid_base64", target=context.target))
+    data, inferred_mime, content_reason = _materialize_file_content(
+        safe_name,
+        content_text=content_text,
+        content_base64=content_base64,
+    )
+    if content_reason:
+        return context.add_file_action(_failed_action("", content_reason, target=context.target))
     if not data:
         return context.add_file_action(_failed_action("", "empty_file", target=context.target))
     if len(data) > DESKTOP_UPLOAD_MAX_BYTES:
@@ -182,7 +209,13 @@ def create_deliverable_file_action(
         target_path.write_bytes(data)
     except OSError:
         return context.add_file_action(_failed_action("", "file_write_failed", target=context.target))
-    return context.add_file_action(_file_action_for_path(target_path, context, caption=caption, mime_type=mime_type))
+    format_reason = validate_deliverable_file_for_delivery(target_path)
+    if format_reason:
+        _remove_file_quietly(target_path)
+        return context.add_file_action(_failed_file_action(target_path.name, format_reason, target=context.target))
+    return context.add_file_action(
+        _file_action_for_path(target_path, context, caption=caption, mime_type=mime_type or inferred_mime)
+    )
 
 
 def _failed_action(attachment_id: str, reason_code: str, *, target: str = "") -> dict[str, Any]:
@@ -213,7 +246,7 @@ def _file_action_for_path(
     caption: str = "",
     mime_type: str = "",
 ) -> dict[str, Any]:
-    mime = str(mime_type or _guess_mime_type(safe_path))
+    mime = _preferred_mime_type(safe_path, mime_type)
     media_kind = "image" if mime.lower().startswith("image/") or safe_path.suffix.lower() in _IMAGE_EXTS else "document"
     return {
         "ok": True,
@@ -295,6 +328,211 @@ def _guess_mime_type(path: Path) -> str:
 
     guessed, _encoding = mimetypes.guess_type(str(path))
     return guessed or "application/octet-stream"
+
+
+def _preferred_mime_type(path: Path, provided_mime: str = "") -> str:
+    suffix = path.suffix.lower()
+    if suffix in _STRICT_FORMAT_MIME_BY_EXT:
+        return _STRICT_FORMAT_MIME_BY_EXT[suffix]
+    if suffix in _TEXT_MIME_BY_EXT:
+        return _TEXT_MIME_BY_EXT[suffix]
+    return str(provided_mime or _guess_mime_type(path))
+
+
+def _materialize_file_content(
+    file_name: str,
+    *,
+    content_text: str | None,
+    content_base64: str | None,
+) -> tuple[bytes, str, str]:
+    suffix = Path(file_name).suffix.lower()
+    if content_text is not None:
+        text = str(content_text)
+        try:
+            if suffix == ".xlsx":
+                return _xlsx_bytes_from_text(text), _XLSX_MIME, ""
+            if suffix == ".docx":
+                return _docx_bytes_from_text(text), _DOCX_MIME, ""
+        except Exception:
+            return b"", "", "unsupported_generated_format"
+        if suffix == ".pdf":
+            return b"", "", "unsupported_generated_format"
+        return text.encode("utf-8"), _TEXT_MIME_BY_EXT.get(suffix, ""), ""
+
+    try:
+        data = _decode_base64_payload(content_base64)
+    except Exception:
+        return b"", "", "invalid_base64"
+    reason = _validate_strict_format_bytes(file_name, data)
+    if reason:
+        return b"", "", reason
+    return data, _STRICT_FORMAT_MIME_BY_EXT.get(suffix, _TEXT_MIME_BY_EXT.get(suffix, "")), ""
+
+
+def _rows_from_text(text: str) -> list[list[str]]:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return [["内容"], [""]]
+
+    markdown_rows: list[list[str]] = []
+    for line in lines:
+        if "|" not in line:
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells):
+            continue
+        if any(cells):
+            markdown_rows.append(cells)
+    if markdown_rows:
+        return markdown_rows
+
+    sample = "\n".join(lines[:50])
+    delimiter = "\t" if "\t" in sample else "," if "," in sample else ""
+    if delimiter:
+        rows = list(csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter))
+        return [[str(cell) for cell in row] for row in rows if any(str(cell).strip() for cell in row)]
+    return [["内容"], *[[line] for line in lines]]
+
+
+def _xlsx_bytes_from_text(text: str) -> bytes:
+    try:
+        from openpyxl import Workbook
+    except Exception as exc:
+        raise RuntimeError("openpyxl unavailable") from exc
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet1"
+    for row in _rows_from_text(text):
+        sheet.append(row)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+    return buffer.getvalue()
+
+
+def _docx_bytes_from_text(text: str) -> bytes:
+    lines = str(text or "").splitlines() or [""]
+    paragraph_xml = "".join(
+        f'<w:p><w:r><w:t xml:space="preserve">{xml_escape(line)}</w:t></w:r></w:p>' for line in lines
+    )
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{paragraph_xml}<w:sectPr/></w:body>"
+        "</w:document>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        "</Types>"
+    )
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/>'
+        "</Relationships>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("[Content_Types].xml", content_types)
+        package.writestr("_rels/.rels", rels)
+        package.writestr("word/document.xml", document_xml)
+    return buffer.getvalue()
+
+
+def validate_deliverable_file_for_delivery(path: str | Path) -> str:
+    candidate = Path(path)
+    try:
+        if not candidate.is_file():
+            return "missing_file"
+        size_bytes = candidate.stat().st_size
+    except OSError:
+        return "missing_file"
+    if size_bytes <= 0:
+        return "empty_file"
+    if size_bytes > DESKTOP_UPLOAD_MAX_BYTES:
+        return "file_too_large"
+    return _validate_strict_format_file(candidate)
+
+
+def _validate_strict_format_file(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix not in _STRICT_FORMAT_MIME_BY_EXT:
+        return ""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return "missing_file"
+    return _validate_strict_format_bytes(path.name, data)
+
+
+def _validate_strict_format_bytes(file_name: str, data: bytes) -> str:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".xlsx":
+        return _validate_xlsx_bytes(data)
+    if suffix == ".docx":
+        return _validate_docx_bytes(data)
+    if suffix == ".pdf":
+        return _validate_pdf_bytes(data)
+    return ""
+
+
+def _validate_xlsx_bytes(data: bytes) -> str:
+    if not data.startswith(b"PK"):
+        return "invalid_file_format"
+    try:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        workbook.close()
+    except Exception:
+        return "invalid_file_format"
+    return ""
+
+
+def _validate_docx_bytes(data: bytes) -> str:
+    if not data.startswith(b"PK"):
+        return "invalid_file_format"
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as package:
+            names = set(package.namelist())
+            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+                return "invalid_file_format"
+            package.read("word/document.xml")
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return "invalid_file_format"
+    return ""
+
+
+def _validate_pdf_bytes(data: bytes) -> str:
+    if not data.lstrip().startswith(b"%PDF-"):
+        return "invalid_file_format"
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        if len(reader.pages) < 1:
+            return "invalid_file_format"
+    except ImportError:
+        if b"%%EOF" not in data[-2048:]:
+            return "invalid_file_format"
+    except Exception:
+        return "invalid_file_format"
+    return ""
+
+
+def _remove_file_quietly(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _decode_base64_payload(value: str | None) -> bytes:

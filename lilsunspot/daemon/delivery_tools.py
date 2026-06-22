@@ -67,22 +67,27 @@ CREATE_DELIVERABLE_FILE_SCHEMA = {
     "description": (
         "Create one real file in the current lilsunspot safe deliverable directory "
         "and deliver it to the current user. Use content_text for UTF-8 text files "
-        "or content_base64 for binary files. Do not include both."
+        "or content_base64 for binary files. Do not include both. For ordinary tables "
+        "use .csv by default; use .xlsx only when the user explicitly asks for Excel."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "file_name": {
                 "type": "string",
-                "description": "Safe display file name, for example report.md, summary.txt, data.csv, or chart.png.",
+                "description": "Safe display file name, for example report.md, summary.txt, data.csv, data.xlsx, or chart.png.",
             },
             "content_text": {
                 "type": "string",
-                "description": "UTF-8 text content for the file. Use this for markdown, txt, csv, json, html, etc.",
+                "description": (
+                    "UTF-8 text content. Use this for markdown, txt, csv, json, html, etc. "
+                    "If file_name ends with .xlsx or .docx, lilsunspot converts this text into a real Office file. "
+                    "Do not use this for PDF."
+                ),
             },
             "content_base64": {
                 "type": "string",
-                "description": "Base64 file bytes for binary files. Do not include content_text at the same time.",
+                "description": "Base64 bytes for real binary files such as png or pdf. Do not include content_text at the same time.",
             },
             "mime_type": {
                 "type": "string",

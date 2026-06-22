@@ -1,5 +1,14 @@
 # Agent Memory
 
+## 2026-06-22 - generated Office format hardening
+
+- Task: implement the first `LIL-WEIXIN-FILE-FORMAT-HARDENING` slice so generated files cannot be pure text with fake Office/PDF extensions.
+- Files touched: `TASKS.md`, `lilsunspot/daemon/delivery_actions.py`, `lilsunspot/daemon/delivery_tools.py`, `lilsunspot/daemon/media_delivery.py`, `lilsunspot/daemon/weixin_runtime.py`, `lilsunspot/daemon/tests/test_conversation_sync.py`, and this memory file.
+- Decision/result: `lilsunspot_create_deliverable_file` now tells the agent to use `.csv` for ordinary tables and `.xlsx` only for explicit Excel requests. Text content for `.xlsx` is converted into a real workbook; text content for `.docx` becomes a minimal real OpenXML document; text content for `.pdf` is rejected instead of being renamed. Delivery actions, same-channel Weixin delivery, and approved Weixin sends all validate `.xlsx/.docx/.pdf` before registering or sending, so fake Office/PDF bytes fail closed with a plain Chinese reason.
+- Validation: `python -m pytest lilsunspot/daemon/tests/test_conversation_sync.py -q` passed with 56 tests.
+- Remaining risk: this was local automated coverage only. A rebuilt installed app still needs live Weixin verification for real `.csv/.xlsx/.docx/.pdf` generation, phone-side opening/preview behavior, and approval-to-Weixin delivery.
+
+
 ## 2026-06-20 - installed Weixin file and image transfer live QA
 
 - Task: verify installed-app Weixin file and image transfer after Mode/Hermes Stage 6.

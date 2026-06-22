@@ -23,7 +23,7 @@ LIL-CAPABILITY-ORCHESTRATION-01B：迁移 Hermes 本地能力并修复重配/图
 
 ## Next
 
-1. LIL-WEIXIN-FILE-FORMAT-HARDENING：修复并复验生成文件真实格式。2026-06-20 安装版真实微信现场已验证：文本回合通过、TXT 文件生成并发回微信通过、微信图片入站识别通过、图片按请求发回微信通过；但“表格文件”请求生成的 `.xlsx` 实际只有 24 bytes，内容是 UTF-8 文本 `文件传输测试通过`，不是合法 Excel/OpenXML 文件。后续应先修复：普通“表格”默认生成 `.csv`，明确要求 Excel 时生成真实 `.xlsx`；`.xlsx/.docx/.pdf` 必须做格式签名/打开校验，不能把纯文本伪装成 Office/PDF 后交付。
+1. LIL-WEIXIN-FILE-FORMAT-HARDENING：修复并复验生成文件真实格式。2026-06-20 安装版真实微信现场已验证：文本回合通过、TXT 文件生成并发回微信通过、微信图片入站识别通过、图片按请求发回微信通过；但“表格文件”请求生成的 `.xlsx` 实际只有 24 bytes，内容是 UTF-8 文本 `文件传输测试通过`，不是合法 Excel/OpenXML 文件。后续应先修复：普通“表格”默认生成 `.csv`，明确要求 Excel 时生成真实 `.xlsx`；`.xlsx/.docx/.pdf` 必须做格式签名/打开校验，不能把纯文本伪装成 Office/PDF 后交付。2026-06-22 代码侧已增加交付工具、delivery action、同路微信发送和审批发送前的真实格式校验：普通表格提示默认 `.csv`，`.xlsx`/`.docx` 由文本生成真实 Office 包，纯文本 `.pdf` 被拒绝，伪 `.xlsx/.docx/.pdf` 不会注册或发送；仍需重建安装版后做真实微信 CSV/XLSX/DOCX/PDF 现场复验。
 2. LIL-HERMES-FULL-01-INSTALL-QA：继续安装版全链路人工验收。已覆盖 `Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Weixin text/file/image` 的部分主链路；待补 `/capabilities` 页面、能力中心/附件卡在 960x680 和 390x760 下无重叠或横向溢出、PDF/docx/xlsx/csv 真实格式、生成文件经审批发回微信、关窗进托盘、托盘打开、托盘退出。
 3. LIL-WEIXIN-MEDIA-STABILITY-QA：微信 live 稳定性复验。重点覆盖扫码误操作、二维码过期、断线重连、多个微信 route、删除当前微信对话后的下一条入站、微信端自然语言切换会话、大文件/多文件、以及安装版 runtime 断线后的恢复状态。
 4. LIL-CREDENTIAL-CAPABILITY-QA：外部账号/凭据依赖能力验收。用安全测试凭据验证 MCP server、browser、x_search、image/video/tts、Home Assistant、Spotify、Discord/Yuanbao 等能力从“需配置”到“可用/失败原因”的状态闭环；不得记录任何 secret、私聊正文、附件内容或二维码。

@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import type { CapabilityNode } from "../../types";
 
 type ChatComposerProps = {
@@ -40,6 +42,10 @@ function imageCapabilityText(node: CapabilityNode | null | undefined) {
     return node.user_message_cn || "图片会先由图片识别模型读取，再交给当前聊天模型。";
   }
   return node.user_message_cn || "图片会先保存和预览，当前还不能识别内容。";
+}
+
+function shouldSendFromKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  return event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing;
 }
 
 export function ChatComposer({
@@ -88,7 +94,8 @@ export function ChatComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            if (shouldSendFromKeyDown(event)) {
+              event.preventDefault();
               onSend();
             }
           }}

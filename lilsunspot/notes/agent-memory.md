@@ -1,5 +1,13 @@
 # Agent Memory
 
+## 2026-06-29 - Weixin file send without approval
+
+- Task: remove the extra safety approval step for user-clicked Weixin file/message sending after the UI showed `weixin_runtime+safety.approval` and the user asked for automatic sending.
+- Files touched: `lilsunspot/daemon/gateway.py`, `lilsunspot/daemon/weixin_runtime.py`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/capability_graph.py`, `lilsunspot/daemon/product_features.py`, `lilsunspot/resources/default_safety_policy.yaml`, focused pytest files, desktop API/types/chat transcript, and this memory file.
+- Decision/result: `/gateway/weixin/send` now directly sends through the active Weixin runtime and returns delivery status; it no longer creates a pending `send_weixin_message` approval. The direct path still validates token protection, explicit recipient/message or attachment, connected Weixin runtime, safe attachment paths, and deliverable file format. `weixin.send_file` now reports `ready` when connected and `requires_approval=false`; the product capability migration updates existing local capability rows without overwriting user-enabled state. Generic safety approvals and Hermes tool approvals remain available for other high-risk operations.
+- Validation: `python -m pytest lilsunspot/daemon/tests/test_safety_approvals.py lilsunspot/daemon/tests/test_conversation_sync.py lilsunspot/daemon/tests/test_product_features.py -q` passed with 72 tests; `npm run build --prefix lilsunspot/desktop` passed; `git diff --check` passed with only LF/CRLF warnings; `python scripts/guard_no_secrets.py` passed; `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon 144 tests, secret guard, and desktop build; `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup.exe at 56,721,876 bytes.
+- Remaining risk: installed-app click-through and live Weixin file-send confirmation were not run in this pass.
+
 ## 2026-06-29 - complete task scheduler, branch attachments, and guarded advanced actions
 
 - Task: close the remaining limitations from the Hermes UI productization slice: make tasks run in the background, preserve attachments when branching conversations, and make Advanced more than read-only without exposing dangerous raw controls.

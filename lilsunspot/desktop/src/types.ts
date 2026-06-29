@@ -801,6 +801,13 @@ export type WeixinSendApprovalResult = {
   status: string;
   approval_required: boolean;
   approval?: SafetyApproval | null;
+  delivery?: {
+    ok: boolean;
+    message?: string;
+    sent_text?: boolean;
+    sent_files?: number;
+    [key: string]: unknown;
+  };
   message: string;
 };
 

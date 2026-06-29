@@ -51,8 +51,11 @@ def test_diagnostics_model_capabilities_and_feature_switches(daemon_client):
 
     capabilities = client.get("/product/capabilities", headers=headers)
     assert capabilities.status_code == 200
-    capability_ids = {item["id"] for item in capabilities.json()["capabilities"]}
+    capability_items = capabilities.json()["capabilities"]
+    capability_ids = {item["id"] for item in capability_items}
     assert {"web_search", "file_read", "reminders", "weixin_send"} <= capability_ids
+    weixin_send = next(item for item in capability_items if item["id"] == "weixin_send")
+    assert weixin_send["requires_approval"] is False
 
     toggled = client.patch("/product/capabilities/web_search", headers=headers, json={"enabled": True})
     assert toggled.status_code == 200

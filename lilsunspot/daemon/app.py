@@ -51,7 +51,7 @@ from .gateway import (
     fail_weixin_login_verification,
     handle_weixin_command_text,
     poll_weixin_login_status,
-    request_weixin_send_approval,
+    send_weixin_message_direct,
     start_weixin_login,
     weixin_commands,
     weixin_status,
@@ -1517,7 +1517,7 @@ async def gateway_weixin_command_handle(payload: WeixinCommandRequest) -> dict[s
 @app.post("/gateway/weixin/send", dependencies=[Depends(require_token)])
 async def gateway_weixin_send(payload: WeixinSendRequest) -> dict[str, Any]:
     try:
-        return request_weixin_send_approval(payload.recipient, payload.message, payload.attachment_ids)
+        return await send_weixin_message_direct(payload.recipient, payload.message, payload.attachment_ids)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -19,8 +19,6 @@ from .attachments import (
 from .config_paths import RuntimePaths, ensure_runtime_dirs
 from .media_delivery import add_delivery_context_to_prompt, prepare_assistant_delivery, register_prepared_delivery
 from .mode_intents import apply_mode_intent, slash_command_hint
-from .safety import request_safety_approval
-
 
 WEIXIN_COMMANDS: list[dict[str, Any]] = [
     {
@@ -479,9 +477,9 @@ def weixin_status() -> dict[str, Any]:
             "private_chat": connected,
             "commands": True,
             "attachments": True,
-            "attachment_send_requires_approval": True,
+            "attachment_send_requires_approval": False,
             "official_adapter_media_methods": ["send", "send_document", "send_image_file", "send_video"],
-            "active_send_requires_approval": True,
+            "active_send_requires_approval": False,
             "official_payment_or_materials_required": False,
         },
         "message": message,
@@ -1270,6 +1268,8 @@ def request_weixin_send_approval(
     message: str,
     attachment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    from .safety import request_safety_approval
+
     recipient_value = recipient.strip()
     message_value = message.strip()
     if not recipient_value:
@@ -1300,4 +1300,30 @@ def request_weixin_send_approval(
         "approval_required": bool(approval_result.get("approval_required")),
         "approval": approval_result.get("approval"),
         "message": "微信发送需要安全审批，通过后才会发送。",
+    }
+
+
+async def send_weixin_message_direct(
+    recipient: str,
+    message: str,
+    attachment_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    recipient_value = recipient.strip()
+    message_value = message.strip()
+    if not recipient_value:
+        raise ValueError("微信联系人不能为空。")
+    if not message_value and not attachment_ids:
+        raise ValueError("微信消息或附件不能为空。")
+
+    from .weixin_runtime import send_weixin_message_now
+
+    delivery = await send_weixin_message_now(recipient_value, message_value, attachment_ids or [])
+    return {
+        "ok": bool(delivery.get("ok")),
+        "gateway": "weixin",
+        "status": "sent" if delivery.get("ok") else "failed",
+        "approval_required": False,
+        "approval": None,
+        "delivery": delivery,
+        "message": str(delivery.get("message") or ("微信发送已完成。" if delivery.get("ok") else "微信发送失败。")),
     }

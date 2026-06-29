@@ -7,21 +7,27 @@ import { modeName } from "../features/mode/ModeQuickPanel";
 import { useModeState } from "../features/mode/ModeState";
 import { displayProvider } from "../features/model/ProviderCard";
 import { WeixinSettings } from "../features/settings/WeixinSettings";
+import { HistoryPage } from "../features/history/HistoryPage";
+import { TasksPage } from "../features/tasks/TasksPage";
 import type { AppUpdateStatus } from "../types";
 import { BootGate } from "./BootGate";
 import { useBootstrapState } from "./useBootstrapState";
 import { useModelServiceState } from "./useModelServiceState";
 
-type ConsoleView = "chat" | "weixin";
+type ConsoleView = "chat" | "weixin" | "tasks" | "history";
 
 const NAV_ITEMS: { id: ConsoleView; short: string; label: string }[] = [
   { id: "chat", short: "CH", label: "聊天" },
-  { id: "weixin", short: "WX", label: "微信" }
+  { id: "weixin", short: "WX", label: "微信" },
+  { id: "tasks", short: "TK", label: "任务" },
+  { id: "history", short: "HS", label: "历史" }
 ];
 
 const VIEW_COPY: Record<ConsoleView, { title: string; subtitle: string }> = {
-  chat: { title: "和小黑子聊天", subtitle: "桌面聊天、任务整理和本地 Agent 控制台" },
-  weixin: { title: "微信连接", subtitle: "私聊同步、文件接收和自然语言调整风格" }
+  chat: { title: "和小黑子聊天", subtitle: "桌面聊天、任务整理和本地能力状态" },
+  weixin: { title: "微信连接", subtitle: "私聊同步、文件接收和自然语言调整风格" },
+  tasks: { title: "任务", subtitle: "提醒、定时总结和定时检查" },
+  history: { title: "历史", subtitle: "搜索、恢复和管理桌面/微信对话" }
 };
 
 export function AppShell() {
@@ -38,6 +44,7 @@ export function AppShell() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [firstChatMessages, setFirstChatMessages] = useState<ChatMessage[]>([]);
+  const [requestedConversationId, setRequestedConversationId] = useState("");
   const [devToken, setDevToken] = useState("");
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [updateNoticeHidden, setUpdateNoticeHidden] = useState(false);
@@ -87,6 +94,11 @@ export function AppShell() {
     setSettingsOpen(true);
   }
 
+  function openConversation(conversationId: string) {
+    setRequestedConversationId(conversationId);
+    setActiveView("chat");
+  }
+
   useEffect(() => {
     if (!isDesktopRuntime()) {
       return;
@@ -134,6 +146,12 @@ export function AppShell() {
     if (activeView === "weixin") {
       return <WeixinSettings />;
     }
+    if (activeView === "tasks") {
+      return <TasksPage />;
+    }
+    if (activeView === "history") {
+      return <HistoryPage onOpenConversation={openConversation} />;
+    }
     return (
       <BootGate
         bootstrap={bootstrapState.bootstrap}
@@ -151,6 +169,8 @@ export function AppShell() {
         onSetupModel={setupModel}
         onBootstrapChanged={handleSaved}
         onFirstChatDone={handleFirstChatDone}
+        requestedConversationId={requestedConversationId}
+        onRequestedConversationHandled={() => setRequestedConversationId("")}
       />
     );
   }

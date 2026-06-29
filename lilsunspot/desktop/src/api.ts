@@ -26,6 +26,8 @@ import type {
   ModelCapabilities,
   ModelRuntimeConfig,
   ProductCapability,
+  AdvancedConfigExport,
+  AdvancedConfigImportResult,
   ProductMemory,
   ProductReminder,
   Provider,
@@ -34,12 +36,19 @@ import type {
   RuntimeInfo,
   SafetyApprovals,
   AuditResult,
+  AdvancedExtensions,
   SafetyPolicy,
   SafetyApprovalDecisionResult,
   SaveProviderResult,
+  ConversationTurnActionResult,
   WeixinCommand,
   WeixinSendApprovalResult,
-  WeixinStatus
+  WeixinStatus,
+  ProductProfile,
+  ProductTask,
+  ProductTaskRun,
+  UiOverview,
+  UsageSummary
 } from "./types";
 
 const DEFAULT_DAEMON_URL = import.meta.env.VITE_LILSUNSPOT_DAEMON_URL || "http://127.0.0.1:8765";
@@ -303,6 +312,10 @@ export async function getAppBootstrap(): Promise<AppBootstrapState> {
   return requestJson<AppBootstrapState>("/app/bootstrap");
 }
 
+export async function getUiOverview(): Promise<UiOverview> {
+  return requestJson<UiOverview>("/ui/overview");
+}
+
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   return requestJson<RuntimeInfo>("/runtime/info");
 }
@@ -419,6 +432,14 @@ export async function searchConversations(query: string, includeArchived = false
   return body.results;
 }
 
+export async function searchSessions(query: string, includeArchived = false): Promise<ConversationSearchResult[]> {
+  const body = await requestJson<{ results: ConversationSearchResult[] }>("/sessions/search", {
+    method: "POST",
+    body: JSON.stringify({ query, include_archived: includeArchived, limit: 50 })
+  });
+  return body.results;
+}
+
 export async function createConversation(payload: {
   title?: string;
   kind?: string;
@@ -488,6 +509,38 @@ export async function sendConversationMessage(conversationId: string, message: s
     method: "POST",
     body: JSON.stringify({ message, attachments: payloadAttachments })
   }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
+}
+
+export async function stopConversationTurn(conversationId: string, message = ""): Promise<ConversationTurnActionResult> {
+  return requestJson<ConversationTurnActionResult>(`/conversations/${encodeURIComponent(conversationId)}/turns/stop`, {
+    method: "POST",
+    body: JSON.stringify({ message })
+  });
+}
+
+export async function retryConversationTurn(conversationId: string): Promise<ConversationTurnActionResult> {
+  return requestJson<ConversationTurnActionResult>(`/conversations/${encodeURIComponent(conversationId)}/turns/retry`, {
+    method: "POST"
+  }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
+}
+
+export async function undoConversationTurn(conversationId: string): Promise<ConversationTurnActionResult> {
+  return requestJson<ConversationTurnActionResult>(`/conversations/${encodeURIComponent(conversationId)}/turns/undo`, {
+    method: "POST"
+  });
+}
+
+export async function branchConversationTurn(conversationId: string, title = ""): Promise<ConversationTurnActionResult> {
+  return requestJson<ConversationTurnActionResult>(`/conversations/${encodeURIComponent(conversationId)}/turns/branch`, {
+    method: "POST",
+    body: JSON.stringify({ title: title || null })
+  });
+}
+
+export async function saveConversationSummary(conversationId: string): Promise<ConversationTurnActionResult> {
+  return requestJson<ConversationTurnActionResult>(`/conversations/${encodeURIComponent(conversationId)}/turns/save-summary`, {
+    method: "POST"
+  });
 }
 
 export async function subscribeDaemonEvents(): Promise<boolean> {
@@ -690,6 +743,43 @@ export async function deleteReminder(reminderId: string): Promise<boolean> {
   return body.ok;
 }
 
+export async function getTasks(): Promise<ProductTask[]> {
+  const body = await requestJson<{ tasks: ProductTask[] }>("/tasks");
+  return body.tasks;
+}
+
+export async function createTask(title: string, prompt: string, dueAt = "", kind = "reminder", schedule = "once"): Promise<ProductTask> {
+  const body = await requestJson<{ task: ProductTask }>("/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title, prompt, due_at: dueAt, kind, schedule })
+  });
+  return body.task;
+}
+
+export async function updateTask(
+  taskId: string,
+  payload: { title?: string; prompt?: string; due_at?: string; kind?: string; schedule?: string; enabled?: boolean; completed?: boolean }
+): Promise<ProductTask> {
+  const body = await requestJson<{ task: ProductTask }>(`/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+  return body.task;
+}
+
+export async function runTask(taskId: string): Promise<{ task: ProductTask; run: ProductTaskRun }> {
+  return requestJson<{ task: ProductTask; run: ProductTaskRun }>(`/tasks/${encodeURIComponent(taskId)}/run`, {
+    method: "POST"
+  });
+}
+
+export async function deleteTask(taskId: string): Promise<boolean> {
+  const body = await requestJson<{ ok: boolean }>(`/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE"
+  });
+  return body.ok;
+}
+
 export async function getMemories(): Promise<ProductMemory[]> {
   const body = await requestJson<{ memories: ProductMemory[] }>("/memory");
   return body.memories;
@@ -718,6 +808,26 @@ export async function deleteMemory(memoryId: string): Promise<boolean> {
   return body.ok;
 }
 
+export async function getProfiles(): Promise<ProductProfile[]> {
+  const body = await requestJson<{ profiles: ProductProfile[] }>("/profiles");
+  return body.profiles;
+}
+
+export async function createProfile(name: string, instructions: string): Promise<ProductProfile> {
+  const body = await requestJson<{ profile: ProductProfile }>("/profiles", {
+    method: "POST",
+    body: JSON.stringify({ name, instructions })
+  });
+  return body.profile;
+}
+
+export async function deleteProfile(profileId: string): Promise<boolean> {
+  const body = await requestJson<{ ok: boolean }>(`/profiles/${encodeURIComponent(profileId)}`, {
+    method: "DELETE"
+  });
+  return body.ok;
+}
+
 export async function getProductCapabilities(): Promise<ProductCapability[]> {
   const body = await requestJson<{ capabilities: ProductCapability[] }>("/product/capabilities");
   return body.capabilities;
@@ -729,6 +839,25 @@ export async function updateProductCapability(capabilityId: string, enabled: boo
     body: JSON.stringify({ enabled })
   });
   return body.capability;
+}
+
+export async function getUsageSummary(): Promise<UsageSummary> {
+  return requestJson<UsageSummary>("/usage/summary");
+}
+
+export async function getAdvancedExtensions(): Promise<AdvancedExtensions> {
+  return requestJson<AdvancedExtensions>("/advanced/extensions");
+}
+
+export async function exportAdvancedConfig(): Promise<AdvancedConfigExport> {
+  return requestJson<AdvancedConfigExport>("/advanced/config/export");
+}
+
+export async function importAdvancedConfig(config: Record<string, unknown>): Promise<AdvancedConfigImportResult> {
+  return requestJson<AdvancedConfigImportResult>("/advanced/config/import", {
+    method: "POST",
+    body: JSON.stringify({ config })
+  });
 }
 
 export async function exportDiagnostics(): Promise<DiagnosticsExportResult> {

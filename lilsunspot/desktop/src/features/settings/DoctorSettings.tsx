@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { exportDiagnostics, runDoctor, runRepair } from "../../api";
-import type { DoctorCheck, DoctorResult } from "../../types";
+import { exportDiagnostics, getDiagnosticsSummary, getUsageSummary, runDoctor, runRepair } from "../../api";
+import type { DiagnosticsSummary, DoctorCheck, DoctorResult, UsageSummary } from "../../types";
 import { StatusBadge } from "../../shared/components/StatusBadge";
 import { TechnicalDetails } from "../../shared/components/TechnicalDetails";
 
@@ -25,6 +25,8 @@ function checkName(check: DoctorCheck) {
 
 export function DoctorSettings() {
   const [doctor, setDoctor] = useState<DoctorResult | null>(null);
+  const [summary, setSummary] = useState<DiagnosticsSummary | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -32,7 +34,10 @@ export function DoctorSettings() {
     setBusy(true);
     setMessage("");
     try {
-      setDoctor(await runDoctor());
+      const [doctorResult, summaryResult, usageResult] = await Promise.all([runDoctor(), getDiagnosticsSummary(), getUsageSummary()]);
+      setDoctor(doctorResult);
+      setSummary(summaryResult);
+      setUsage(usageResult);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "诊断失败。");
     } finally {
@@ -75,6 +80,24 @@ export function DoctorSettings() {
         </div>
         <StatusBadge tone={doctor?.ok ? "ok" : "neutral"}>{doctor ? (doctor.ok ? "检查通过" : "存在问题") : "未检查"}</StatusBadge>
       </div>
+      <div className="controlMetricGrid">
+        <article>
+          <span>模型</span>
+          <strong>{summary?.model.configured ? `${summary.model.provider_name} / ${summary.model.model}` : "未设置"}</strong>
+        </article>
+        <article>
+          <span>微信</span>
+          <strong>{summary?.weixin.connected ? "已连接" : summary?.weixin.status || "未连接"}</strong>
+        </article>
+        <article>
+          <span>消息</span>
+          <strong>{usage?.messages.total ?? 0} 条 · 错误 {usage?.messages.errors ?? 0}</strong>
+        </article>
+        <article>
+          <span>任务</span>
+          <strong>{usage?.tasks.active ?? 0} 个启用</strong>
+        </article>
+      </div>
       <div className="doctorList">
         {(doctor?.checks || [
           { name: "daemon_responding", ok: false, detail: "尚未检查" },
@@ -105,8 +128,9 @@ export function DoctorSettings() {
         <StatusBadge>脱敏</StatusBadge>
         <span>诊断包导出必须隐藏 API Key、runtime token 和私聊正文。</span>
       </p>
+      {usage?.costs.message && <p className="inlineNotice">{usage.costs.message}</p>}
       {message && <p className="inlineStatus">{message}</p>}
-      {doctor && <TechnicalDetails data={doctor} />}
+      {doctor && <TechnicalDetails data={{ doctor, summary, usage }} />}
     </section>
   );
 }

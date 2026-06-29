@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 
-def _create_weixin_approval(daemon_client):
+def _create_credential_approval(daemon_client):
     return daemon_client.client.post(
-        "/gateway/weixin/send",
+        "/safety/approvals/request",
         headers=daemon_client.headers,
-        json={"recipient": "文件传输助手", "message": "帮我提醒一下明天开会。"},
+        json={
+            "operation": "credential_access",
+            "summary": "读取本地凭据",
+            "details": {
+                "target": "local_credentials",
+            },
+            "source": "settings",
+        },
     )
 
 
-def test_weixin_send_requires_token_and_creates_pending_approval(daemon_client):
+def test_weixin_send_requires_token_and_does_not_create_pending_approval(daemon_client):
     client = daemon_client.client
 
     assert client.post(
@@ -17,25 +24,21 @@ def test_weixin_send_requires_token_and_creates_pending_approval(daemon_client):
         json={"recipient": "文件传输助手", "message": "你好"},
     ).status_code == 403
 
-    response = _create_weixin_approval(daemon_client)
+    response = client.post(
+        "/gateway/weixin/send",
+        headers=daemon_client.headers,
+        json={"recipient": "文件传输助手", "message": "帮我提醒一下明天开会。"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
-    assert body["status"] == "approval_required"
-    assert body["approval_required"] is True
-    assert "安全审批" in body["message"]
-
-    approval = body["approval"]
-    assert approval["operation"] == "send_weixin_message"
-    assert approval["status"] == "pending"
-    assert approval["source"] == "weixin"
-    assert approval["details"]["recipient"] == "文件传输助手"
-    assert approval["details"]["message"] == "帮我提醒一下明天开会。"
-    assert approval["details"]["message_preview"] == "帮我提醒一下明天开会。"
-    assert approval["details"]["message_length"] == len("帮我提醒一下明天开会。")
+    assert body["status"] == "failed"
+    assert body["approval_required"] is False
+    assert body["approval"] is None
+    assert "微信还没有连接" in body["message"]
 
     paths = daemon_client.config_paths.get_runtime_paths()
-    assert (paths.data_dir / "safety-approvals.json").exists()
+    assert not (paths.data_dir / "safety-approvals.json").exists()
     assert not (paths.hermes_home / "safety-approvals.json").exists()
     assert daemon_client.token not in response.text
 
@@ -43,7 +46,7 @@ def test_weixin_send_requires_token_and_creates_pending_approval(daemon_client):
 def test_approval_decision_updates_pending_and_history(daemon_client):
     client = daemon_client.client
     headers = daemon_client.headers
-    approval_id = _create_weixin_approval(daemon_client).json()["approval"]["id"]
+    approval_id = _create_credential_approval(daemon_client).json()["approval"]["id"]
 
     pending = client.get("/safety/approvals", headers=headers)
     assert pending.status_code == 200
@@ -75,7 +78,7 @@ def test_approval_decision_updates_pending_and_history(daemon_client):
 def test_weixin_command_help_hides_approval_commands_but_hidden_decision_still_works(daemon_client):
     client = daemon_client.client
     headers = daemon_client.headers
-    approval_id = _create_weixin_approval(daemon_client).json()["approval"]["id"]
+    approval_id = _create_credential_approval(daemon_client).json()["approval"]["id"]
 
     help_response = client.post("/gateway/weixin/commands/handle", headers=headers, json={"text": "/help"})
     assert help_response.status_code == 200

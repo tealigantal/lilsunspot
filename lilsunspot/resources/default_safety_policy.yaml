@@ -3,7 +3,6 @@ high_risk:
   operations:
     - shell
     - delete_file
-    - send_weixin_message
     - read_sensitive_directory
     - write_sensitive_file
     - network_post

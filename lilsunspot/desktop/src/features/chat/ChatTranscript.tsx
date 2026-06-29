@@ -1,6 +1,6 @@
 import { useState } from "react";
 import lilsunspotIcon from "../../assets/lilsunspot-icon.png";
-import { decideSafetyApproval, openAttachment, sendWeixinMessage } from "../../api";
+import { openAttachment, sendWeixinMessage } from "../../api";
 import type { ConversationAttachment, ConversationMessage } from "../../types";
 
 export type ChatMessage = Partial<ConversationMessage> & {
@@ -140,22 +140,15 @@ function AttachmentCard({
     }
     const message = draftMessage.trim() || `发你一个文件：${attachment.file_name}`;
     setSending(true);
-    setSendStatus("正在创建发送审批。");
+    setSendStatus("正在发送到微信。");
     try {
-      const approvalResult = await sendWeixinMessage(weixinSendTarget.recipient, message, [attachment.id]);
-      const approvalId = approvalResult.approval?.id;
-      if (!approvalResult.approval_required || !approvalId) {
-        setSendStatus(approvalResult.message || "微信发送审批没有创建成功。");
-        return;
-      }
-      setSendStatus("正在确认发送。");
-      const decision = await decideSafetyApproval(approvalId, "approved");
-      if (decision.delivery && !decision.delivery.ok) {
-        setSendStatus(decision.delivery.message || "微信发送失败。");
+      const result = await sendWeixinMessage(weixinSendTarget.recipient, message, [attachment.id]);
+      if (!result.ok) {
+        setSendStatus(result.delivery?.message || result.message || "微信发送失败。");
         return;
       }
       setConfirming(false);
-      setSendStatus(decision.delivery?.message || "已发到微信。");
+      setSendStatus(result.delivery?.message || result.message || "已发到微信。");
     } catch (error) {
       setSendStatus(error instanceof Error ? error.message : "微信发送失败。");
     } finally {

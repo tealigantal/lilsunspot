@@ -289,11 +289,11 @@ def _weixin_nodes() -> list[dict[str, Any]]:
         send = _node(
             "weixin.send_file",
             label="微信发送文件",
-            status="degraded",
-            source="weixin_runtime+safety.approval",
-            user_message_cn="微信文件发送可创建审批，通过确认后才会发送。",
-            next_actions=[_action("retry", "创建发送审批")],
-            details={"requires_approval": True, "status": str(status.get("status") or "")},
+            status="ready",
+            source="weixin_runtime",
+            user_message_cn="微信文件发送已连接，点击发送后会直接发出。",
+            next_actions=[],
+            details={"requires_approval": False, "status": str(status.get("status") or "")},
         )
         return [receive, send]
     if available:
@@ -313,11 +313,11 @@ def _weixin_nodes() -> list[dict[str, Any]]:
                 "weixin.send_file",
                 label="微信发送文件",
                 status="needs_setup",
-                source="weixin_runtime+safety.approval",
+                source="weixin_runtime",
                 blocking_reason="weixin.disconnected",
-                user_message_cn="连接微信后才能创建文件发送审批。",
+                user_message_cn="连接微信后才能直接发送文件。",
                 next_actions=[_action("retry", "连接微信")],
-                details={"requires_approval": True, "status": str(status.get("status") or "")},
+                details={"requires_approval": False, "status": str(status.get("status") or "")},
             ),
         ]
     return [
@@ -334,10 +334,10 @@ def _weixin_nodes() -> list[dict[str, Any]]:
             "weixin.send_file",
             label="微信发送文件",
             status="blocked",
-            source="weixin_runtime+safety.approval",
+            source="weixin_runtime",
             blocking_reason="weixin.unavailable",
             user_message_cn="当前环境不可用微信发送能力。",
-            details={"requires_approval": True, "status": str(status.get("status") or "")},
+            details={"requires_approval": False, "status": str(status.get("status") or "")},
         ),
     ]
 

@@ -52,9 +52,9 @@ DEFAULT_CAPABILITIES = [
     {
         "id": "weixin_send",
         "label": "微信主动发送",
-        "description": "允许创建微信发送审批；真正发送仍需要安全确认。",
+        "description": "允许在用户点击发送时直接发送微信消息或附件。",
         "enabled": True,
-        "requires_approval": True,
+        "requires_approval": False,
     },
 ]
 
@@ -217,6 +217,20 @@ def ensure_schema_for_connection(conn: sqlite3.Connection) -> None:
                 now,
                 now,
                 _json_dumps({"source": "hermes_merge_plan"}),
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE product_capabilities
+            SET label = ?, description = ?, requires_approval = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                capability["label"],
+                capability["description"],
+                1 if capability["requires_approval"] else 0,
+                now,
+                capability["id"],
             ),
         )
     conn.commit()

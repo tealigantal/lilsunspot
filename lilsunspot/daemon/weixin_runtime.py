@@ -176,21 +176,22 @@ def _record_weixin_delivery_failure(result: dict[str, Any], message: str) -> Non
         pass
 
 
-async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any]:
-    if str(approval.get("operation") or "") != "send_weixin_message":
-        return {"ok": True, "skipped": True, "message": "这个审批不需要微信发送。"}
-    if str(approval.get("status") or "") != "approved":
-        return {"ok": True, "skipped": True, "message": "审批未通过，不发送微信。"}
+async def send_weixin_message_now(
+    recipient: str,
+    message: str,
+    attachment_ids: list[str] | None = None,
+) -> dict[str, Any]:
     adapter = _adapter
     if adapter is None or not getattr(adapter, "is_connected", False):
         return {"ok": False, "message": "微信还没有连接，暂时不能发送。"}
 
-    details = approval.get("details") if isinstance(approval.get("details"), dict) else {}
-    recipient = str(details.get("recipient") or "").strip()
-    message = str(details.get("message") or details.get("message_preview") or "").strip()
-    attachment_ids = [str(item) for item in details.get("attachment_ids", []) if str(item).strip()]
+    recipient = recipient.strip()
+    message = message.strip()
+    attachment_ids = [str(item) for item in attachment_ids or [] if str(item).strip()]
     if not recipient:
         return {"ok": False, "message": "微信联系人不能为空。"}
+    if not message and not attachment_ids:
+        return {"ok": False, "message": "微信消息或附件不能为空。"}
 
     files_to_send: list[tuple[str, str]] = []
     for attachment_id in attachment_ids:
@@ -231,6 +232,19 @@ async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any
         "sent_text": bool(message),
         "sent_files": sent_files,
     }
+
+
+async def send_approved_weixin_action(approval: dict[str, Any]) -> dict[str, Any]:
+    if str(approval.get("operation") or "") != "send_weixin_message":
+        return {"ok": True, "skipped": True, "message": "这个审批不需要微信发送。"}
+    if str(approval.get("status") or "") != "approved":
+        return {"ok": True, "skipped": True, "message": "审批未通过，不发送微信。"}
+
+    details = approval.get("details") if isinstance(approval.get("details"), dict) else {}
+    recipient = str(details.get("recipient") or "").strip()
+    message = str(details.get("message") or details.get("message_preview") or "").strip()
+    attachment_ids = [str(item) for item in details.get("attachment_ids", []) if str(item).strip()]
+    return await send_weixin_message_now(recipient, message, attachment_ids)
 
 
 def _file_delivery_error_message(reason_code: str) -> str:

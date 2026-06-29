@@ -2554,7 +2554,7 @@ def test_weixin_same_channel_generated_document_rejects_fake_xlsx_before_text_se
     assert assistant["metadata"]["delivery"]["reason_code"] == "invalid_file_format"
 
 
-def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(daemon_client, monkeypatch):
+def test_weixin_direct_send_sends_text_and_files_without_pending_approval(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     cache_dir = paths.hermes_home / "cache" / "documents"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -2588,7 +2588,7 @@ def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(dae
     fake_adapter = FakeWeixinSendAdapter()
     monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
 
-    approval = daemon_client.client.post(
+    sent = daemon_client.client.post(
         "/gateway/weixin/send",
         headers=daemon_client.headers,
         json={
@@ -2596,54 +2596,35 @@ def test_weixin_approval_approved_sends_text_and_file_rejected_does_not_send(dae
             "message": "看附件",
             "attachment_ids": [attachment["id"], image_attachment["id"]],
         },
-    ).json()["approval"]
-    approved = daemon_client.client.post(
-        f"/safety/approvals/{approval['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "approved"},
     )
-    assert approved.status_code == 200
-    assert approved.json()["delivery"]["ok"] is True
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is True
+    assert sent.json()["approval_required"] is False
+    assert sent.json()["approval"] is None
     assert fake_adapter.calls[0] == ("send", "wx_user", "看附件")
     assert fake_adapter.calls[1][0] == "document"
     assert fake_adapter.calls[2][0] == "image"
-
-    second = daemon_client.client.post(
-        "/gateway/weixin/send",
-        headers=daemon_client.headers,
-        json={"recipient": "wx_user", "message": "不要发"},
-    ).json()["approval"]
-    rejected = daemon_client.client.post(
-        f"/safety/approvals/{second['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "rejected"},
-    )
-    assert rejected.status_code == 200
-    assert len(fake_adapter.calls) == 3
+    assert daemon_client.client.get("/safety/approvals", headers=daemon_client.headers).json()["pending"] == []
 
 
-def test_weixin_approval_validates_files_before_sending_text(daemon_client, monkeypatch):
+def test_weixin_direct_send_validates_files_before_sending_text(daemon_client, monkeypatch):
     fake_adapter = FakeWeixinSendAdapter()
     monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
 
-    approval = daemon_client.client.post(
+    sent = daemon_client.client.post(
         "/gateway/weixin/send",
         headers=daemon_client.headers,
         json={"recipient": "wx_user", "message": "看附件", "attachment_ids": ["att_missing"]},
-    ).json()["approval"]
-    approved = daemon_client.client.post(
-        f"/safety/approvals/{approval['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "approved"},
     )
 
-    assert approved.status_code == 200
-    assert approved.json()["delivery"]["ok"] is False
-    assert "附件" in approved.json()["delivery"]["message"]
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is False
+    assert sent.json()["approval_required"] is False
+    assert "附件" in sent.json()["delivery"]["message"]
     assert fake_adapter.calls == []
 
 
-def test_weixin_approval_rejects_unsafe_attachment_path_before_sending_text(daemon_client, monkeypatch):
+def test_weixin_direct_send_rejects_unsafe_attachment_path_before_sending_text(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     outside_file = paths.data_dir.parent / "outside.txt"
     outside_file.write_text("不应直接发送", encoding="utf-8")
@@ -2669,24 +2650,19 @@ def test_weixin_approval_rejects_unsafe_attachment_path_before_sending_text(daem
     fake_adapter = FakeWeixinSendAdapter()
     monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
 
-    approval = daemon_client.client.post(
+    sent = daemon_client.client.post(
         "/gateway/weixin/send",
         headers=daemon_client.headers,
         json={"recipient": "wx_user", "message": "看附件", "attachment_ids": [attachment["id"]]},
-    ).json()["approval"]
-    approved = daemon_client.client.post(
-        f"/safety/approvals/{approval['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "approved"},
     )
 
-    assert approved.status_code == 200
-    assert approved.json()["delivery"]["ok"] is False
-    assert "附件" in approved.json()["delivery"]["message"]
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is False
+    assert "附件" in sent.json()["delivery"]["message"]
     assert fake_adapter.calls == []
 
 
-def test_weixin_approval_rejects_fake_office_attachment_before_sending_text(daemon_client, monkeypatch):
+def test_weixin_direct_send_rejects_fake_office_attachment_before_sending_text(daemon_client, monkeypatch):
     paths = daemon_client.config_paths.get_runtime_paths()
     generated_file = daemon_client.attachments.attachment_storage_root(paths) / "fake.xlsx"
     generated_file.write_text("文件传输测试通过", encoding="utf-8")
@@ -2712,40 +2688,31 @@ def test_weixin_approval_rejects_fake_office_attachment_before_sending_text(daem
     fake_adapter = FakeWeixinSendAdapter()
     monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", fake_adapter)
 
-    approval = daemon_client.client.post(
+    sent = daemon_client.client.post(
         "/gateway/weixin/send",
         headers=daemon_client.headers,
         json={"recipient": "wx_user", "message": "看附件", "attachment_ids": [attachment["id"]]},
-    ).json()["approval"]
-    approved = daemon_client.client.post(
-        f"/safety/approvals/{approval['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "approved"},
     )
 
-    assert approved.status_code == 200
-    assert approved.json()["delivery"]["ok"] is False
-    assert "格式不正确" in approved.json()["delivery"]["message"]
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is False
+    assert "格式不正确" in sent.json()["delivery"]["message"]
     assert fake_adapter.calls == []
 
 
-def test_weixin_approval_does_not_send_when_weixin_is_disconnected(daemon_client, monkeypatch):
+def test_weixin_direct_send_does_not_send_when_weixin_is_disconnected(daemon_client, monkeypatch):
     monkeypatch.setattr(daemon_client.weixin_runtime, "_adapter", None)
 
-    approval = daemon_client.client.post(
+    sent = daemon_client.client.post(
         "/gateway/weixin/send",
         headers=daemon_client.headers,
         json={"recipient": "wx_user", "message": "只发文本"},
-    ).json()["approval"]
-    approved = daemon_client.client.post(
-        f"/safety/approvals/{approval['id']}/decide",
-        headers=daemon_client.headers,
-        json={"decision": "approved"},
     )
 
-    assert approved.status_code == 200
-    assert approved.json()["delivery"]["ok"] is False
-    assert "微信还没有连接" in approved.json()["delivery"]["message"]
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is False
+    assert sent.json()["approval_required"] is False
+    assert "微信还没有连接" in sent.json()["delivery"]["message"]
 
 
 def test_weixin_file_request_text_stays_on_normal_chat_path(daemon_client, monkeypatch):

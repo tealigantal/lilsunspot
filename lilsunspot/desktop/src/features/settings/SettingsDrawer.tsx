@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AppBootstrapRuntime, AppUpdateStatus, ModelCapabilities, OperationNotice, OperationState, Provider } from "../../types";
 import { ModelSettings } from "../model/ModelSettings";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { AppUpdateSettings } from "./AppUpdateSettings";
 import { CapabilitySettings } from "./CapabilitySettings";
-import { ControlCenterSettings } from "./ControlCenterSettings";
 import { DoctorSettings } from "./DoctorSettings";
+import { MemoryProfileSettings } from "./MemoryProfileSettings";
 import { SafetySettings } from "./SafetySettings";
 import { WeixinSettings } from "./WeixinSettings";
 
-export type SettingsTab = "model" | "capabilities" | "weixin" | "safety" | "doctor" | "control" | "update";
+export type SettingsTab = "model" | "capabilities" | "memory" | "weixin" | "safety" | "doctor" | "advanced" | "update";
 
 type SettingsDrawerProps = {
   open: boolean;
@@ -34,10 +35,11 @@ type SettingsDrawerProps = {
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "model", label: "模型服务" },
   { id: "capabilities", label: "能力" },
+  { id: "memory", label: "记忆与风格" },
   { id: "weixin", label: "微信" },
   { id: "safety", label: "安全审批" },
   { id: "doctor", label: "诊断" },
-  { id: "control", label: "控制台" },
+  { id: "advanced", label: "高级" },
   { id: "update", label: "应用更新" }
 ];
 
@@ -109,10 +111,11 @@ export function SettingsDrawer({
   const tabBadges: Partial<Record<SettingsTab, string>> = {
     model: runtime.configured ? "已设置" : "未设置",
     capabilities: capabilityState === "running" ? "刷新中" : imageStatus(modelCapabilities),
+    memory: "本地",
     weixin: modelCapabilities?.supports_weixin ? "可配置" : "未连接",
     safety: "审批",
     doctor: "诊断",
-    control: "总览",
+    advanced: "只读",
     update:
       updateStatus?.state === "available"
         ? "有新版"
@@ -133,7 +136,7 @@ export function SettingsDrawer({
         <header>
           <div>
             <h2>设置</h2>
-            <p>模型服务、微信连接和本地控制台都在这里调整。</p>
+            <p>模型服务、微信连接、记忆、诊断和高级状态都在这里调整。</p>
           </div>
           <button type="button" className="iconButton" onClick={onClose} aria-label="关闭设置">
             ×
@@ -173,18 +176,12 @@ export function SettingsDrawer({
               onModelCapabilitiesChanged={onModelCapabilitiesChanged}
             />
           )}
+          {active === "memory" && <MemoryProfileSettings />}
           {active === "weixin" && <WeixinSettings />}
           {active === "safety" && <SafetySettings />}
           {active === "doctor" && <DoctorSettings />}
           {active === "update" && <AppUpdateSettings status={updateStatus} onStatusChanged={onUpdateStatusChanged} />}
-          {active === "control" && (
-            <ControlCenterSettings
-              modelCapabilities={modelCapabilities}
-              capabilityNotice={capabilityNotice}
-              onModelCapabilitiesRefresh={onModelCapabilitiesRefresh}
-              onModelCapabilitiesChanged={onModelCapabilitiesChanged}
-            />
-          )}
+          {active === "advanced" && <AdvancedSettings />}
         </div>
       </aside>
     </div>

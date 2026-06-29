@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 import type { AppBootstrapState, Conversation, ConversationAttachment, ConversationSearchResult, LilsunspotEvent } from "../../types";
 import {
+  branchConversationTurn,
   createConversation,
   deleteConversation,
   getConversations,
   getConversationMessages,
   listenDaemonEvents,
+  retryConversationTurn,
+  saveConversationSummary,
   searchConversations,
   sendConversationMessage,
+  stopConversationTurn,
   subscribeDaemonEvents,
+  undoConversationTurn,
   updateConversation
 } from "../../api";
 import type { CapabilityNode, ModelCapabilities } from "../../types";
@@ -27,6 +32,8 @@ type ChatHomeProps = {
   onSetupModel: () => void;
   onRefresh: () => void;
   onOpenSettings: (tab?: SettingsTab) => void;
+  requestedConversationId?: string;
+  onRequestedConversationHandled?: () => void;
 };
 
 const EXAMPLE_PROMPTS = [
@@ -104,7 +111,16 @@ function capabilityNode(capabilities: ModelCapabilities | null, id: string): Cap
   return graph?.by_id?.[id] || graph?.nodes?.find((node) => node.id === id) || null;
 }
 
-export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, onSetupModel, onRefresh, onOpenSettings }: ChatHomeProps) {
+export function ChatHome({
+  bootstrap,
+  initialMessages = [],
+  modelCapabilities,
+  onSetupModel,
+  onRefresh,
+  onOpenSettings,
+  requestedConversationId = "",
+  onRequestedConversationHandled
+}: ChatHomeProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState(PERSONAL_CONVERSATION_ID);
@@ -115,6 +131,7 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
   const [input, setInput] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [sendError, setSendError] = useState("");
+  const [actionBusy, setActionBusy] = useState("");
   const [busy, setBusy] = useState(false);
   const modeState = useModeState();
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
@@ -128,6 +145,7 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
         ? `微信消息正在进入：${activeConversation.title}`
         : "这个微信对话不会接收新消息，除非你让微信消息进入这里。"
       : "桌面聊天和微信私聊按对话分开记录。";
+  const hasGeneratingMessage = messages.some((message) => message.status === "generating");
 
   useEffect(() => {
     setMessages(initialMessages);
@@ -166,6 +184,14 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
       mounted = false;
     };
   }, [bootstrap.stage, bootstrap.runtime.configured, showArchived]);
+
+  useEffect(() => {
+    if (!requestedConversationId || requestedConversationId === activeConversationId) {
+      return;
+    }
+    setActiveConversationId(requestedConversationId);
+    onRequestedConversationHandled?.();
+  }, [requestedConversationId, activeConversationId, onRequestedConversationHandled]);
 
   useEffect(() => {
     if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured || !activeConversationId) {
@@ -357,6 +383,90 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
     setMessages([]);
   }
 
+  async function refreshActiveMessages() {
+    const recent = await getConversationMessages(activeConversationId);
+    setMessages(recent);
+    void refreshConversations(activeConversationId);
+  }
+
+  async function stopTurn() {
+    setActionBusy("stop");
+    setSendError("");
+    try {
+      const result = await stopConversationTurn(activeConversationId, "用户在桌面停止了当前任务。");
+      setSendError(result.message || "已请求停止当前任务。");
+      await refreshActiveMessages();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "停止失败。");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function retryTurn() {
+    setActionBusy("retry");
+    setSendError("");
+    try {
+      const result = await retryConversationTurn(activeConversationId);
+      if (result.user_message && result.assistant_message) {
+        setMessages((current) => mergeMessageList(mergeMessageList(current, result.user_message!), result.assistant_message!));
+      }
+      setSendError("已按上一条用户消息重新发起。");
+      void refreshConversations(activeConversationId);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "重试失败。");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function undoTurn() {
+    setActionBusy("undo");
+    setSendError("");
+    try {
+      const result = await undoConversationTurn(activeConversationId);
+      setSendError(result.message || "已撤销上一轮。");
+      await refreshActiveMessages();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "撤销失败。");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function branchTurn() {
+    const title = window.prompt("新分支名称", `${activeConversation?.title || "对话"} 分支`);
+    if (title === null) {
+      return;
+    }
+    setActionBusy("branch");
+    setSendError("");
+    try {
+      const result = await branchConversationTurn(activeConversationId, title.trim());
+      if (result.conversation) {
+        await refreshConversations(result.conversation.id);
+        setSendError(`已创建分支，复制 ${result.copied_messages ?? 0} 条文本消息。`);
+      }
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "创建分支失败。");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function saveSummary() {
+    setActionBusy("summary");
+    setSendError("");
+    try {
+      const result = await saveConversationSummary(activeConversationId);
+      setSendError(result.message || "已保存为本地记录。");
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "保存摘要失败。");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
   async function send() {
     const message = input.trim();
     const attachments = pendingAttachments;
@@ -519,6 +629,26 @@ export function ChatHome({ bootstrap, initialMessages = [], modelCapabilities, o
             <p>{headerHint}</p>
           </div>
           <div className="chatHeaderActions">
+            <button
+              type="button"
+              className="secondaryButton compactButton"
+              onClick={() => void stopTurn()}
+              disabled={!hasGeneratingMessage || actionBusy === "stop"}
+            >
+              停止
+            </button>
+            <button type="button" className="secondaryButton compactButton" onClick={() => void retryTurn()} disabled={Boolean(actionBusy)}>
+              重试
+            </button>
+            <button type="button" className="secondaryButton compactButton" onClick={() => void undoTurn()} disabled={Boolean(actionBusy)}>
+              撤销
+            </button>
+            <button type="button" className="secondaryButton compactButton" onClick={() => void branchTurn()} disabled={Boolean(actionBusy)}>
+              分支
+            </button>
+            <button type="button" className="secondaryButton compactButton" onClick={() => void saveSummary()} disabled={Boolean(actionBusy)}>
+              保存摘要
+            </button>
             {hasWeixinRoute(activeConversation) && (
               <button type="button" className="secondaryButton compactButton" onClick={() => void createWeixinThread()}>
                 为这个微信联系人开新对话

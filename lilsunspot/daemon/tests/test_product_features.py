@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 
 def test_product_feature_endpoints_require_token(daemon_client):
     response = daemon_client.client.get("/diagnostics/summary")
 
     assert response.status_code == 403
     assert daemon_client.client.get("/capability-graph").status_code == 403
+    assert daemon_client.client.get("/ui/overview").status_code == 403
+    assert daemon_client.client.get("/tasks").status_code == 403
+    assert daemon_client.client.get("/profiles").status_code == 403
+    assert daemon_client.client.get("/usage/summary").status_code == 403
+    assert daemon_client.client.get("/advanced/extensions").status_code == 403
+    assert daemon_client.client.get("/advanced/config/export").status_code == 403
+    assert daemon_client.client.post("/advanced/config/import", json={"config": {}}).status_code == 403
 
 
 def test_diagnostics_model_capabilities_and_feature_switches(daemon_client):
@@ -320,3 +329,234 @@ def test_reminders_and_memory_are_persistent_product_records(daemon_client):
     deleted = client.delete(f"/memory/{memory['id']}", headers=headers)
     assert deleted.status_code == 200
     assert deleted.json()["ok"] is True
+
+
+def test_tasks_profiles_usage_and_overview_are_product_wrappers(daemon_client):
+    client = daemon_client.client
+    headers = daemon_client.headers
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="minutes")
+
+    created = client.post(
+        "/tasks",
+        headers=headers,
+        json={"title": "明早看日报", "prompt": "提醒我看日报", "due_at": due_at, "kind": "reminder", "schedule": "daily"},
+    )
+    assert created.status_code == 200
+    task = created.json()["task"]
+    assert task["status"] == "active"
+    assert task["next_run_at"]
+    assert task["schedule"] == "daily"
+    assert task["metadata"]["scheduler"] == "background"
+
+    paused = client.patch(f"/tasks/{task['id']}", headers=headers, json={"enabled": False})
+    assert paused.status_code == 200
+    assert paused.json()["task"]["status"] == "paused"
+
+    run = client.post(f"/tasks/{task['id']}/run", headers=headers)
+    assert run.status_code == 200
+    assert run.json()["task"]["last_run_at"]
+    assert run.json()["run"]["state"] == "succeeded"
+    assert run.json()["run"]["message_id"]
+
+    listed = client.get("/tasks", headers=headers)
+    assert listed.status_code == 200
+    assert task["id"] in {item["id"] for item in listed.json()["tasks"]}
+
+    profile = client.post(
+        "/profiles",
+        headers=headers,
+        json={"name": "工作助理", "instructions": "先给结论，再给步骤。"},
+    )
+    assert profile.status_code == 200
+    profile_id = profile.json()["profile"]["id"]
+    assert client.get("/profiles", headers=headers).json()["profiles"][0]["id"] == profile_id
+
+    usage = client.get("/usage/summary", headers=headers)
+    assert usage.status_code == 200
+    assert usage.json()["tasks"]["total"] >= 1
+    assert usage.json()["costs"]["available"] is False
+
+    overview = client.get("/ui/overview", headers=headers)
+    assert overview.status_code == 200
+    assert "diagnostics" in overview.json()
+    assert overview.json()["tasks"]["total"] >= 1
+
+    advanced = client.get("/advanced/extensions", headers=headers)
+    assert advanced.status_code == 200
+    assert advanced.json()["mode"] == "guarded"
+    assert advanced.json()["safe_actions"]["config_export"] is True
+    assert advanced.json()["dangerous_actions_enabled"] is False
+
+    deleted = client.delete(f"/profiles/{profile_id}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["ok"] is True
+
+
+def test_product_task_scheduler_runs_due_tasks_and_reschedules_daily(daemon_client):
+    product_features = daemon_client.product_features
+    conversations = daemon_client.conversations
+    paths = daemon_client.config_paths.get_runtime_paths()
+    now = datetime.now(timezone.utc)
+    once = product_features.create_task(
+        title="到点提醒",
+        prompt="提醒我喝水",
+        due_at=(now - timedelta(minutes=1)).isoformat(timespec="minutes"),
+        kind="reminder",
+        schedule="once",
+        paths=paths,
+    )
+    daily = product_features.create_task(
+        title="每日检查",
+        prompt="检查本地状态",
+        due_at=(now - timedelta(days=1)).isoformat(timespec="minutes"),
+        kind="check",
+        schedule="daily",
+        paths=paths,
+    )
+
+    results = product_features.run_due_tasks(paths=paths, now=now)
+
+    result_by_id = {item["task"]["id"]: item for item in results}
+    assert once["id"] in result_by_id
+    assert daily["id"] in result_by_id
+    assert result_by_id[once["id"]]["task"]["status"] == "completed"
+    assert result_by_id[daily["id"]]["task"]["status"] == "active"
+    assert result_by_id[daily["id"]]["task"]["next_run_at"]
+    assert result_by_id[daily["id"]]["task"]["due_at"] != daily["due_at"]
+    messages = conversations.list_messages("personal", limit=20, paths=paths)
+    assert any("任务提醒：到点提醒" in item["text"] for item in messages)
+    assert any("定时检查：每日检查" in item["text"] for item in messages)
+
+
+def test_advanced_config_export_import_is_redacted_and_product_scoped(daemon_client):
+    product_features = daemon_client.product_features
+    hermes_runtime = daemon_client.hermes_runtime
+    paths = daemon_client.config_paths.get_runtime_paths()
+    hermes_runtime.save_provider_credentials(
+        {
+            "id": "deepseek",
+            "type": "cloud",
+            "env_key": "DEEPSEEK_API_KEY",
+            "base_url": "https://api.deepseek.com/v1",
+            "hermes_provider": "deepseek",
+        },
+        "deepseek-chat",
+        "placeholder-secret-value",
+        paths=paths,
+    )
+    product_features.update_capability("web_search", enabled=True, paths=paths)
+    product_features.create_profile(name="工作助理", instructions="先给结论。", paths=paths)
+    product_features.create_task(
+        title="导出任务",
+        prompt="导出后可恢复",
+        due_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="minutes"),
+        kind="reminder",
+        schedule="once",
+        paths=paths,
+    )
+
+    exported = product_features.advanced_config_export(paths)
+    exported_text = str(exported)
+    assert exported["redacted"] is True
+    assert "placeholder-secret-value" not in exported_text
+    assert exported["not_included"]
+
+    product_features.update_capability("web_search", enabled=False, paths=paths)
+    imported = product_features.advanced_config_import(exported, paths=paths)
+
+    assert imported["ok"] is True
+    assert imported["applied"]["capabilities"] >= 1
+    web_search = [item for item in product_features.list_capabilities(paths) if item["id"] == "web_search"][0]
+    assert web_search["enabled"] is True
+
+
+def test_conversation_turn_product_actions_are_local_wrappers(daemon_client, monkeypatch):
+    conversations = daemon_client.conversations
+    paths = daemon_client.config_paths.get_runtime_paths()
+    client = daemon_client.client
+    headers = daemon_client.headers
+
+    conversation = conversations.create_conversation(title="原始对话", paths=paths)
+    user = conversations.create_message(
+        conversation_id=conversation["id"],
+        source="desktop",
+        role="user",
+        text="帮我整理事项",
+        paths=paths,
+    )
+    attachment_dir = paths.data_dir / "attachments" / "branch-test"
+    attachment_dir.mkdir(parents=True, exist_ok=True)
+    attachment_path = attachment_dir / "todo.txt"
+    attachment_path.write_text("todo", encoding="utf-8")
+    source_attachment = conversations.create_attachment_record(
+        message_id=user["id"],
+        conversation_id=conversation["id"],
+        safe_path=attachment_path,
+        file_name="todo.txt",
+        mime_type="text/plain",
+        size_bytes=4,
+        summary_status="ready",
+        summary_text="待办附件",
+        paths=paths,
+    )
+    conversations.create_message(
+        conversation_id=conversation["id"],
+        source="assistant",
+        role="assistant",
+        text="好的。",
+        paths=paths,
+    )
+
+    summary = client.post(f"/conversations/{conversation['id']}/turns/save-summary", headers=headers)
+    assert summary.status_code == 200
+    assert summary.json()["memory"]["source"] == "conversation_summary"
+
+    branch = client.post(
+        f"/conversations/{conversation['id']}/turns/branch",
+        headers=headers,
+        json={"title": "分支对话", "message_id": user["id"]},
+    )
+    assert branch.status_code == 200
+    assert branch.json()["conversation"]["metadata"]["branch_from"] == conversation["id"]
+    assert branch.json()["copied_messages"] == 1
+    assert branch.json()["copied_attachments"] == 1
+    branch_messages = conversations.list_messages(branch.json()["conversation"]["id"], paths=paths)
+    assert len(branch_messages) == 1
+    assert len(branch_messages[0]["attachments"]) == 1
+    copied_attachment = conversations.get_attachment(branch_messages[0]["attachments"][0]["id"], include_safe_path=True, paths=paths)
+    assert copied_attachment is not None
+    assert copied_attachment["id"] != source_attachment["id"]
+    assert copied_attachment["safe_path"] == str(attachment_path)
+    assert copied_attachment["metadata"]["copied_from_attachment_id"] == source_attachment["id"]
+
+    undo = client.post(f"/conversations/{conversation['id']}/turns/undo", headers=headers)
+    assert undo.status_code == 200
+    assert len(undo.json()["removed_message_ids"]) == 2
+
+    conversations.create_message(
+        conversation_id=conversation["id"],
+        source="desktop",
+        role="user",
+        text="再试一次",
+        paths=paths,
+    )
+
+    async def fake_accept(message, *, conversation_id, source, attachments_payload=None):
+        return {
+            "ok": True,
+            "user_message": {"id": "msg_user", "conversation_id": conversation_id, "role": "user", "source": source, "text": message},
+            "assistant_message": {
+                "id": "msg_assistant",
+                "conversation_id": conversation_id,
+                "role": "assistant",
+                "source": "assistant",
+                "text": "accepted",
+            },
+            "chat": {"ok": True, "accepted": True},
+        }
+
+    monkeypatch.setattr(daemon_client.app_module, "_accept_conversation_message", fake_accept)
+    retry = client.post(f"/conversations/{conversation['id']}/turns/retry", headers=headers)
+    assert retry.status_code == 200
+    assert retry.json()["action"] == "retry"
+    assert retry.json()["user_message"]["text"] == "再试一次"

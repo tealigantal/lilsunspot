@@ -75,6 +75,7 @@ from .mode_intents import apply_mode_intent
 from .modes import get_current_mode, load_mode_profiles, select_mode
 from .provider_client import test_provider_connection
 from .providers import load_provider_registry, provider_by_id
+from .product_task_scheduler import start_task_scheduler, stop_task_scheduler
 from .runtime_discovery import base_url_for, read_runtime_descriptor, write_runtime_descriptor
 from .safety import (
     ApprovalNotFoundError,
@@ -129,11 +130,13 @@ logger.info(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    task_scheduler = start_task_scheduler(paths)
     if current_runtime_model(paths)["configured"]:
         await start_weixin_runtime(paths)
     try:
         yield
     finally:
+        await stop_task_scheduler()
         await stop_weixin_runtime()
 
 
@@ -238,6 +241,11 @@ class ConversationTurnSteerRequest(BaseModel):
     message: str = Field(..., min_length=1)
 
 
+class ConversationBranchRequest(BaseModel):
+    title: str | None = None
+    message_id: str | None = None
+
+
 class ConversationCreateRequest(BaseModel):
     title: str | None = None
     kind: str = "desktop"
@@ -301,6 +309,24 @@ class ReminderUpdateRequest(BaseModel):
     completed: bool | None = None
 
 
+class TaskCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1)
+    due_at: str = ""
+    kind: str = "reminder"
+    schedule: str = "once"
+
+
+class TaskUpdateRequest(BaseModel):
+    title: str | None = None
+    prompt: str | None = None
+    due_at: str | None = None
+    kind: str | None = None
+    schedule: str | None = None
+    enabled: bool | None = None
+    completed: bool | None = None
+
+
 class MemoryCreateRequest(BaseModel):
     text: str = Field(..., min_length=1)
     source: str = "manual"
@@ -310,8 +336,17 @@ class MemoryUpdateRequest(BaseModel):
     enabled: bool | None = None
 
 
+class ProfileCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    instructions: str = Field(..., min_length=1)
+
+
 class CapabilityUpdateRequest(BaseModel):
     enabled: bool
+
+
+class AdvancedConfigImportRequest(BaseModel):
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class RepairRequest(BaseModel):
@@ -461,6 +496,11 @@ async def runtime_info() -> dict[str, Any]:
             "upstream_commit": compatibility["upstream_commit"],
         },
     }
+
+
+@app.get("/ui/overview", dependencies=[Depends(require_token)])
+async def api_ui_overview() -> dict[str, Any]:
+    return product_features.ui_overview(ensure_runtime_dirs())
 
 
 @app.get("/providers", dependencies=[Depends(require_token)])
@@ -1234,6 +1274,11 @@ async def api_conversation_search(payload: ConversationSearchRequest) -> dict[st
     }
 
 
+@app.post("/sessions/search", dependencies=[Depends(require_token)])
+async def api_session_search(payload: ConversationSearchRequest) -> dict[str, Any]:
+    return await api_conversation_search(payload)
+
+
 @app.post("/conversations", dependencies=[Depends(require_token)])
 async def api_conversation_create(payload: ConversationCreateRequest) -> dict[str, Any]:
     metadata = payload.metadata if isinstance(payload.metadata, dict) else {}
@@ -1290,6 +1335,55 @@ async def api_conversation_turn_steer(
     result = steer_active_turn(conversation_id, payload.message)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=str(result.get("message") or "当前没有正在执行的任务。"))
+    return result
+
+
+@app.post("/conversations/{conversation_id}/turns/retry", dependencies=[Depends(require_token)])
+async def api_conversation_turn_retry(conversation_id: str) -> dict[str, Any]:
+    messages = conversations.list_messages(conversation_id, limit=40)
+    last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
+    if last_user is None:
+        raise HTTPException(status_code=400, detail="这个对话还没有可重试的用户消息。")
+    text = str(last_user.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="上一条用户消息为空，不能重试。")
+    result = await _accept_conversation_message(text, conversation_id=conversation_id, source="desktop")
+    result["action"] = "retry"
+    result["retried_message_id"] = last_user.get("id")
+    return result
+
+
+@app.post("/conversations/{conversation_id}/turns/undo", dependencies=[Depends(require_token)])
+async def api_conversation_turn_undo(conversation_id: str) -> dict[str, Any]:
+    result = product_features.undo_last_turn(conversation_id, paths=ensure_runtime_dirs())
+    if result is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("message") or "没有可撤销的消息。"))
+    return result
+
+
+@app.post("/conversations/{conversation_id}/turns/branch", dependencies=[Depends(require_token)])
+async def api_conversation_turn_branch(conversation_id: str, payload: ConversationBranchRequest) -> dict[str, Any]:
+    result = product_features.branch_conversation(
+        conversation_id,
+        title=payload.title,
+        message_id=payload.message_id,
+        paths=ensure_runtime_dirs(),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
+    return result
+
+
+@app.post("/conversations/{conversation_id}/turns/save-summary", dependencies=[Depends(require_token)])
+async def api_conversation_turn_save_summary(conversation_id: str) -> dict[str, Any]:
+    try:
+        result = product_features.save_conversation_summary(conversation_id, paths=ensure_runtime_dirs())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="没有找到这个对话。")
     return result
 
 
@@ -1468,6 +1562,64 @@ async def api_reminder_delete(reminder_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+@app.get("/tasks", dependencies=[Depends(require_token)])
+async def api_tasks() -> dict[str, Any]:
+    return {"tasks": product_features.list_tasks(ensure_runtime_dirs())}
+
+
+@app.post("/tasks", dependencies=[Depends(require_token)])
+async def api_task_create(payload: TaskCreateRequest) -> dict[str, Any]:
+    try:
+        task = product_features.create_task(
+            title=payload.title,
+            prompt=payload.prompt,
+            due_at=payload.due_at,
+            kind=payload.kind,
+            schedule=payload.schedule,
+            paths=ensure_runtime_dirs(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task": task}
+
+
+@app.patch("/tasks/{task_id}", dependencies=[Depends(require_token)])
+async def api_task_update(task_id: str, payload: TaskUpdateRequest) -> dict[str, Any]:
+    try:
+        task = product_features.update_task(
+            task_id,
+            title=payload.title,
+            prompt=payload.prompt,
+            due_at=payload.due_at,
+            kind=payload.kind,
+            schedule=payload.schedule,
+            enabled=payload.enabled,
+            completed=payload.completed,
+            paths=ensure_runtime_dirs(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="没有找到这个任务。")
+    return {"task": task}
+
+
+@app.post("/tasks/{task_id}/run", dependencies=[Depends(require_token)])
+async def api_task_run(task_id: str) -> dict[str, Any]:
+    result = product_features.run_task(task_id, paths=ensure_runtime_dirs())
+    if result is None:
+        raise HTTPException(status_code=404, detail="没有找到这个任务。")
+    return result
+
+
+@app.delete("/tasks/{task_id}", dependencies=[Depends(require_token)])
+async def api_task_delete(task_id: str) -> dict[str, Any]:
+    deleted = product_features.delete_reminder(task_id, paths=ensure_runtime_dirs())
+    if not deleted:
+        raise HTTPException(status_code=404, detail="没有找到这个任务。")
+    return {"ok": True}
+
+
 @app.get("/memory", dependencies=[Depends(require_token)])
 async def api_memory() -> dict[str, Any]:
     return {"memories": product_features.list_memories()}
@@ -1498,6 +1650,32 @@ async def api_memory_delete(memory_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+@app.get("/profiles", dependencies=[Depends(require_token)])
+async def api_profiles() -> dict[str, Any]:
+    return {"profiles": product_features.list_profiles(ensure_runtime_dirs())}
+
+
+@app.post("/profiles", dependencies=[Depends(require_token)])
+async def api_profile_create(payload: ProfileCreateRequest) -> dict[str, Any]:
+    try:
+        profile = product_features.create_profile(
+            name=payload.name,
+            instructions=payload.instructions,
+            paths=ensure_runtime_dirs(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"profile": profile}
+
+
+@app.delete("/profiles/{profile_id}", dependencies=[Depends(require_token)])
+async def api_profile_delete(profile_id: str) -> dict[str, Any]:
+    deleted = product_features.delete_profile(profile_id, paths=ensure_runtime_dirs())
+    if not deleted:
+        raise HTTPException(status_code=404, detail="没有找到这个风格档案。")
+    return {"ok": True}
+
+
 @app.get("/product/capabilities", dependencies=[Depends(require_token)])
 async def api_product_capabilities() -> dict[str, Any]:
     return {"capabilities": product_features.list_capabilities()}
@@ -1514,6 +1692,26 @@ async def api_product_capability_update(capability_id: str, payload: CapabilityU
 @app.get("/upstream/status", dependencies=[Depends(require_token)])
 async def api_upstream_status() -> dict[str, Any]:
     return product_features.upstream_status()
+
+
+@app.get("/usage/summary", dependencies=[Depends(require_token)])
+async def api_usage_summary() -> dict[str, Any]:
+    return product_features.usage_summary(ensure_runtime_dirs())
+
+
+@app.get("/advanced/extensions", dependencies=[Depends(require_token)])
+async def api_advanced_extensions() -> dict[str, Any]:
+    return product_features.advanced_extensions(ensure_runtime_dirs())
+
+
+@app.get("/advanced/config/export", dependencies=[Depends(require_token)])
+async def api_advanced_config_export() -> dict[str, Any]:
+    return product_features.advanced_config_export(ensure_runtime_dirs())
+
+
+@app.post("/advanced/config/import", dependencies=[Depends(require_token)])
+async def api_advanced_config_import(payload: AdvancedConfigImportRequest) -> dict[str, Any]:
+    return product_features.advanced_config_import(payload.config, paths=ensure_runtime_dirs())
 
 
 @app.get("/safety/approvals", dependencies=[Depends(require_token)])

@@ -1,5 +1,21 @@
 # Agent Memory
 
+## 2026-06-29 - complete task scheduler, branch attachments, and guarded advanced actions
+
+- Task: close the remaining limitations from the Hermes UI productization slice: make tasks run in the background, preserve attachments when branching conversations, and make Advanced more than read-only without exposing dangerous raw controls.
+- Files touched: `lilsunspot/daemon/product_features.py`, `lilsunspot/daemon/product_task_scheduler.py`, `lilsunspot/daemon/app.py`, `lilsunspot/daemon/tests/test_product_features.py`, desktop API/types, `TasksPage`, `AdvancedSettings`, CSS, and this memory file.
+- Decision/result: `/tasks` now requires parseable date-time input and supports `once` or `daily` schedules. The daemon starts a product task scheduler in FastAPI lifespan; due tasks create local system messages, write run history, complete one-shot tasks, and reschedule daily tasks. Branching a conversation creates new attachment records that point to the existing safe attachment path and record `copied_from_attachment_id`. Advanced now supports guarded capability toggles, redacted config export, and safe product-config import; plugin install, raw env editing, terminal tools, API keys, runtime tokens, Weixin credentials, chat text, and attachment contents remain excluded.
+- Validation so far: `python -m pytest lilsunspot/daemon/tests/test_product_features.py -q` passed with 11 tests; `python -m pytest lilsunspot/daemon/tests/test_product_features.py lilsunspot/daemon/tests/test_conversation_sync.py -q` passed with 67 tests; `npm run build --prefix lilsunspot/desktop` passed.
+- Remaining risk: installed-app/manual click-through and final NSIS rebuild are still pending for this follow-up pass.
+
+## 2026-06-29 - Hermes missing UI productization slice
+
+- Task: implement the planned UI integration for Hermes official UI gaps without copying the raw Dashboard into the normal-user product.
+- Files touched: product API wrappers in `lilsunspot/daemon/app.py` and `product_features.py`, focused product tests, desktop API/types, AppShell/BootGate/ChatHome, new Tasks/History/Memory/Profile/Advanced UI components, `DoctorSettings`, `SettingsDrawer`, CSS, and this memory file.
+- Decision/result: main navigation now exposes Chat, Weixin, Tasks, and History. Settings now groups Model, Capabilities, Memory and Style, Safety, Diagnostics, Advanced, and Update. Added token-protected wrappers for `/ui/overview`, `/sessions/search`, `/tasks`, `/usage/summary`, `/profiles`, `/advanced/extensions`, and conversation turn actions for stop/retry/undo/branch/save-summary. Tasks are productized local jobs with pause/resume/manual-run records; the background scheduler and silent Weixin delivery remain explicitly not enabled.
+- Validation: `python -m pytest lilsunspot/daemon/tests/test_product_features.py lilsunspot/daemon/tests/test_conversation_sync.py -q` passed with 65 tests; `npm run build --prefix lilsunspot/desktop` passed; `git diff --check` passed with only LF/CRLF warnings; `python scripts/guard_no_secrets.py` passed; `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` passed with daemon 142 tests, secret guard, and desktop build; `npm run tauri:build --prefix lilsunspot/desktop` produced the NSIS setup.exe.
+- Remaining risk: installed-app/manual click-through was not run in this pass. Follow-up work on the same date added a real product scheduler, branch attachment records, and guarded Advanced import/export.
+
 ## 2026-06-22 - generated Office format hardening
 
 - Task: implement the first `LIL-WEIXIN-FILE-FORMAT-HARDENING` slice so generated files cannot be pure text with fake Office/PDF extensions.

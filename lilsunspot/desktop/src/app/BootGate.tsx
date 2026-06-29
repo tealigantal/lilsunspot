@@ -24,6 +24,8 @@ type BootGateProps = {
   onSetupModel: () => void;
   onBootstrapChanged: () => Promise<void> | void;
   onFirstChatDone: (messages: ChatMessage[]) => void;
+  requestedConversationId?: string;
+  onRequestedConversationHandled?: () => void;
 };
 
 export function BootGate({
@@ -41,7 +43,9 @@ export function BootGate({
   onOpenSettings,
   onSetupModel,
   onBootstrapChanged,
-  onFirstChatDone
+  onFirstChatDone,
+  requestedConversationId = "",
+  onRequestedConversationHandled
 }: BootGateProps) {
   const reconfiguringExistingModel = forceOnboarding && bootstrap.runtime.configured;
 
@@ -109,6 +113,8 @@ export function BootGate({
         onSetupModel={onSetupModel}
         onRefresh={onRefresh}
         onOpenSettings={onOpenSettings}
+        requestedConversationId={requestedConversationId}
+        onRequestedConversationHandled={onRequestedConversationHandled}
       />
     );
   }

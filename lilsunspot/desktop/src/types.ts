@@ -298,6 +298,57 @@ export type DiagnosticsSummary = {
   upstream: UpstreamStatus;
 };
 
+export type UsageSummary = {
+  generated_at: string;
+  conversations: {
+    total: number;
+    desktop: number;
+    weixin: number;
+  };
+  messages: {
+    total: number;
+    user: number;
+    assistant: number;
+    errors: number;
+    running: number;
+  };
+  attachments: {
+    total: number;
+  };
+  tasks: {
+    total: number;
+    active: number;
+    paused: number;
+    completed: number;
+  };
+  memories: {
+    total: number;
+    active: number;
+  };
+  capabilities: {
+    total: number;
+    enabled: number;
+  };
+  costs: {
+    available: boolean;
+    message: string;
+  };
+};
+
+export type UiOverview = {
+  generated_at: string;
+  status: "ok" | "needs_attention" | string;
+  diagnostics: DiagnosticsSummary;
+  usage: UsageSummary;
+  tasks: {
+    total: number;
+    active: number;
+    next: ProductTask | null;
+  };
+  model: ModelCapabilities;
+  weixin: DiagnosticsSummary["weixin"];
+};
+
 export type UpstreamStatus = {
   available: boolean;
   latest_report: string;
@@ -333,6 +384,35 @@ export type ProductReminder = {
   metadata?: Record<string, unknown>;
 };
 
+export type ProductTaskRun = {
+  ran_at: string;
+  trigger?: string;
+  state: string;
+  message: string;
+  conversation_id?: string;
+  message_id?: string;
+};
+
+export type ProductTask = {
+  id: string;
+  title: string;
+  prompt: string;
+  kind: string;
+  schedule: "once" | "daily" | string;
+  status: "active" | "paused" | "completed" | string;
+  enabled: boolean;
+  completed_at: string;
+  next_run_at: string;
+  due_at: string;
+  last_run_at: string;
+  last_result: string;
+  last_error: string;
+  run_history: ProductTaskRun[];
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type ProductMemory = {
   id: string;
   text: string;
@@ -341,6 +421,16 @@ export type ProductMemory = {
   memory_scope?: string;
   scope_label?: string;
   agent_memory_synced?: boolean;
+  created_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProductProfile = {
+  id: string;
+  name: string;
+  instructions: string;
+  enabled: boolean;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;
@@ -355,6 +445,58 @@ export type ProductCapability = {
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;
+};
+
+export type AdvancedExtensions = {
+  generated_at: string;
+  mode: "readonly" | "guarded" | string;
+  message: string;
+  skills: {
+    available: boolean;
+    count: number;
+    items: string[];
+  };
+  plugins: {
+    available: boolean;
+    count: number;
+    items: string[];
+  };
+  toolsets: Array<{
+    id: string;
+    label: string;
+    enabled: boolean;
+    requires_approval: boolean;
+  }>;
+  upstream: UpstreamStatus;
+  safe_actions?: {
+    config_export?: boolean;
+    product_config_import?: boolean;
+    toolset_toggle?: boolean;
+    plugin_install?: boolean;
+    raw_env_edit?: boolean;
+    terminal_tools?: boolean;
+  };
+  dangerous_actions_enabled: boolean;
+};
+
+export type AdvancedConfigExport = {
+  version: number;
+  generated_at: string;
+  redacted: boolean;
+  message: string;
+  sections: Record<string, unknown>;
+  not_included: string[];
+};
+
+export type AdvancedConfigImportResult = {
+  ok: boolean;
+  message: string;
+  applied: {
+    capabilities: number;
+    tasks: number;
+    profiles: number;
+  };
+  skipped: string[];
 };
 
 export type ChatSendResult =
@@ -438,6 +580,20 @@ export type ConversationSendResult = {
   user_message: ConversationMessage;
   assistant_message: ConversationMessage;
   chat: ChatSendResult;
+};
+
+export type ConversationTurnActionResult = {
+  ok?: boolean;
+  message?: string;
+  action?: string;
+  removed_message_ids?: string[];
+  retried_message_id?: string;
+  conversation?: Conversation;
+  copied_messages?: number;
+  memory?: ProductMemory;
+  user_message?: ConversationMessage;
+  assistant_message?: ConversationMessage;
+  chat?: ChatSendResult;
 };
 
 export type LilsunspotEvent = {

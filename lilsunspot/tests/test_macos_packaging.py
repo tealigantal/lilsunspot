@@ -68,6 +68,14 @@ def test_macos_workflow_has_two_native_artifacts_and_windows_regression():
     assert "${{ secrets." not in workflow
 
 
+def test_macos_icon_script_generates_tauri_context_png_and_bundle_icns():
+    script = (ROOT / "scripts" / "prepare_lilsunspot_macos_icon.sh").read_text(encoding="utf-8")
+
+    assert 'src-tauri/icons/icon.icns' in script
+    assert 'src-tauri/icons/icon.png' in script
+    assert 'icon_512x512.png' in script
+
+
 def test_macos_installed_app_smoke_covers_complete_product_surface():
     smoke = (ROOT / "scripts" / "smoke_lilsunspot_macos.py").read_text(encoding="utf-8")
 

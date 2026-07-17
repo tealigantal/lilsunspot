@@ -2,6 +2,8 @@
 
 ## Current
 
+LIL-MACOS-DMG-01：在不改变现有 Windows NSIS、PowerShell 构建脚本、发布 workflow、installer hooks 和 `tauri:build` 行为的前提下，新增 Apple Silicon 与 Intel 两个 macOS 15+ 私用 DMG。必须复用同一 React、daemon、Hermes runtime、微信 adapter、会话/附件/模式/审批/任务/记忆能力面；仅增加 macOS sidecar、Tauri 平台配置、数据目录/资源定位/updater 隔离、双原生 runner Artifact workflow 和安装后自动烟测。真实微信扫码/收发、真实模型服务、Finder 交互和托盘点击保留为未来真实 Mac 人工验收，不得把未运行的云端或人工项目写成已通过。执行记录见 `lilsunspot/notes/macos-private-dmg-plan.md`。
+
 LIL-CAPABILITY-ORCHESTRATION-01B：迁移 Hermes 本地能力并修复重配/图片/微信链路。按 `lilsunspot/notes/model-capability-ux-plan.md` 第一阶段继续执行：能力判断和视觉调用迁移到 Hermes resolver/metadata，重配流程从首启向导拆出，微信会话里的桌面插话复用微信 route/coalescer/session，安装版必须重建验证。允许使用本机已有真实 API Key 做定向 live smoke，但不得记录 Key/token/微信凭据/私聊正文/附件原文或完整模型回复。
 
 - 2026-06-13 附件返还链路问题记录：用户在桌面对话里要求“小黑子把刚上传的图片再发给我”时，模型回复成“没有直接发送图片文件能力 / weixin.send_file 未配置”，暴露的是能力编排口径问题，不是图片识别失败。当前会话库已经把桌面上传附件保存到安全附件目录，`/attachments/{id}` 也能按附件 id 取回安全路径；但能力图和 prompt 快照只暴露 `runtime.desktop_image_upload`（上传/预览/识别）与 `weixin.send_file`（微信发送文件且需连接/审批），没有暴露“复用最近已上传/已生成的本地安全附件并返还给当前桌面用户”的默认能力，也没有把这类自然语言意图路由到附件卡打开/下载/复制或安全返还动作。因此模型只能按微信发送能力判断并拒绝。后续修复应把“已入库安全附件的当前聊天返还/打开/下载”作为默认可用的桌面能力处理；若目标是微信或外部平台，再走 `weixin.send_file + safety.approval`，不要让普通用户理解 weixin/tool 名称。本轮仅研究并记录，不改代码。

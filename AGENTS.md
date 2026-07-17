@@ -5,11 +5,11 @@
 - Product name: lilsunspot.
 - Chinese name: 小黑子.
 - This repository is a fork of Hermes Agent.
-- The goal is a Windows desktop personal agent that normal users can install and run.
+- The goal is a desktop personal agent that normal users can install and run: the existing Windows product remains the release baseline, with private macOS arm64 and x86_64 DMGs built separately.
 
 ## Main Path
 
-Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config -> Desktop chat -> Mode profiles -> Weixin commands -> Safety approval
+Installer/DMG -> Lilsunspot desktop -> lilsunspotd -> Hermes runtime -> Provider config -> Desktop chat -> Mode profiles -> Weixin commands -> Safety approval
 
 ## Hard Rules
 
@@ -67,3 +67,4 @@ Installer -> Lilsunspot.exe -> lilsunspotd -> Hermes runtime -> Provider config 
 - App skeleton still starts.
 - `scripts/check.ps1` passes, or failure is documented and unrelated.
 - For installer-impacting work, a fresh `setup.exe` is built and its path is reported, or the exact reason it could not be built is recorded.
+- For macOS packaging work, both native-architecture DMG jobs and their installed-app smoke checks are defined; cloud-only results must not be reported as passed until GitHub Actions has actually produced the artifacts.

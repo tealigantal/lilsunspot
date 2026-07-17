@@ -550,3 +550,9 @@
 - Decision/result: `LIL-00-04` moved to Done and `LIL-00-05` is now Current.
 - Validation: using local environment variable `DEEPSEEK_API_KEY`, `/providers/test` passed for `deepseek/deepseek-chat`, and `/chat/send` returned a real `hermes_runtime_adapter` response with 39 characters. `python scripts/guard_no_secrets.py` and `pwsh scripts/check.ps1` passed locally.
 - Remaining risk: no API Key, runtime token, or reply body was recorded; GitHub PR creation still requires local `gh auth login`.
+# 2026-07-17 LIL-MACOS-DMG-01
+
+- 任务：在保持现有 Windows setup.exe 链路不变的前提下增加 macOS 15+ arm64/x86_64 私用 DMG。
+- 涉及：Mac Tauri 平台配置、PyInstaller onedir/icon shell 脚本、Rust/Python 数据目录与资源定位、Mac updater 隔离、双架构 Artifact workflow、安装后功能面烟测及项目文档。
+- 决策：不改 Hermes core、不做功能裁剪；两个原生 runner 分别构建，无 Developer ID/公证/Release/自动更新，Windows 关键配置和脚本由 PR regression job 强制保持不变。
+- 验证：`scripts/check.ps1`（daemon 147 passed、secret guard、desktop build）、产品测试 51 passed、Rust 测试 4 passed、Mac 定向测试 7 passed、Mac Tauri override/no-bundle build、Windows `scripts/check_release.ps1` 和临时安装 smoke 均通过。新 `Lilsunspot_0.1.0_x64-setup.exe` 为 39,325,311 bytes，SHA-256 为 `8F686A1C95FE62D949AE86FE2395CB28DE2006095884303CC6717BEE5F6F15D5`；云端双架构 DMG 与真实 Mac 人工项目尚未执行，不记为通过。

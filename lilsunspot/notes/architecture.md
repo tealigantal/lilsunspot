@@ -18,6 +18,7 @@ lilsunspot 是产品层，优先新增在 `lilsunspot/`，不大面积修改 Her
 ## 运行时数据
 
 - `%LOCALAPPDATA%/Lilsunspot/data`：计划/当前默认产品数据目录。
+- `~/Library/Application Support/Lilsunspot/data`：macOS 默认产品数据目录；Rust 桌面壳启动 sidecar 时显式传递同一路径。
 - `hermes_home`：lilsunspot 独立 Hermes home，计划避免污染用户原 `~/.hermes`。
 - `runtime-token.json`：本地 API runtime token 文件。
 - `daemon-runtime.json`：daemon discovery 文件，记录本机 base URL、端口和 token 文件路径，不应包含 token 明文。
@@ -103,3 +104,14 @@ doctor checks
 4. Weixin 真实私聊需要人工扫码验收。
 5. 安装包必须在干净 Windows 验证。
 6. secret 脱敏必须贯穿日志和诊断包。
+
+## macOS 私用包壳层
+
+Mac 不复制或裁剪产品运行时：React 前端、Python daemon、Hermes runtime、微信 iLink adapter、会话、附件、模式、安全审批、任务和记忆仍走同一套代码。平台差异仅位于：
+
+- `tauri.macos.conf.json` 覆盖普通前端构建命令、DMG、macOS 15 下限、独立 `icon.icns` 和 ad-hoc 签名。
+- 原生 runner 用 PyInstaller 6.16.0 `onedir` 生成无扩展名的 `lilsunspotd`，完整复用 Windows hidden imports、Hermes collect-submodules 与产品资源。
+- `.app` 中 daemon 固定从 `Contents/Resources/binaries/lilsunspotd/lilsunspotd` 发现；`LILSUNSPOT_DATA_DIR` 仍优先于平台默认值。
+- Mac 更新入口保留，但只返回“私用 DMG 不提供自动更新”，不会访问 Windows 更新源。
+
+Windows 主 `tauri.conf.json`、NSIS hooks、PowerShell sidecar/installer/release 脚本、npm `tauri:build` 和 Windows release workflow 仍是独立且受保护的原链路。

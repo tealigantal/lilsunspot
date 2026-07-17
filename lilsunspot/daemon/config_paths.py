@@ -35,6 +35,9 @@ def get_data_dir() -> Path:
             return Path(local_appdata) / APP_DIR_NAME / DATA_DIR_NAME
         return Path.home() / "AppData" / "Local" / APP_DIR_NAME / DATA_DIR_NAME
 
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_DIR_NAME / DATA_DIR_NAME
+
     xdg_data_home = os.environ.get("XDG_DATA_HOME")
     if xdg_data_home:
         return Path(xdg_data_home) / APP_DIR_NAME / DATA_DIR_NAME

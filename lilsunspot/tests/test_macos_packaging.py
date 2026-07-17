@@ -99,3 +99,4 @@ def test_macos_installed_app_smoke_covers_complete_product_surface():
     assert "LILSUNSPOT_DATA_DIR" in smoke
     assert 'env.pop("LILSUNSPOT_DATA_DIR", None)' in smoke
     assert "Contents" in smoke and "Resources" in smoke
+    assert 'wait_until("daemon /health ready"' in smoke

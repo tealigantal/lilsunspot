@@ -507,9 +507,12 @@ def verify_installed_app(dmg_path: Path, expected_arch: str) -> None:
                     raise SmokeError("Desktop did not launch the sidecar from .app/Contents/Resources")
 
                 base_url = str(runtime.get("base_url") or "")
-                _, health = http_json(base_url, "/health")
-                if not health.get("ok"):
-                    raise SmokeError("Daemon /health did not return ok=true")
+
+                def read_health() -> dict[str, Any] | None:
+                    _, payload = http_json(base_url, "/health", timeout=5)
+                    return payload if payload.get("ok") else None
+
+                wait_until("daemon /health ready", read_health, timeout=45)
                 http_json(base_url, "/providers", expected=(403,))
 
                 token_payload = json.loads(token_file.read_text(encoding="utf-8"))

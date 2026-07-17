@@ -1,5 +1,17 @@
 # QA Checklist
 
+## LIL-MACOS-DMG-01 自动验证边界
+
+- [x] 独立 Mac Tauri 配置只覆盖前端 build、DMG、macOS 15、`icon.icns` 与 ad-hoc 签名。
+- [x] Mac sidecar 脚本与 Windows 脚本的 hidden imports、collect-submodules 和产品资源集合保持一致。
+- [x] arm64/x86_64 原生 Artifact workflow、安装后烟测和 PR Windows regression job 已实现。
+- [x] `macos-15` 实际生成 `Lilsunspot_0.1.0_macos-arm64.dmg` 并通过安装后烟测。
+- [x] `macos-15-intel` 实际生成 `Lilsunspot_0.1.0_macos-x86_64.dmg` 并通过安装后烟测。
+- [x] 本分支重新生成 Windows `Lilsunspot_0.1.0_x64-setup.exe` 并通过临时安装 smoke。
+- [ ] 真实 Mac 微信扫码/收发、真实模型服务、Finder 附件交互和托盘点击人工验收。
+
+GitHub Actions run `29576626648` 已通过并完成本地 Artifact SHA-256 复核；真实 Mac 人工项目仍不得标记为通过。DMG Artifact 来自公开仓库，14 天保留不等于保密存储。
+
 ## LIL-P0-01 自动验证记录
 
 - [x] daemon tests：23 passed。

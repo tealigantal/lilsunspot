@@ -2,7 +2,7 @@
 
 ## 一句话说明
 
-Lilsunspot 小黑子是基于 Hermes Agent 的 Windows 桌面个人 Agent 产品层。
+Lilsunspot 小黑子是基于 Hermes Agent 的桌面个人 Agent 产品层。Windows 安装包仍是正式基线；macOS 只通过独立云端链路提供 arm64 与 x86_64 私用 DMG。
 
 ## 当前目标
 
@@ -26,6 +26,7 @@ P0 主路径：
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | Windows 安装包 | 自动构建通过 | LIL-P0-01 已构建 NSIS 安装包；干净 Windows 未验证。 |
+| macOS 私用安装包 | workflow 已实现、待云端执行 | macOS 15+ arm64/x86_64 分别原生构建 DMG Artifact；不做正式签名、公证、Release 或自动更新。 |
 | Lilsunspot.exe 启动 | 自动构建通过 | Tauri release exe 已构建；仓库外安装启动未验证。 |
 | lilsunspotd | 自动验证通过 | PyInstaller sidecar 可在临时数据目录启动并通过 `/health`。 |
 | runtime token | 自动验证通过 | sidecar smoke 创建 runtime token 和 discovery file，token 未写入 daemon 日志；未记录 token。 |
@@ -44,7 +45,7 @@ P0 主路径：
 
 ## 不做的事
 
-- 不做 macOS
+- 不做 macOS 正式发布、Developer ID 签名、公证或自动更新
 - 不做 Linux
 - 不做插件市场
 - 不做云后台

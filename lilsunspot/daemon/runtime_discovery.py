@@ -33,7 +33,10 @@ def process_metadata() -> dict[str, Any]:
         bundle_dir = Path(str(getattr(sys, "_MEIPASS", ""))).resolve()
         if bundle_dir == executable_dir or executable_dir in bundle_dir.parents:
             process_model = "pyinstaller_onedir_single_process"
-            note_cn = "安装版本地服务使用 PyInstaller onedir 打包，任务管理器里通常只会看到一个 lilsunspotd.exe 服务进程。"
+            if sys.platform == "darwin":
+                note_cn = "安装版本地服务使用 PyInstaller onedir 打包，活动监视器里通常只会看到一个 lilsunspotd 服务进程。"
+            else:
+                note_cn = "安装版本地服务使用 PyInstaller onedir 打包，任务管理器里通常只会看到一个 lilsunspotd.exe 服务进程。"
         else:
             process_model = "pyinstaller_onefile_parent_child"
             note_cn = (

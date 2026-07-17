@@ -113,10 +113,24 @@ fn data_dir() -> Result<PathBuf, String> {
     if let Ok(value) = env::var("LILSUNSPOT_DATA_DIR") {
         return Ok(PathBuf::from(value));
     }
+
+    #[cfg(target_os = "macos")]
+    if let Ok(value) = env::var("HOME") {
+        return Ok(macos_data_dir(Path::new(&value)));
+    }
+
     if let Ok(value) = env::var("LOCALAPPDATA") {
         return Ok(PathBuf::from(value).join("Lilsunspot").join("data"));
     }
     Err("无法找到小黑子的本地数据目录。".to_string())
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_data_dir(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join("Lilsunspot")
+        .join("data")
 }
 
 fn update_state_path(data_path: &Path) -> PathBuf {
@@ -599,7 +613,15 @@ fn hide_child_window(command: &mut Command) {
 #[cfg(not(target_os = "windows"))]
 fn hide_child_window(_command: &mut Command) {}
 
-fn spawn_candidate(program: PathBuf, args: &[&str]) -> Result<(), String> {
+#[cfg(target_os = "macos")]
+fn configure_daemon_command(command: &mut Command, data_path: &Path) {
+    command.env("LILSUNSPOT_DATA_DIR", data_path);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_daemon_command(_command: &mut Command, _data_path: &Path) {}
+
+fn spawn_candidate(program: PathBuf, args: &[&str], data_path: &Path) -> Result<(), String> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -607,6 +629,7 @@ fn spawn_candidate(program: PathBuf, args: &[&str]) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     hide_child_window(&mut command);
+    configure_daemon_command(&mut command, data_path);
     command
         .spawn()
         .map(|_| ())
@@ -646,6 +669,11 @@ fn bundled_sidecar_candidates() -> Vec<PathBuf> {
     if let Ok(current_exe) = env::current_exe() {
         if let Some(dir) = current_exe.parent() {
             add_sidecar_candidates_from_dir(&mut candidates, dir);
+
+            #[cfg(target_os = "macos")]
+            if let Some(contents_dir) = dir.parent() {
+                add_sidecar_candidates_from_dir(&mut candidates, &contents_dir.join("Resources"));
+            }
         }
     }
 
@@ -656,29 +684,35 @@ fn bundled_sidecar_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn launch_daemon_process() -> Result<(), String> {
+fn launch_daemon_process(data_path: &Path) -> Result<(), String> {
     if let Ok(value) = env::var("LILSUNSPOTD_PATH") {
         let path = PathBuf::from(value);
         if path.exists() {
-            return spawn_candidate(path, &[]);
+            return spawn_candidate(path, &[], data_path);
         }
     }
 
     for path in bundled_sidecar_candidates() {
         if path.exists() {
-            return spawn_candidate(path, &[]);
+            return spawn_candidate(path, &[], data_path);
         }
     }
 
     for name in sidecar_file_names() {
-        if spawn_candidate(PathBuf::from(name), &[]).is_ok() {
+        if spawn_candidate(PathBuf::from(name), &[], data_path).is_ok() {
             return Ok(());
         }
     }
 
     #[cfg(debug_assertions)]
     {
-        if spawn_candidate(PathBuf::from("python"), &["-m", "lilsunspot.daemon.launcher"]).is_ok() {
+        if spawn_candidate(
+            PathBuf::from("python"),
+            &["-m", "lilsunspot.daemon.launcher"],
+            data_path,
+        )
+        .is_ok()
+        {
             return Ok(());
         }
     }
@@ -721,7 +755,7 @@ fn connect_daemon() -> DaemonConnectStatus {
         Some(endpoint) => endpoint,
         None => {
             launch_attempted = true;
-            if let Err(message) = launch_daemon_process() {
+            if let Err(message) = launch_daemon_process(&data_path) {
                 return DaemonConnectStatus {
                     ok: false,
                     base_url: default_endpoint().base_url,
@@ -835,6 +869,18 @@ fn open_attachment(attachment_id: String) -> Result<bool, String> {
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> AppUpdateStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        return AppUpdateStatus {
+            state: "unavailable".to_string(),
+            update: None,
+            message: "当前私用 macOS 安装包不提供自动更新，请下载新的 DMG 后覆盖安装。".to_string(),
+        };
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
     let data_path = match data_dir() {
         Ok(path) => path,
         Err(message) => return failed_update_status(message),
@@ -869,10 +915,19 @@ async fn check_update(app: AppHandle) -> AppUpdateStatus {
         },
         Err(_) => failed_update_status("无法连接更新源，请稍后再试。"),
     }
+    }
 }
 
 #[tauri::command]
 async fn download_and_install_update(app: AppHandle) -> Result<AppUpdateInstallResult, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        return Err("当前私用 macOS 安装包不提供自动更新，请下载新的 DMG 后覆盖安装。".to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
     let updater = app
         .updater()
         .map_err(|_| "应用更新检查暂时不可用。".to_string())?;
@@ -893,6 +948,7 @@ async fn download_and_install_update(app: AppHandle) -> Result<AppUpdateInstallR
         .await
         .map_err(|_| "更新下载或安装失败，请稍后重试。".to_string())?;
     app.restart()
+    }
 }
 
 #[tauri::command]
@@ -1097,5 +1153,26 @@ mod tests {
             Some(UPDATE_STATE_FILE_NAME)
         );
         let _ = fs::remove_dir_all(data_path);
+    }
+
+    #[test]
+    fn macos_default_data_dir_uses_application_support() {
+        assert_eq!(
+            macos_data_dir(Path::new("/Users/tester")),
+            PathBuf::from("/Users/tester/Library/Application Support/Lilsunspot/data")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_app_resources_candidate_includes_onedir_executable() {
+        let mut candidates = Vec::new();
+        add_sidecar_candidates_from_dir(
+            &mut candidates,
+            Path::new("/Applications/Lilsunspot.app/Contents/Resources"),
+        );
+        assert!(candidates.contains(&PathBuf::from(
+            "/Applications/Lilsunspot.app/Contents/Resources/binaries/lilsunspotd/lilsunspotd"
+        )));
     }
 }

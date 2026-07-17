@@ -76,6 +76,23 @@ npm run tauri:build --prefix lilsunspot/desktop -- --bundles nsis
 
 The NSIS installer is written under `src-tauri/target/release/bundle/nsis/`. Do not use `targets: all` for the Windows build path; MSI/WiX is not part of the current minimum installer loop.
 
+### Private macOS DMGs
+
+Mac builds run only on native macOS 15 runners. They do not change the Windows commands above:
+
+```bash
+bash scripts/build_lilsunspotd_sidecar_macos.sh arm64   # or x86_64 on an Intel runner
+bash scripts/prepare_lilsunspot_macos_icon.sh
+cd lilsunspot/desktop
+npx tauri build --bundles dmg --target aarch64-apple-darwin
+```
+
+Tauri automatically merges `src-tauri/tauri.macos.conf.json`. The private package uses an ad-hoc signature (`-`) only for bundle integrity; it has no Developer ID certificate or notarization. On first launch the user may need to allow it in macOS “隐私与安全”. The app supports macOS 15 and later, and its default data directory is `~/Library/Application Support/Lilsunspot/data`.
+
+`.github/workflows/lilsunspot-macos-artifacts.yml` builds arm64 on `macos-15` and x86_64 on `macos-15-intel`, verifies and installs each DMG into a temporary directory, launches the packaged desktop/daemon chain with an isolated `HOME`, exercises the complete local API surface plus mock-model chat and attachment persistence, then uploads a DMG and SHA-256 for 14 days. It creates no GitHub Release and reads no signing or release secrets.
+
+The Mac update UI remains visible but reports that private DMGs do not support automatic updates. Download a newer DMG and replace the app manually.
+
 ## LIL-P0-FLOW-UI-01 Validation
 
 Validated locally on 2026-06-07:

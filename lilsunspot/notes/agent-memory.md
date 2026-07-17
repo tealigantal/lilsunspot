@@ -550,3 +550,9 @@
 - Decision/result: `LIL-00-04` moved to Done and `LIL-00-05` is now Current.
 - Validation: using local environment variable `DEEPSEEK_API_KEY`, `/providers/test` passed for `deepseek/deepseek-chat`, and `/chat/send` returned a real `hermes_runtime_adapter` response with 39 characters. `python scripts/guard_no_secrets.py` and `pwsh scripts/check.ps1` passed locally.
 - Remaining risk: no API Key, runtime token, or reply body was recorded; GitHub PR creation still requires local `gh auth login`.
+# 2026-07-17 LIL-MACOS-DMG-01
+
+- 任务：在保持现有 Windows setup.exe 链路不变的前提下增加 macOS 15+ arm64/x86_64 私用 DMG。
+- 涉及：Mac Tauri 平台配置、PyInstaller onedir/icon shell 脚本、Rust/Python 数据目录与资源定位、Mac updater 隔离、双架构 Artifact workflow、安装后功能面烟测及项目文档。
+- 决策：不改 Hermes core、不做功能裁剪；两个原生 runner 分别构建，无 Developer ID/公证/Release/自动更新，Windows 关键配置和脚本由 PR regression job 强制保持不变。
+- 验证：本机 `scripts/check.ps1`（daemon 147 passed、secret guard、desktop build）、产品测试 51 passed、Rust 测试 4 passed、Mac 定向测试和 Windows release/安装版 smoke 通过。GitHub Actions run `29576626648` 在 `bcc110603` 上完成 arm64/x86_64 DMG 安装后功能面 smoke 与 Windows regression；Artifact 已下载到 `ignored/macos-artifacts/run-29576626648/`。arm64 SHA-256 为 `F70537166D09FE18B12BDC5F327B29E2DA2589C18C0C2F3937F640C32EA38EB0`，x86_64 SHA-256 为 `0C53F97675A5B242617F8DAB4B4F829A1430174B036B2AE6FA923CA979A2EC7D`。真实 Mac 微信、真实模型、Finder 和托盘人工项目尚未执行，不记为通过。

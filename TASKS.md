@@ -47,6 +47,10 @@ LIL-CAPABILITY-ORCHESTRATION-01B：迁移 Hermes 本地能力并修复重配/图
 
 以下为历史任务记录，是否完全代表当前主线状态需以当前 Current / Next / Blocked / Unknown 为准。
 
+### Completed 2026-07-17
+
+- LIL-MACOS-DMG-01：在保持 Windows NSIS、PowerShell 构建、installer hooks、release workflow 和 Hermes core 不变的前提下，完成 macOS 15+ arm64/x86_64 私用 DMG。GitHub Actions run `29576626648` 的两个 Mac 安装后 smoke 与 Windows regression 全部通过；DMG Artifact 已下载到 `ignored/macos-artifacts/run-29576626648/` 并完成 SHA-256 复核。真实 Mac 微信扫码/收发、真实模型服务、Finder 交互和托盘点击仍属于后续人工验收。
+
 ### Moved From Current 2026-06-12
 
 - LIL-VISION-ONBOARDING-01：模型选择/更换后的视觉能力引导。

@@ -1,0 +1,222 @@
+name: Lilsunspot macOS private DMGs
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - ".github/workflows/lilsunspot-macos-artifacts.yml"
+      - "agent/**"
+      - "gateway/**"
+      - "hermes_cli/**"
+      - "lilsunspot/daemon/**"
+      - "lilsunspot/desktop/**"
+      - "lilsunspot/resources/**"
+      - "lilsunspot/tests/**"
+      - "lilsunspot/UPSTREAM_COMMIT.txt"
+      - "model_tools/**"
+      - "providers/**"
+      - "tools/**"
+      - "utils/**"
+      - "scripts/build_lilsunspotd_sidecar_macos.sh"
+      - "scripts/prepare_lilsunspot_macos_icon.sh"
+      - "scripts/smoke_lilsunspot_macos.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "run_agent.py"
+      - "hermes_state.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-dmg:
+    name: macOS ${{ matrix.package_arch }} private DMG
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            rust_target: aarch64-apple-darwin
+            native_arch: arm64
+            python_arch: arm64
+            package_arch: arm64
+            artifact_name: lilsunspot-macos-arm64-dmg
+          - runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            native_arch: x86_64
+            python_arch: x64
+            package_arch: x86_64
+            artifact_name: lilsunspot-macos-x86_64-dmg
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      TAURI_TARGET: ${{ matrix.rust_target }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lilsunspot/desktop/package-lock.json
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Set up Rust target
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target "$TAURI_TARGET"
+          rustup default stable
+
+      - name: Install desktop dependencies
+        working-directory: lilsunspot/desktop
+        run: npm ci
+
+      - name: Run Python product and daemon tests
+        shell: bash
+        run: |
+          uv run --locked --extra web --extra lilsunspot --extra dev \
+            python -m pytest lilsunspot/daemon/tests lilsunspot/tests \
+            --timeout-method=thread \
+            --basetemp "$RUNNER_TEMP/lilsunspot-pytest-${{ matrix.package_arch }}"
+
+      - name: Check for committed secrets
+        shell: bash
+        run: uv run --locked --extra web --extra lilsunspot python scripts/guard_no_secrets.py
+
+      - name: Build desktop frontend
+        working-directory: lilsunspot/desktop
+        run: npm run build
+
+      - name: Build native macOS sidecar
+        shell: bash
+        run: bash scripts/build_lilsunspotd_sidecar_macos.sh "${{ matrix.native_arch }}"
+
+      - name: Prepare independent macOS icon
+        shell: bash
+        run: bash scripts/prepare_lilsunspot_macos_icon.sh
+
+      - name: Run Rust tests
+        shell: bash
+        run: cargo test --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml --target "$TAURI_TARGET"
+
+      - name: Build DMG
+        working-directory: lilsunspot/desktop
+        shell: bash
+        run: npx tauri build --bundles dmg --target "$TAURI_TARGET"
+
+      - name: Name and verify installed DMG
+        shell: bash
+        run: |
+          bundle_dir="lilsunspot/desktop/src-tauri/target/$TAURI_TARGET/release/bundle/dmg"
+          source_dmg="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [[ -z "$source_dmg" ]]; then
+            echo "DMG was not created under $bundle_dir" >&2
+            exit 1
+          fi
+          artifact_dir="$RUNNER_TEMP/lilsunspot-macos-${{ matrix.package_arch }}"
+          mkdir -p "$artifact_dir"
+          artifact_name="Lilsunspot_0.1.0_macos-${{ matrix.package_arch }}.dmg"
+          cp "$source_dmg" "$artifact_dir/$artifact_name"
+          python scripts/smoke_lilsunspot_macos.py \
+            --dmg "$artifact_dir/$artifact_name" \
+            --arch "${{ matrix.native_arch }}"
+          (
+            cd "$artifact_dir"
+            shasum -a 256 "$artifact_name" > "$artifact_name.sha256"
+          )
+
+      - name: Upload private DMG artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ runner.temp }}/lilsunspot-macos-${{ matrix.package_arch }}/Lilsunspot_0.1.0_macos-${{ matrix.package_arch }}.dmg
+            ${{ runner.temp }}/lilsunspot-macos-${{ matrix.package_arch }}/Lilsunspot_0.1.0_macos-${{ matrix.package_arch }}.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  windows-regression:
+    name: Existing Windows setup.exe regression
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Assert protected Windows build files are unchanged
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $protected = @(
+            ".github/workflows/lilsunspot-release.yml",
+            "scripts/build_lilsunspot_release.ps1",
+            "scripts/build_lilsunspot_desktop_nsis.ps1",
+            "scripts/build_lilsunspotd_sidecar.ps1",
+            "scripts/check_release.ps1",
+            "scripts/smoke_lilsunspot_installed_app.ps1",
+            "lilsunspot/desktop/package.json",
+            "lilsunspot/desktop/src-tauri/tauri.conf.json",
+            "lilsunspot/desktop/src-tauri/nsis/installer-hooks.nsh"
+          )
+          & git diff --exit-code $env:BASE_SHA $env:HEAD_SHA -- @protected
+          if ($LASTEXITCODE -ne 0) {
+            throw "macOS packaging changes must not modify the protected Windows build chain."
+          }
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lilsunspot/desktop/package-lock.json
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          uv sync --locked --extra web --extra lilsunspot --extra dev
+          npm ci --prefix lilsunspot/desktop
+
+      - name: Rebuild existing Windows release path
+        shell: pwsh
+        run: uv run pwsh -NoProfile -File scripts/check_release.ps1
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml
+
+      - name: Smoke-test temporary installed setup.exe
+        shell: pwsh
+        run: uv run pwsh -NoProfile -File scripts/smoke_lilsunspot_installed_app.ps1

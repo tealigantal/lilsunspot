@@ -36,6 +36,7 @@ class _TextTurnBatch:
     assistant_message: dict[str, Any]
     assistant_source: str
     route: dict[str, str] | None
+    generation_override: dict[str, Any] | None
     paths: RuntimePaths
     future: Future
     items: list[_BatchItem] = field(default_factory=list)
@@ -44,7 +45,7 @@ class _TextTurnBatch:
     sealed: bool = False
 
     def can_accept(self, text: str) -> bool:
-        if self.sealed:
+        if self.sealed or self.generation_override is not None:
             return False
         if len(self.items) >= TEXT_BATCH_MAX_MESSAGES:
             return False
@@ -92,6 +93,7 @@ async def enqueue_text_turn(
     assistant_source: str,
     paths: RuntimePaths | None = None,
     route: dict[str, str] | None = None,
+    generation_override: dict[str, Any] | None = None,
     wait_for_reply: bool = False,
 ) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
@@ -112,6 +114,7 @@ async def enqueue_text_turn(
         assistant_source=assistant_source,
         paths=runtime_paths,
         route=route,
+        generation_override=generation_override,
     )
     if wait_for_reply and enqueue_result.get("owner"):
         return await asyncio.wrap_future(enqueue_result["future"])
@@ -135,12 +138,13 @@ def _enqueue(
     assistant_source: str,
     paths: RuntimePaths,
     route: dict[str, str] | None,
+    generation_override: dict[str, Any] | None,
 ) -> dict[str, Any]:
     with _LOCK:
         queue = _QUEUES.setdefault(key, deque())
         if queue:
             candidate = queue[-1]
-            if candidate.can_accept(text):
+            if generation_override is None and candidate.can_accept(text):
                 candidate.add(text, current_message_id)
                 assistant = conversations.get_message(candidate.assistant_message_id, paths) or candidate.assistant_message
                 return {
@@ -182,10 +186,13 @@ def _enqueue(
             assistant_message=assistant_message,
             assistant_source=assistant_source,
             route=route,
+            generation_override=generation_override,
             paths=paths,
             future=Future(),
         )
         batch.add(text, current_message_id)
+        if generation_override is not None:
+            batch.sealed = True
         queue.append(batch)
         _start_worker_locked(key)
         return {
@@ -289,6 +296,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
             host_message_id=batch.assistant_message_id,
             exclude_message_ids=message_ids,
             route=batch.route,
+            generation_override=batch.generation_override,
             require_existing_conversation=True,
         )
     except Exception as exc:
@@ -328,6 +336,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
                 "source_message_count": len(message_ids),
                 "visible_reply": prepared.visible_text,
                 "delivery": delivery_metadata,
+                "generation_execution": chat_result.get("generation_execution"),
             },
             paths=batch.paths,
         )
@@ -389,6 +398,7 @@ async def _run_batch(batch: _TextTurnBatch) -> None:
             "kind": "chat_error",
             "error_code": chat_result.get("error_code"),
             "batch_count": len(batch.items),
+            "generation_execution": chat_result.get("generation_execution"),
         },
         paths=batch.paths,
     )

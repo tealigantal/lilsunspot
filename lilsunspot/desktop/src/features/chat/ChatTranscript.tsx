@@ -1,7 +1,7 @@
 import { useState } from "react";
 import lilsunspotIcon from "../../assets/lilsunspot-icon.png";
 import { openAttachment, sendWeixinMessage } from "../../api";
-import type { ConversationAttachment, ConversationMessage } from "../../types";
+import type { ConversationAttachment, ConversationMessage, GenerationExecution } from "../../types";
 
 export type ChatMessage = Partial<ConversationMessage> & {
   id: string;
@@ -104,6 +104,47 @@ function deliveryStatusText(metadata: Record<string, unknown> | undefined) {
     return reasonText || "附件没有返还成功。";
   }
   return "";
+}
+
+function generationExecution(metadata: Record<string, unknown> | undefined): GenerationExecution | null {
+  const value = metadata?.generation_execution;
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return value as GenerationExecution;
+}
+
+function GenerationDetails({ execution }: { execution: GenerationExecution }) {
+  return (
+    <details className="generationReplyDetails">
+      <summary>本次生成详情</summary>
+      <dl>
+        <div><dt>模型</dt><dd>{execution.provider} / {execution.model}</dd></div>
+        <div><dt>模式</dt><dd>{execution.mode_label || execution.mode}</dd></div>
+        <div><dt>推理强度</dt><dd>{execution.reasoning_effort || "模型默认"}</dd></div>
+        <div><dt>工具迭代</dt><dd>{execution.tool_iterations} / {execution.max_iterations}</dd></div>
+        <div><dt>兼容降级</dt><dd>{execution.automatic_downgrade ? `是${execution.retry_count ? `，安全重试 ${execution.retry_count} 次` : ""}` : "否"}</dd></div>
+      </dl>
+      <div className="generationParameterTags">
+        {Object.entries(execution.effective_parameters || {}).map(([key, value]) => (
+          <span key={key}>{key}: {String(value)}</span>
+        ))}
+        {Object.keys(execution.effective_parameters || {}).length === 0 && <span>使用模型默认生成参数</span>}
+      </div>
+      {execution.omitted_parameters?.length > 0 && (
+        <ul>
+          {execution.omitted_parameters.map((item) => (
+            <li key={item.parameter}><b>{item.parameter}</b>：{item.reason || "当前模型未使用此参数。"}</li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+function GenerationDetailsForMetadata({ metadata }: { metadata: Record<string, unknown> | undefined }) {
+  const execution = generationExecution(metadata);
+  return execution ? <GenerationDetails execution={execution} /> : null;
 }
 
 function AttachmentCard({
@@ -264,6 +305,7 @@ export function ChatTranscript({ messages, examples = [], onExampleSelect, weixi
                 </div>
               )}
               {deliveryStatusText(message.metadata) && <em>{deliveryStatusText(message.metadata)}</em>}
+              {message.role === "assistant" && <GenerationDetailsForMetadata metadata={message.metadata} />}
             </div>
           </article>
         ))

@@ -1,0 +1,77 @@
+profiles:
+  strict:
+    label: "严谨"
+    description: "少猜测、结论更稳定，适合事实核对与执行。"
+    effects:
+      stability: "高"
+      length: "中等"
+      reasoning: "高"
+      autonomy: "中高"
+    parameters:
+      temperature: 0.2
+      max_tokens: 1800
+      reasoning_effort: high
+      max_iterations: 40
+      seed: 0
+  balanced:
+    label: "平衡"
+    description: "日常默认，在质量、速度和行动之间取平衡。"
+    effects:
+      stability: "中等"
+      length: "中等"
+      reasoning: "中等"
+      autonomy: "中等"
+    parameters:
+      temperature: 0.6
+      max_tokens: 1200
+      reasoning_effort: medium
+      max_iterations: 24
+  creative:
+    label: "创意"
+    description: "扩大候选范围，适合构思、文案与头脑风暴。"
+    effects:
+      stability: "较低"
+      length: "中等"
+      reasoning: "中等"
+      autonomy: "中等"
+    parameters:
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 1600
+      reasoning_effort: medium
+      max_iterations: 24
+  fast:
+    label: "快速"
+    description: "缩短回答和等待时间，只进行必要行动。"
+    effects:
+      stability: "中高"
+      length: "短"
+      reasoning: "低"
+      autonomy: "低"
+    parameters:
+      temperature: 0.3
+      max_tokens: 500
+      reasoning_effort: low
+      max_iterations: 8
+  deep:
+    label: "深度执行"
+    description: "主动拆解、验证并交付，但不改变任何安全边界。"
+    effects:
+      stability: "高"
+      length: "长"
+      reasoning: "高"
+      autonomy: "高"
+    parameters:
+      temperature: 0.35
+      max_tokens: 3000
+      reasoning_effort: high
+      max_iterations: 60
+  custom:
+    label: "自定义"
+    description: "只使用你明确设置且当前模型支持的参数。"
+    effects:
+      stability: "自定义"
+      length: "自定义"
+      reasoning: "自定义"
+      autonomy: "自定义"
+    parameters: {}

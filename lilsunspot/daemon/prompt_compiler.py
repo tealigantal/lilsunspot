@@ -34,32 +34,21 @@ def _load_prompt_config() -> dict[str, Any]:
 
 def slider_summary(profile: dict[str, Any]) -> str:
     style_axis = _as_int(profile.get("style_axis"))
-    detail_level = _as_int(profile.get("detail_level"))
-    autonomy_level = _as_int(profile.get("autonomy_level"))
-
     style = "表达更务实" if style_axis <= 35 else "表达更有陪伴感" if style_axis >= 70 else "表达平衡清楚"
-    detail = "回答保持简短" if detail_level <= 35 else "回答给出更充分细节" if detail_level >= 70 else "回答详略适中"
-    autonomy = (
-        "风险或不确定时优先确认"
-        if autonomy_level <= 35
-        else "可自动推进明确的下一步"
-        if autonomy_level >= 70
-        else "在自动推进和必要确认之间保持平衡"
-    )
-    return f"{style}；{detail}；{autonomy}。"
+    return f"{style}。回答长度、推理深度和行动次数由独立的生成控制决定。"
 
 
 def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
     config = _load_prompt_config()
     mode_hint = _as_text(profile.get("system_hint"))
-    mode_summary = _as_text(profile.get("description")) or f"使用 {profile.get('id', 'balanced')} 输出模式。"
+    mode_summary = _as_text(profile.get("description")) or f"使用 {profile.get('id', 'balanced')} 表达风格。"
     current_slider_summary = slider_summary(profile)
 
     system_hint = "\n\n".join(
         item
         for item in (
-            f"当前输出模式：{_as_text(profile.get('id')) or 'balanced'}。\n{mode_hint}",
-            f"当前输出偏好：{current_slider_summary}",
+            f"当前表达风格：{_as_text(profile.get('id')) or 'balanced'}。\n{mode_hint}",
+            f"当前措辞偏好：{current_slider_summary}",
         )
         if item.strip()
     )
@@ -69,12 +58,12 @@ def compile_mode_prompt(profile: dict[str, Any]) -> dict[str, Any]:
         "layers": [
             {
                 "id": "mode_profile",
-                "label": _layer_label(config, "mode_profile", "模式预设"),
+                "label": _layer_label(config, "mode_profile", "表达风格预设"),
                 "summary": mode_summary,
             },
             {
                 "id": "slider_overrides",
-                "label": _layer_label(config, "slider_overrides", "三滑杆覆盖"),
+                "label": _layer_label(config, "slider_overrides", "表达滑杆覆盖"),
                 "summary": current_slider_summary,
             },
         ],

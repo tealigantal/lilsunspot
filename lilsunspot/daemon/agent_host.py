@@ -77,6 +77,13 @@ class AgentHostCallbacks:
         self.message_id = message_id
         self.source = source or "assistant"
         self.paths = paths
+        self._tool_iterations = 0
+        self._tool_iterations_lock = threading.Lock()
+
+    @property
+    def tool_iterations(self) -> int:
+        with self._tool_iterations_lock:
+            return self._tool_iterations
 
     def status_callback(self, kind: str, message: str) -> None:
         label = _clean_text(message) or "正在处理当前任务..."
@@ -90,6 +97,8 @@ class AgentHostCallbacks:
             self._record_phase("tool_started", f"正在使用工具：{_format_tool_name(name)}...", tool=_format_tool_name(name))
 
     def tool_start_callback(self, tool_call_id: str, name: str, _args: Any) -> None:
+        with self._tool_iterations_lock:
+            self._tool_iterations += 1
         self._record_phase(
             "tool_started",
             f"正在使用工具：{_format_tool_name(name)}...",

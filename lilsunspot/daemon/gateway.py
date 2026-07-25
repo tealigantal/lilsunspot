@@ -1116,7 +1116,11 @@ async def _handle_weixin_after_store(
         if not result.get("ok"):
             reply = _finish_weixin_reply(
                 result.get("message", "微信私聊暂时不能回复。"),
-                {"kind": "chat_error", "error_code": result.get("error_code")},
+                {
+                    "kind": "chat_error",
+                    "error_code": result.get("error_code"),
+                    "generation_execution": result.get("generation_execution"),
+                },
                 runtime_paths,
                 conversation_id=conversation_id,
                 reply_message_id=reply_message_id,
@@ -1140,6 +1144,8 @@ async def _handle_weixin_after_store(
                 "kind": "chat_reply",
                 "engine": result.get("engine"),
                 "provider": result.get("provider"),
+                "model": result.get("model"),
+                "generation_execution": result.get("generation_execution"),
                 "delivery": prepared.metadata(),
                 "source_message_ids": [current_message_id],
                 "source_message_count": 1,

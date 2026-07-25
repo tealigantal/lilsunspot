@@ -63,10 +63,12 @@ def test_chat_runtime_cloud_provider_uses_hermes_agent_loop_without_leaking(daem
     ]
     assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
     assert default_hint in seen["settings"]["system_hint"]
-    assert seen["settings"]["mode_runtime_policy"]["target_answer_tokens"] == 1000
-    assert seen["settings"]["mode_runtime_policy"]["max_iterations"] == 30
-    assert "当前 Mode 运行策略" in seen["settings"]["system_hint"]
-    assert "目标约 1000 tokens" in seen["settings"]["system_hint"]
+    generation = seen["settings"]["generation_control"]
+    assert generation["runtime"]["max_tokens"] == 1200
+    assert generation["runtime"]["max_iterations"] == 24
+    assert generation["runtime"]["request_overrides"] == {"temperature": 0.6}
+    assert generation["runtime"]["reasoning_effort"] is None
+    assert "当前 Mode 运行策略" not in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
     assert "provider=deepseek；model=deepseek-chat" in seen["settings"]["system_hint"]
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in seen["settings"]["system_hint"]

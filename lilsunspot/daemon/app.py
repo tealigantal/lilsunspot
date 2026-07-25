@@ -31,7 +31,7 @@ from .attachments import (
     register_uploaded_attachments,
 )
 from .auth import load_or_create_token, require_token
-from .agent_runner import delete_hermes_session, send_agent_message
+from .agent_runner import delete_hermes_session, generation_control_status, send_agent_message
 from .capabilities import (
     CapabilityError,
     get_capability,
@@ -68,6 +68,12 @@ from .hermes_runtime import (
     save_provider_credentials,
     save_provider_routing,
     upsert_mcp_server,
+)
+from .generation_controls import (
+    GenerationControlError,
+    generation_modes_catalog,
+    reset_generation_selection,
+    save_generation_selection,
 )
 from .logging_utils import configure_logging
 from .media_delivery import add_delivery_context_to_prompt, prepare_assistant_delivery, register_prepared_delivery
@@ -220,6 +226,7 @@ class McpServerPatchRequest(BaseModel):
 class ChatSendRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: str | None = None
+    generation_override: dict[str, Any] | None = None
 
 
 class ConversationUploadAttachmentRequest(BaseModel):
@@ -231,6 +238,7 @@ class ConversationUploadAttachmentRequest(BaseModel):
 class ConversationMessageRequest(BaseModel):
     message: str = ""
     attachments: list[ConversationUploadAttachmentRequest] = Field(default_factory=list)
+    generation_override: dict[str, Any] | None = None
 
 
 class ConversationTurnStopRequest(BaseModel):
@@ -265,6 +273,18 @@ class SelectModeRequest(BaseModel):
     autonomy_level: int | None = None
     conversation_id: str | None = None
     scope: str | None = None
+
+
+class GenerationSelectionRequest(BaseModel):
+    mode: str | None = None
+    parameters: dict[str, Any] | None = None
+    conversation_id: str | None = None
+    scope: str = "conversation"
+
+
+class GenerationResetRequest(BaseModel):
+    conversation_id: str | None = None
+    scope: str = "conversation"
 
 
 class ApprovalPlaceholderRequest(BaseModel):
@@ -806,12 +826,74 @@ async def modes_select(payload: SelectModeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/generation/modes", dependencies=[Depends(require_token)])
+async def generation_modes() -> dict[str, Any]:
+    return {"modes": generation_modes_catalog()}
+
+
+@app.get("/generation/current", dependencies=[Depends(require_token)])
+async def generation_current(conversation_id: str | None = None) -> dict[str, Any]:
+    error, control = generation_control_status(paths, conversation_id=conversation_id)
+    if error is not None:
+        raise HTTPException(status_code=400, detail=str(error.get("message") or "请先配置 AI 服务。"))
+    assert control is not None
+    return control
+
+
+@app.post("/generation/select", dependencies=[Depends(require_token)])
+async def generation_select(payload: GenerationSelectionRequest) -> dict[str, Any]:
+    selection: dict[str, Any] = {}
+    if payload.mode is not None:
+        selection["mode"] = payload.mode
+    if payload.parameters is not None:
+        selection["parameters"] = payload.parameters
+    try:
+        error, _preview = generation_control_status(
+            paths,
+            conversation_id=payload.conversation_id,
+            generation_override=selection,
+        )
+        if error is not None:
+            raise GenerationControlError(str(error.get("message") or "生成模式没有保存成功。"))
+        save_generation_selection(
+            paths,
+            scope=payload.scope,
+            selection=selection,
+            conversation_id=payload.conversation_id,
+        )
+        error, control = generation_control_status(
+            paths,
+            conversation_id=payload.conversation_id,
+            generation_override=selection if payload.scope == "turn" else None,
+        )
+    except GenerationControlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if error is not None:
+        raise HTTPException(status_code=400, detail=str(error.get("message") or "生成模式没有保存成功。"))
+    assert control is not None
+    return control
+
+
+@app.post("/generation/reset", dependencies=[Depends(require_token)])
+async def generation_reset(payload: GenerationResetRequest) -> dict[str, Any]:
+    try:
+        reset_generation_selection(paths, scope=payload.scope, conversation_id=payload.conversation_id)
+        error, control = generation_control_status(paths, conversation_id=payload.conversation_id)
+    except GenerationControlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if error is not None:
+        raise HTTPException(status_code=400, detail=str(error.get("message") or "恢复模型默认值失败。"))
+    assert control is not None
+    return control
+
+
 @app.post("/chat/send", dependencies=[Depends(require_token)])
 async def chat_send(payload: ChatSendRequest) -> dict[str, Any]:
     result = await _send_conversation_message(
         payload.message,
         conversation_id=payload.conversation_id or conversations.PERSONAL_CONVERSATION_ID,
         source="desktop",
+        generation_override=payload.generation_override,
     )
     return result["chat"]
 
@@ -843,6 +925,7 @@ def _assistant_message_from_chat_result(
         "source_message_ids": source_ids,
         "source_message_count": len(source_ids),
         "visible_reply": prepared.visible_text,
+        "generation_execution": chat_result.get("generation_execution"),
     }
     if message_id:
         assistant_message = conversations.update_message(
@@ -956,6 +1039,7 @@ async def _send_conversation_message(
     *,
     conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
     source: str = "desktop",
+    generation_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
     user_message = conversations.create_message(
@@ -1020,6 +1104,7 @@ async def _send_conversation_message(
         conversation_id,
         runtime_paths,
         current_message_id=user_message["id"],
+        generation_override=generation_override,
     )
     if chat_result.get("ok"):
         assistant_message, chat_result = _assistant_message_from_chat_result(
@@ -1036,7 +1121,10 @@ async def _send_conversation_message(
             role="assistant",
             text=f"{chat_result.get('message', '聊天请求没有成功。')}\n{chat_result.get('suggestion', '')}".strip(),
             status="error",
-            metadata={"error_code": chat_result.get("error_code")},
+            metadata={
+                "error_code": chat_result.get("error_code"),
+                "generation_execution": chat_result.get("generation_execution"),
+            },
         )
     return {"ok": bool(chat_result.get("ok")), "user_message": user_message, "assistant_message": assistant_message, "chat": chat_result}
 
@@ -1064,6 +1152,7 @@ async def _accept_conversation_message(
     conversation_id: str = conversations.PERSONAL_CONVERSATION_ID,
     source: str = "desktop",
     attachments_payload: list[ConversationUploadAttachmentRequest] | None = None,
+    generation_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runtime_paths = ensure_runtime_dirs()
     attachments_payload = attachments_payload or []
@@ -1196,6 +1285,7 @@ async def _accept_conversation_message(
             current_message_id=user_message["id"],
             host_message_id=assistant_placeholder["id"],
             route=route,
+            generation_override=generation_override,
         )
         if chat_result.get("ok"):
             assistant_message, chat_result = _assistant_message_from_chat_result(
@@ -1211,7 +1301,10 @@ async def _accept_conversation_message(
                 assistant_placeholder["id"],
                 text=f"{chat_result.get('message', '聊天请求没有成功。')}\n{chat_result.get('suggestion', '')}".strip(),
                 status="error",
-                metadata_patch={"error_code": chat_result.get("error_code")},
+                metadata_patch={
+                    "error_code": chat_result.get("error_code"),
+                    "generation_execution": chat_result.get("generation_execution"),
+                },
                 paths=runtime_paths,
             ) or assistant_placeholder
         return {
@@ -1231,6 +1324,7 @@ async def _accept_conversation_message(
         assistant_source=assistant_source,
         paths=runtime_paths,
         route=route,
+        generation_override=generation_override,
         wait_for_reply=False,
     )
     if not accepted.get("accepted"):
@@ -1313,6 +1407,7 @@ async def api_conversation_message_send(
         conversation_id=conversation_id,
         source="desktop",
         attachments_payload=payload.attachments,
+        generation_override=payload.generation_override,
     )
 
 

@@ -106,8 +106,8 @@ def test_chat_send_uses_runtime_after_local_provider_save(tmp_path, monkeypatch)
     default_hint = current_mode["prompt"]["system_hint"]
     assert current_mode["profile"]["system_hint"] == default_hint
     assert _prompt_layer_ids(current_mode) == ["mode_profile", "slider_overrides"]
-    assert "当前输出模式" in default_hint
-    assert "当前输出偏好" in default_hint
+    assert "当前表达风格" in default_hint
+    assert "当前措辞偏好" in default_hint
     assert "你是 Lilsunspot 小黑子" in seen["settings"]["system_hint"]
     assert default_hint in seen["settings"]["system_hint"]
     assert "当前 lilsunspot 能力状态快照" in seen["settings"]["system_hint"]
@@ -131,7 +131,7 @@ def test_chat_send_uses_selected_mode_system_hint_from_lilsunspot_data_dir(tmp_p
     selected_mode = selected.json()
     selected_hint = selected_mode["prompt"]["system_hint"]
     assert selected_mode["profile"]["system_hint"] == selected_hint
-    assert selected_mode["prompt"]["layers"][0]["summary"] == "偏务实执行，减少铺垫，优先给出可运行结果。"
+    assert selected_mode["prompt"]["layers"][0]["summary"] == "偏务实的措辞，减少铺垫，直接表达重点。"
     seen = _mock_agent_turn(agent_runner, monkeypatch, "已按务实模式回复。")
 
     response = client.post("/chat/send", headers=headers, json={"message": "帮我整理下一步"})
@@ -185,7 +185,7 @@ def test_conversation_mode_override_persists_and_stays_isolated(tmp_path, monkey
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
-    assert "当前输出模式：pragmatic" in seen["settings"]["system_hint"]
+    assert "当前表达风格：pragmatic" in seen["settings"]["system_hint"]
 
     _agent_runner, _config_paths, _hermes_runtime, reloaded_client, reloaded_headers = _load_test_app(tmp_path, monkeypatch)
     persisted = reloaded_client.get(f"/modes/current?conversation_id={first['id']}", headers=reloaded_headers)
@@ -274,7 +274,7 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert selected.status_code == 200
     assert selected.json()["current"] == "custom"
     assert selected.json()["profile"]["style_axis"] == 80
-    assert "当前输出偏好" in selected.json()["profile"]["system_hint"]
+    assert "当前措辞偏好" in selected.json()["profile"]["system_hint"]
     assert selected.json()["prompt"]["slider_summary"] == selected.json()["prompt"]["layers"][1]["summary"]
     seen = _mock_agent_turn(agent_runner, monkeypatch, "已按滑杆偏好回复。")
 
@@ -283,15 +283,12 @@ def test_chat_send_uses_mode_sliders_in_next_system_hint(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["ok"] is True
     system_hint = seen["settings"]["system_hint"]
-    assert "当前输出偏好" in system_hint
+    assert "当前措辞偏好" in system_hint
     assert "表达更有陪伴感" in system_hint
-    assert "回答保持简短" in system_hint
-    assert "风险或不确定时优先确认" in system_hint
-    assert "当前 Mode 运行策略" in system_hint
-    assert "目标约 600 tokens" in system_hint
-    assert seen["settings"]["mode_runtime_policy"]["target_answer_tokens"] == 600
-    assert seen["settings"]["mode_runtime_policy"]["max_iterations"] == 8
-    assert seen["settings"]["mode_reasoning_config"] == {"enabled": True, "effort": "low"}
+    assert "回答长度、推理深度和行动次数由独立的生成控制决定" in system_hint
+    assert "当前 Mode 运行策略" not in system_hint
+    assert "目标约 600 tokens" not in system_hint
+    assert seen["settings"]["generation_control"]["mode"] == "balanced"
 
 
 def test_mode_prompt_compiles_defaults_and_clamps_saved_sliders(tmp_path, monkeypatch):
@@ -329,8 +326,7 @@ def test_mode_prompt_compiles_defaults_and_clamps_saved_sliders(tmp_path, monkey
     assert body["profile"]["detail_level"] == 100
     assert body["profile"]["autonomy_level"] == 45
     assert "表达更务实" in body["prompt"]["slider_summary"]
-    assert "回答给出更充分细节" in body["prompt"]["slider_summary"]
-    assert "在自动推进和必要确认之间保持平衡" in body["prompt"]["slider_summary"]
+    assert "回答长度、推理深度和行动次数由独立的生成控制决定" in body["prompt"]["slider_summary"]
 
 
 def test_mismatched_fixed_mode_state_reads_as_custom(tmp_path, monkeypatch):

@@ -11,6 +11,6 @@ layers:
   product_baseline:
     label: 产品基线
   mode_profile:
-    label: 模式预设
+    label: 表达风格预设
   slider_overrides:
-    label: 三滑杆覆盖
+    label: 表达滑杆覆盖

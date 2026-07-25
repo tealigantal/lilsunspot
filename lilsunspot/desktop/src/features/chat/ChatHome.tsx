@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppBootstrapState, Conversation, ConversationAttachment, ConversationSearchResult, LilsunspotEvent } from "../../types";
+import type { AppBootstrapState, Conversation, ConversationAttachment, ConversationSearchResult, GenerationSelection, LilsunspotEvent } from "../../types";
 import {
   branchConversationTurn,
   createConversation,
@@ -19,6 +19,7 @@ import {
 import type { CapabilityNode, ModelCapabilities } from "../../types";
 import type { SettingsTab } from "../settings/SettingsDrawer";
 import { ModeQuickPanel } from "../mode/ModeQuickPanel";
+import { GenerationControlPanel } from "../mode/GenerationControlPanel";
 import { useModeState } from "../mode/ModeState";
 import { displayProvider } from "../model/ProviderCard";
 import { ChatBlockedState } from "./ChatBlockedState";
@@ -133,6 +134,7 @@ export function ChatHome({
   const [sendError, setSendError] = useState("");
   const [actionBusy, setActionBusy] = useState("");
   const [busy, setBusy] = useState(false);
+  const [generationOverride, setGenerationOverride] = useState<GenerationSelection | null>(null);
   const modeState = useModeState();
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
   const activeWeixinRecipient = weixinRecipientFromConversation(activeConversation);
@@ -151,6 +153,10 @@ export function ChatHome({
     setMessages(initialMessages);
     setSendError("");
   }, [initialMessages]);
+
+  useEffect(() => {
+    setGenerationOverride(null);
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (bootstrap.stage !== "chat_ready" || !bootstrap.runtime.configured) {
@@ -493,8 +499,12 @@ export function ChatHome({
     setInput("");
     setPendingAttachments([]);
     setBusy(true);
+    const turnGenerationOverride = generationOverride;
+    if (turnGenerationOverride) {
+      setGenerationOverride(null);
+    }
     try {
-      const result = await sendConversationMessage(activeConversationId, message, attachments);
+      const result = await sendConversationMessage(activeConversationId, message, attachments, turnGenerationOverride);
       setMessages((current) => current.filter((item) => item.id !== userMessage.id));
       setSendError("");
       void refreshConversations(activeConversationId);
@@ -678,7 +688,12 @@ export function ChatHome({
           placeholder="输入你想问的内容"
         />
       </article>
-      <aside className="chatSidePanel" aria-label="输出模式">
+      <aside className="chatSidePanel" aria-label="生成控制与表达风格">
+        <GenerationControlPanel
+          conversationId={activeConversationId}
+          turnOverride={generationOverride}
+          onTurnOverrideChange={setGenerationOverride}
+        />
         <ModeQuickPanel conversationId={activeConversationId} />
       </aside>
     </section>

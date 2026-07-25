@@ -20,6 +20,9 @@ import type {
   DiagnosticsExportResult,
   DiagnosticsSummary,
   HealthStatus,
+  GenerationControl,
+  GenerationMode,
+  GenerationSelection,
   LilsunspotEvent,
   LocalProviderResetResult,
   ModeProfile,
@@ -503,11 +506,20 @@ async function fileToUploadAttachment(file: File): Promise<ConversationUploadAtt
   };
 }
 
-export async function sendConversationMessage(conversationId: string, message: string, attachments: File[] = []): Promise<ConversationSendResult> {
+export async function sendConversationMessage(
+  conversationId: string,
+  message: string,
+  attachments: File[] = [],
+  generationOverride?: GenerationSelection | null
+): Promise<ConversationSendResult> {
   const payloadAttachments = await Promise.all(attachments.map((file) => fileToUploadAttachment(file)));
   return requestJson<ConversationSendResult>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ message, attachments: payloadAttachments })
+    body: JSON.stringify({
+      message,
+      attachments: payloadAttachments,
+      ...(generationOverride ? { generation_override: generationOverride } : {})
+    })
   }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
 }
 
@@ -633,6 +645,46 @@ export async function selectMode(
       ...(sliders || {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(options?.scope ? { scope: options.scope } : {})
+    })
+  });
+}
+
+export async function getGenerationModes(): Promise<GenerationMode[]> {
+  const body = await requestJson<{ modes: GenerationMode[] }>("/generation/modes");
+  return body.modes;
+}
+
+export async function getCurrentGenerationControl(conversationId = ""): Promise<GenerationControl> {
+  const params = new URLSearchParams();
+  if (conversationId) {
+    params.set("conversation_id", conversationId);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<GenerationControl>(`/generation/current${suffix}`);
+}
+
+export async function selectGenerationControl(
+  selection: GenerationSelection,
+  options: { conversationId?: string; scope: "global" | "conversation" | "turn" }
+): Promise<GenerationControl> {
+  return requestJson<GenerationControl>("/generation/select", {
+    method: "POST",
+    body: JSON.stringify({
+      ...selection,
+      scope: options.scope,
+      ...(options.conversationId ? { conversation_id: options.conversationId } : {})
+    })
+  });
+}
+
+export async function resetGenerationControl(
+  options: { conversationId?: string; scope: "global" | "conversation" }
+): Promise<GenerationControl> {
+  return requestJson<GenerationControl>("/generation/reset", {
+    method: "POST",
+    body: JSON.stringify({
+      scope: options.scope,
+      ...(options.conversationId ? { conversation_id: options.conversationId } : {})
     })
   });
 }

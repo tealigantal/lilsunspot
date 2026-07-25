@@ -518,13 +518,75 @@ export type ChatSendResult =
         [key: string]: unknown;
       };
       mode?: CurrentMode;
+      generation_execution?: GenerationExecution;
     }
   | {
       ok: false;
       error_code: string;
       message: string;
       suggestion: string;
+      generation_execution?: GenerationExecution;
     };
+
+export type GenerationModeId = "strict" | "balanced" | "creative" | "fast" | "deep" | "custom" | string;
+
+export type GenerationParameterValue = number | string | null;
+
+export type GenerationSelection = {
+  mode?: GenerationModeId;
+  parameters?: Record<string, GenerationParameterValue>;
+};
+
+export type GenerationMode = {
+  id: GenerationModeId;
+  label: string;
+  description: string;
+  effects: Record<string, string>;
+};
+
+export type GenerationParameterDetail = {
+  requested: GenerationParameterValue;
+  effective: GenerationParameterValue;
+  source: string;
+  source_label: string;
+  status: "supported" | "unsupported" | "locked" | "omitted" | "default" | string;
+  reason?: string;
+  range?: { min: number; max: number };
+  values?: string[];
+  default?: GenerationParameterValue;
+  degraded?: boolean;
+};
+
+export type GenerationControl = {
+  mode: GenerationModeId;
+  mode_scope: "global" | "conversation" | "turn" | string;
+  label: string;
+  description: string;
+  effects: Record<string, string>;
+  provider: string;
+  model: string;
+  fully_supported: boolean;
+  compatibility_summary: string;
+  requested_parameters: Record<string, GenerationParameterValue>;
+  effective_parameters: Record<string, GenerationParameterValue>;
+  parameters: Record<string, GenerationParameterDetail>;
+  automatic_downgrade: boolean;
+  retry_count: number;
+};
+
+export type GenerationExecution = {
+  provider: string;
+  model: string;
+  mode: GenerationModeId;
+  mode_label: string;
+  effective_parameters: Record<string, GenerationParameterValue>;
+  omitted_parameters: Array<{ parameter: string; status: string; reason?: string }>;
+  reasoning_effort: string | null;
+  tool_iterations: number;
+  max_iterations: number;
+  automatic_downgrade: boolean;
+  retry_count: number;
+};
 
 export type Conversation = {
   id: string;

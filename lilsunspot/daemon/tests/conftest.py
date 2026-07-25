@@ -26,6 +26,7 @@ def daemon_client(tmp_path, monkeypatch):
     import lilsunspot.daemon.doctor as doctor
     import lilsunspot.daemon.diagnostics as diagnostics
     import lilsunspot.daemon.gateway as gateway
+    import lilsunspot.daemon.generation_controls as generation_controls
     import lilsunspot.daemon.hermes_compat as hermes_compat
     import lilsunspot.daemon.hermes_runtime as hermes_runtime
     import lilsunspot.daemon.logging_utils as logging_utils
@@ -58,6 +59,7 @@ def daemon_client(tmp_path, monkeypatch):
     runtime_discovery = importlib.reload(runtime_discovery)
     chat_client = importlib.reload(chat_client)
     modes = importlib.reload(modes)
+    generation_controls = importlib.reload(generation_controls)
     mode_intents = importlib.reload(mode_intents)
     mode_tools = importlib.reload(mode_tools)
     agent_runner = importlib.reload(agent_runner)
@@ -93,6 +95,7 @@ def daemon_client(tmp_path, monkeypatch):
         delivery_tools=delivery_tools,
         headers=headers,
         gateway=gateway,
+        generation_controls=generation_controls,
         hermes_compat=hermes_compat,
         hermes_runtime=hermes_runtime,
         diagnostics=diagnostics,

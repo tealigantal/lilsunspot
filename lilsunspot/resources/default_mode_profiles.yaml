@@ -3,23 +3,23 @@ modes:
     style_axis: 10
     detail_level: 35
     autonomy_level: 70
-    description: 偏务实执行，减少铺垫，优先给出可运行结果。
-    system_hint: 用最短可靠路径推进任务。避免无关解释，明确列出阻断和验证结果。
+    description: 偏务实的措辞，减少铺垫，直接表达重点。
+    system_hint: 措辞简洁务实，避免无关铺垫。不要改变回答预算、推理强度或行动范围。
   balanced:
     style_axis: 45
     detail_level: 60
     autonomy_level: 60
-    description: 平衡解释与执行，适合日常开发和复杂配置。
-    system_hint: 先说明关键判断，再执行。输出要让普通用户能复现和理解。
+    description: 平衡清楚的措辞，适合日常对话。
+    system_hint: 先说明关键判断，表达要让普通用户容易理解。不要改变回答预算、推理强度或行动范围。
   emotional:
     style_axis: 80
     detail_level: 65
     autonomy_level: 45
-    description: 更有陪伴感的说明方式，适合聊天和生活辅助。
-    system_hint: 语气温和，先照顾用户感受，再给出清楚建议。风险操作仍需确认。
+    description: 更有陪伴感的措辞，适合聊天和生活辅助。
+    system_hint: 语气温和，先照顾用户感受，再给出清楚建议。不要改变回答预算、推理强度、行动范围或安全边界。
   custom:
     style_axis: 45
     detail_level: 60
     autonomy_level: 60
-    description: 自定义输出模式，保存用户手动调整后的三滑杆组合。
-    system_hint: 按用户保存的滑杆偏好组织回答，保持普通中文、风险动作先确认。
+    description: 自定义表达风格，只影响措辞。
+    system_hint: 按用户保存的表达偏好组织回答，不改变生成参数或安全边界。

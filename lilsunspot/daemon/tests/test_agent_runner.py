@@ -101,7 +101,7 @@ def test_agent_runner_uses_independent_hermes_sessions_per_conversation(daemon_c
     system_prompt = FakeAIAgent.calls[0]["kwargs"]["ephemeral_system_prompt"]
     assert "你是 Lilsunspot 小黑子" in system_prompt
     assert "当前 lilsunspot 能力状态快照" in system_prompt
-    assert "当前输出模式" in system_prompt
+    assert "当前表达风格" in system_prompt
     assert "用户要求生成新文件" in system_prompt
     assert FakeAIAgent.calls[0]["kwargs"]["skip_memory"] is False
     assert FakeAIAgent.calls[0]["kwargs"]["skip_context_files"] is True
@@ -128,13 +128,13 @@ def test_agent_runner_mode_overlay_does_not_change_tools_memory_or_soul(daemon_c
     assert second["skip_context_files"] is True
     assert first["load_soul_identity"] is True
     assert second["load_soul_identity"] is True
-    assert "当前输出模式：pragmatic" in first["ephemeral_system_prompt"]
-    assert "当前输出模式：emotional" in second["ephemeral_system_prompt"]
+    assert "当前表达风格：pragmatic" in first["ephemeral_system_prompt"]
+    assert "当前表达风格：emotional" in second["ephemeral_system_prompt"]
     assert "当前 lilsunspot 能力状态快照" in first["ephemeral_system_prompt"]
     assert "当前 lilsunspot 能力状态快照" in second["ephemeral_system_prompt"]
 
 
-def test_agent_runner_mode_runtime_policy_maps_sliders_to_agent_limits(daemon_client, monkeypatch):
+def test_expression_sliders_do_not_change_generation_runtime_limits(daemon_client, monkeypatch):
     _install_fake_hermes(daemon_client, monkeypatch)
     _save_local_provider(daemon_client)
     paths = daemon_client.config_paths.get_runtime_paths()
@@ -164,16 +164,13 @@ def test_agent_runner_mode_runtime_policy_maps_sliders_to_agent_limits(daemon_cl
 
     low = FakeAIAgent.calls[-2]["kwargs"]
     high = FakeAIAgent.calls[-1]["kwargs"]
-    assert low["max_tokens"] == 300
-    assert low["max_iterations"] == 8
-    assert low["reasoning_config"] == {"enabled": True, "effort": "low"}
-    assert "目标约 300 tokens" in low["ephemeral_system_prompt"]
-    assert "非明确任务先询问用户" in low["ephemeral_system_prompt"]
-    assert high["max_tokens"] == 3000
-    assert high["max_iterations"] == 75
-    assert high["reasoning_config"] == {"enabled": True, "effort": "high"}
-    assert "目标约 3000 tokens" in high["ephemeral_system_prompt"]
-    assert "完成完整任务链" in high["ephemeral_system_prompt"]
+    assert low["max_tokens"] == high["max_tokens"] == 1200
+    assert low["max_iterations"] == high["max_iterations"] == 24
+    assert low["reasoning_config"] == high["reasoning_config"] == {"enabled": True, "effort": "medium"}
+    assert "目标约" not in low["ephemeral_system_prompt"]
+    assert "本轮最多" not in high["ephemeral_system_prompt"]
+    assert "当前表达风格：custom" in low["ephemeral_system_prompt"]
+    assert "当前表达风格：custom" in high["ephemeral_system_prompt"]
     assert low["enabled_toolsets"] == high["enabled_toolsets"]
 
 

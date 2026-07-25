@@ -1,5 +1,18 @@
 # Validation
 
+## Develop workspace consolidation - 2026-07-25
+
+- Scenario: 整理本地脏工作区，并在不触碰 `main`、不创建 PR 的前提下同步最新远端 `develop`。
+- Actual Observable Result: 将变更拆为项目治理、独立生成控制、Hermes 终端与 DeepSeek 默认值、状态记录四组提交；rebase 到包含 macOS 私有 DMG 与 Hermes 同步计划的最新 `origin/develop`，手工合并 `AGENTS.md` 和 `TASKS.md`，保留双方 `agent-memory.md` 记录。
+- Validation:
+  - `py -3 -m pytest lilsunspot/daemon/tests -q`：154 passed。
+  - `py -3 -m pytest lilsunspot/tests -q --timeout-method=thread`：52 passed；同步前发现 5 个产品测试仍断言旧 Mode 运行策略，已改为验证表达滑杆不改变生成预算后通过。
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1`：daemon 154 passed、secret guard、桌面 TypeScript/Vite build 通过。
+  - `npm run tauri:build --prefix lilsunspot/desktop`：通过；NSIS 为 `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`，56,737,444 bytes，时间 2026-07-25 22:49:25 +08:00。
+  - `git diff --check`：通过；pytest 临时根 `.pytest-lilsunspot-daemon/` 已加入 `.gitignore`，未进入提交。
+- Remaining Risk: 本次只完成仓库与构建验证，没有覆盖安装新 NSIS、真实 Provider、真实微信或 macOS 实机；这些能力沿用各自最近一次记录，不能把本次构建等同于新的现场验收。
+- Date: 2026-07-25.
+
 ## LIL-GENERATION-CONTROL-01 - 2026-07-25
 
 - Scenario: 五种生成模式真实改变下一轮请求。

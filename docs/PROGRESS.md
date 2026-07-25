@@ -22,6 +22,7 @@ LIL-HERMES-UPSTREAM-FULL-SYNC-01：同步执行时可确认的 Hermes 官方最�
 - 自动化已通过 150 个 daemon 测试、secret guard、TypeScript/Vite build；云端 DeepSeek 与本地 Ollama `llama3.2:1b` 均完成真实安装版聊天验证。
 - Hermes 原生 `terminal/process` toolset 已默认启用并通过安装版真实只读命令验证；DeepSeek 新安装默认已更新为 `deepseek-v4-flash`。
 - Hermes 官方最新版同步计划已建立，并以固定官方 SHA、全能力账本、thin adapter 和安装版端到端证据作为完成门槛。
+- 本地已完成的治理、generation control、terminal 和 DeepSeek 修正已拆成逻辑提交并 rebase 到最新 `origin/develop`；macOS 私有 DMG 记录与 Windows 主线内容均已保留，最终自动化和 NSIS 重建通过。
 
 ## Implemented but Not Verified
 
@@ -29,7 +30,7 @@ LIL-HERMES-UPSTREAM-FULL-SYNC-01：同步执行时可确认的 Hermes 官方最�
 
 ## In Progress
 
-- 正在把已完成的 generation control、terminal、DeepSeek 默认值和治理文档按逻辑提交收口，并同步到远端 `develop`。
+- 无；本地收口与验证完成，下一步按 active ExecPlan 进入 Hermes upstream Milestone 0。
 
 ## Next Work
 

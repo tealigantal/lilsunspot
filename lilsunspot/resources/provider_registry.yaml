@@ -4,11 +4,11 @@ providers:
     type: cloud
     key_url: https://platform.deepseek.com/api_keys
     detect_url: https://api.deepseek.com/v1
-    default_model: deepseek-chat
+    default_model: deepseek-v4-flash
     env_key: DEEPSEEK_API_KEY
     hermes_provider: deepseek
     base_url: https://api.deepseek.com/v1
-    notes: DeepSeek API key path. Day1 only saves local config; it does not test the provider.
+    notes: DeepSeek official API path. The default tracks the current low-latency V4 model; users may select V4 Pro in advanced settings.
   - id: kimi
     display_name: Kimi
     type: cloud

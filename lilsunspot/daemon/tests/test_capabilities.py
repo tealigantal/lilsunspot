@@ -38,6 +38,8 @@ def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_cl
     assert "product.memory.prompt_injection" in ids
     assert "product.capability_switches" in ids
     assert body["platform"] == "lilsunspot"
+    assert "terminal" in body["default_toolsets"]
+    assert "terminal" in body["enabled_toolsets"]
     upstream_audit = body["upstream_audit"]
     assert "missing_toolsets" in upstream_audit
     if upstream_audit["available"]:
@@ -75,6 +77,31 @@ def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_cl
     assert "runtime.desktop_image_upload / 桌面聊天图片上传: status=enabled" in snapshot
     assert "verified=false" in snapshot
     assert "toolset.vision / 图片理解" in snapshot
+    assert "toolset.terminal / 终端和进程: status=enabled" in snapshot
+
+
+def test_default_agent_uses_official_hermes_terminal_toolset(daemon_client):
+    paths = daemon_client.config_paths.get_runtime_paths()
+    config = daemon_client.hermes_runtime.read_hermes_config(paths)
+    platform_toolsets = config.get("platform_toolsets") or {}
+    platform_toolsets.pop("lilsunspot", None)
+    config["platform_toolsets"] = platform_toolsets
+    daemon_client.hermes_runtime.write_hermes_config(config, paths)
+
+    enabled = daemon_client.capabilities.enabled_toolsets_for_agent(paths)
+
+    assert "terminal" in enabled
+    capability = next(
+        item
+        for item in daemon_client.capabilities.list_capabilities(paths, include_upstream_audit=False)["capabilities"]
+        if item["id"] == "toolset.terminal"
+    )
+    assert capability["source"] == "hermes_toolset"
+    assert capability["source_of_truth"] == "hermes_toolset"
+    assert capability["tools"] == ["terminal", "process"]
+    assert capability["risk"] == "high"
+    assert capability["enabled"] is True
+    assert capability["executable"] is True
 
 
 def test_capability_test_returns_layered_truth_state(daemon_client):

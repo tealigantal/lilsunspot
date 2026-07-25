@@ -15,7 +15,17 @@ from .upstream_audit import safe_upstream_capability_audit
 
 
 LILSUNSPOT_PLATFORM = "lilsunspot"
-DEFAULT_LILSUNSPOT_TOOLSETS = ["web", "vision", "file", "todo", "memory", "session_search", "skills", "clarify"]
+DEFAULT_LILSUNSPOT_TOOLSETS = [
+    "web",
+    "vision",
+    "terminal",
+    "file",
+    "todo",
+    "memory",
+    "session_search",
+    "skills",
+    "clarify",
+]
 REQUIRED_LILSUNSPOT_TOOLSETS = {"file"}
 MODEL_CONFIG_KEYS = [
     "fallback_providers",

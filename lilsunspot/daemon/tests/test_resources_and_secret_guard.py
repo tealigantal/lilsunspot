@@ -28,6 +28,7 @@ def test_mainland_provider_registry_uses_mainland_compatible_defaults():
     providers = {item["id"]: item for item in data["providers"]}
 
     assert providers["deepseek"]["base_url"] == "https://api.deepseek.com/v1"
+    assert providers["deepseek"]["default_model"] == "deepseek-v4-flash"
     assert providers["kimi"]["base_url"] == "https://api.moonshot.cn/v1"
     assert providers["kimi"]["default_model"] == "kimi-k2.6"
     assert providers["qwen"]["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"

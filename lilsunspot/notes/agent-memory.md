@@ -1,5 +1,13 @@
 # Agent Memory
 
+## 2026-06-30 - screenshot-level full UI acceptance plan only
+
+- Task: run screenshot-level acceptance across the current desktop UI and record issues only as the next plan.
+- Files touched: `TASKS.md` and this memory file. Temporary screenshot harness and artifacts stayed under ignored `ignored/ui-acceptance/`.
+- Decision/result: no product code was changed. Vite + headless Chrome/CDP with a mock daemon captured 22 screenshots covering onboarding, chat, Weixin, tasks, history, all settings tabs, and 390px mobile views. The plan now records the remaining UI issues: stale "未配置" status after model save, hidden primary save action on the model-save step, overly tall settings category navigation, and mobile chat prioritizing conversation list over the actual chat/input.
+- Validation: screenshot run produced `ignored/ui-acceptance/results.json` and `contact_sheet.png`; metrics found no horizontal overflow. The only console error in onboarding was the dev-server favicon 404. No real API Key, runtime token, Weixin credential, private message, QR payload, attachment original, or model reply was recorded.
+- Remaining risk: this was Vite/mock screenshot acceptance, not installed-app WebView, real daemon, real provider, or live Weixin acceptance.
+
 ## 2026-06-29 - Weixin file send without approval
 
 - Task: remove the extra safety approval step for user-clicked Weixin file/message sending after the UI showed `weixin_runtime+safety.approval` and the user asked for automatic sending.

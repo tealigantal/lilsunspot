@@ -6,6 +6,18 @@
 - Chinese name: 小黑子.
 - This repository is a fork of Hermes Agent.
 - The goal is a desktop personal agent that normal users can install and run: the existing Windows product remains the release baseline, with private macOS arm64 and x86_64 DMGs built separately.
+- Lifecycle stage: installed Windows product hardening and end-to-end capability integration.
+
+## Canonical Project Documents
+
+- Durable goal: `PROJECT_GOAL.md`.
+- ExecPlan rules: `PLANS.md`.
+- Current work queue: `TASKS.md`.
+- Product behavior: `docs/PRODUCT.md`.
+- Current runtime architecture: `docs/ARCHITECTURE.md`.
+- Active milestone and resume state: `docs/PROGRESS.md`.
+- Executed validation evidence: `docs/VALIDATION.md`.
+- Historical lilsunspot notes remain under `lilsunspot/notes/`; when they conflict with current governance documents, the current governance documents win.
 
 ## Main Path
 

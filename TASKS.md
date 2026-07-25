@@ -2,6 +2,8 @@
 
 ## Current
 
+`LIL-HERMES-UPSTREAM-FULL-SYNC-01`：同步执行时可确认的 Hermes 官方最新 `main`，并让 lilsunspot 在 Windows 安装版中完整继承上游全部能力。当前只完成执行计划，尚未 fetch/merge/改源码；计划见 `docs/plans/2026-07-25-hermes-latest-full-capability-lilsunspot.md`。真实同步必须先隔离当前脏工作树，以固定 SHA、全能力账本、thin adapter、安装版可达和新装/升级端到端证据作为完成门槛。
+
 LIL-CAPABILITY-ORCHESTRATION-01B：迁移 Hermes 本地能力并修复重配/图片/微信链路。按 `lilsunspot/notes/model-capability-ux-plan.md` 第一阶段继续执行：能力判断和视觉调用迁移到 Hermes resolver/metadata，重配流程从首启向导拆出，微信会话里的桌面插话复用微信 route/coalescer/session，安装版必须重建验证。允许使用本机已有真实 API Key 做定向 live smoke，但不得记录 Key/token/微信凭据/私聊正文/附件原文或完整模型回复。
 
 - 2026-06-13 附件返还链路问题记录：用户在桌面对话里要求“小黑子把刚上传的图片再发给我”时，模型回复成“没有直接发送图片文件能力 / weixin.send_file 未配置”，暴露的是能力编排口径问题，不是图片识别失败。当前会话库已经把桌面上传附件保存到安全附件目录，`/attachments/{id}` 也能按附件 id 取回安全路径；但能力图和 prompt 快照只暴露 `runtime.desktop_image_upload`（上传/预览/识别）与 `weixin.send_file`（微信发送文件且需连接/审批），没有暴露“复用最近已上传/已生成的本地安全附件并返还给当前桌面用户”的默认能力，也没有把这类自然语言意图路由到附件卡打开/下载/复制或安全返还动作。因此模型只能按微信发送能力判断并拒绝。后续修复应把“已入库安全附件的当前聊天返还/打开/下载”作为默认可用的桌面能力处理；若目标是微信或外部平台，再走 `weixin.send_file + safety.approval`，不要让普通用户理解 weixin/tool 名称。本轮仅研究并记录，不改代码。

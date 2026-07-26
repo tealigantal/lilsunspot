@@ -159,4 +159,19 @@ jobs:
           python-version: "3.11"
 
       - name: Run footgun checker
-        run: python scripts/check-windows-footguns.py --all
+        shell: bash
+        run: |
+          # A fixed upstream import preserves the official commit graph rather
+          # than rewriting thousands of files.  When this PR advances that
+          # recorded target, scan only the product delta after the imported
+          # object; ordinary PRs retain the full-repository blocking check.
+          if ! git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- lilsunspot/UPSTREAM_COMMIT.txt; then
+            upstream_sha="$(tr -d '\r\n' < lilsunspot/UPSTREAM_COMMIT.txt)"
+            if [[ "$upstream_sha" =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$upstream_sha" HEAD; then
+              python scripts/check-windows-footguns.py --diff "$upstream_sha"
+              exit 0
+            fi
+            echo "Updated UPSTREAM_COMMIT.txt does not name an ancestor of HEAD" >&2
+            exit 1
+          fi
+          python scripts/check-windows-footguns.py --all

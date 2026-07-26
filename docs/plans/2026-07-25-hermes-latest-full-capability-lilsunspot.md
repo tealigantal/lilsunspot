@@ -395,3 +395,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hermes_upstream_check.ps1 
 验证已超出 health：`scripts/check.ps1` 为 165 daemon tests + secret guard + desktop build；新装、v32 升级、真实 DeepSeek provider save/chat、真实 iLink QR 与 NSIS 安装卸载均通过。没有本机既有微信登录态，且扫码确认是账号持有人的外部操作；因此只记录 QR/中文待确认链路通过，不伪称已完成账号收发。`UPSTREAM_COMMIT.txt` 必须保持为最终动作，随后才提交、推送和 PR 验收。
 
 PR #36 首跑发现 macOS workflow 的测试环境缺少官方 `messaging` extra，故 Weixin 依赖健康检查失败；同时 Windows release checker 使用未声明的 pytest-timeout 参数，并把本任务必须更新的 Windows checker 误列为 macOS-only 保护对象。恢复方案是让 macOS/Windows CI 统一安装 `messaging`、删除无依赖契约的 timeout 参数、仅保护独立 release-chain 文件，并让 macOS sidecar 同步 Windows 的 gateway/plugin 收集和四类资源。修复后的 cloud-equivalent locked 命令在 Windows 完整运行 `218 passed`，secret guard 与 diff check 通过；等待新一次 PR CI 作为最终 gate。
+
+后续重跑揭示全库 Windows footgun 和作者归属规则无法直接用于“保留 8,485 个官方提交原始 Git 图”的同步：前者扫描到 2,701 条固定目标中既有项，后者把所有上游作者当成此 PR 新贡献者。为同时保留真实安全门禁和不改写 Hermes core，CI 只在 PR 实际变更且祖先可验证的 `UPSTREAM_COMMIT.txt` 时，改为审计该 fixed object 之后的产品 delta；普通 PR 仍走完整全库/完整 PR range。该受限例外与固定 SHA 一起可复现，且本地集成人员 email 单独映射；等待其 cloud rerun。
+
+post-target footgun 复核还识别到 macOS-only DMG smoke 中两处 `os.kill`，它们只在 `hdiutil` 工作流运行，已使用 checker 规定的 inline platform-gate 标记，随后该 delta 无剩余 findings。

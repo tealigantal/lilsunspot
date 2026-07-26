@@ -393,3 +393,5 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hermes_upstream_check.ps1 
 固定官方 Git object `d9f1043c3337818b1f29224a7deb5bbb17402370` 已通过现有同步分支进入 ancestry。v33 契约在产品层实现为 sidecar startup 前迁移：对 config/env/auth/provider cache 生成哈希备份，官方迁移后做 schema 校验，失败恢复原字节，较新版本拒绝降级。机器账本现在是 519/519 `design_mapped`，没有 unspecified 行；安装版 token-protected catalog 实测发现 93 plugins、180 skills、4 optional MCPs、30 gateway adapters。PyInstaller 同时收集动态代码、四类资产和官方 `messaging` extra；真实 Weixin probe 因而能从安装版获取 iLink QR。
 
 验证已超出 health：`scripts/check.ps1` 为 165 daemon tests + secret guard + desktop build；新装、v32 升级、真实 DeepSeek provider save/chat、真实 iLink QR 与 NSIS 安装卸载均通过。没有本机既有微信登录态，且扫码确认是账号持有人的外部操作；因此只记录 QR/中文待确认链路通过，不伪称已完成账号收发。`UPSTREAM_COMMIT.txt` 必须保持为最终动作，随后才提交、推送和 PR 验收。
+
+PR #36 首跑发现 macOS workflow 使用了未安装插件的 pytest timeout 参数，并把本任务必须修改的 Windows sidecar/smoke 脚本误判为 macOS 变更越界。恢复方案是删除无依赖契约的 timeout 参数、仅保护独立 release chain，并让 macOS sidecar 同步 Windows 的 gateway/plugin 收集、四类资源和 messaging extra。云端等价 locked 命令已在 Windows 完整运行 `218 passed`；等待重跑 CI 作为最终 PR gate。

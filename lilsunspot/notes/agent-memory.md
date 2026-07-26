@@ -568,6 +568,8 @@
 - Validation: full `scripts/check.ps1` passed (165 daemon tests, secret guard, desktop build); fresh NSIS new-install and v32 upgrade smoke passed; installed catalog counted 93 plugins, 180 skills, 4 MCPs, 30 gateways; real DeepSeek provider/Hermes chat and real Weixin QR retrieval passed. No secret, QR payload, account identity, private message, token or full reply was written to repository records.
 - Remaining risk: actual Weixin inbound/outbound needs phone scan confirmation from the account holder; do not mark it passed merely from the QR network probe.
 
+- CI follow-up: PR #36 initially failed because the macOS workflow passed `--timeout-method=thread` without pytest-timeout and its Windows guard rejected the intentionally modified sidecar/smoke scripts. Removed the unsupported flag, limited that guard to the separate Windows release chain, and mirrored dynamic module/assets plus messaging extra in the macOS sidecar script. Validation: the cloud-equivalent locked command passed `218` tests locally; CI rerun pending.
+
 - 任务：在保持现有 Windows setup.exe 链路不变的前提下增加 macOS 15+ arm64/x86_64 私用 DMG。
 - 涉及：Mac Tauri 平台配置、PyInstaller onedir/icon shell 脚本、Rust/Python 数据目录与资源定位、Mac updater 隔离、双架构 Artifact workflow、安装后功能面烟测及项目文档。
 - 决策：不改 Hermes core、不做功能裁剪；两个原生 runner 分别构建，无 Developer ID/公证/Release/自动更新，Windows 关键配置和脚本由 PR regression job 强制保持不变。

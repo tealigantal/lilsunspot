@@ -394,4 +394,4 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hermes_upstream_check.ps1 
 
 验证已超出 health：`scripts/check.ps1` 为 165 daemon tests + secret guard + desktop build；新装、v32 升级、真实 DeepSeek provider save/chat、真实 iLink QR 与 NSIS 安装卸载均通过。没有本机既有微信登录态，且扫码确认是账号持有人的外部操作；因此只记录 QR/中文待确认链路通过，不伪称已完成账号收发。`UPSTREAM_COMMIT.txt` 必须保持为最终动作，随后才提交、推送和 PR 验收。
 
-PR #36 首跑发现 macOS workflow 使用了未安装插件的 pytest timeout 参数，并把本任务必须修改的 Windows sidecar/smoke 脚本误判为 macOS 变更越界。恢复方案是删除无依赖契约的 timeout 参数、仅保护独立 release chain，并让 macOS sidecar 同步 Windows 的 gateway/plugin 收集、四类资源和 messaging extra。云端等价 locked 命令已在 Windows 完整运行 `218 passed`；等待重跑 CI 作为最终 PR gate。
+PR #36 首跑发现 macOS workflow 的测试环境缺少官方 `messaging` extra，故 Weixin 依赖健康检查失败；同时 Windows release checker 使用未声明的 pytest-timeout 参数，并把本任务必须更新的 Windows checker 误列为 macOS-only 保护对象。恢复方案是让 macOS/Windows CI 统一安装 `messaging`、删除无依赖契约的 timeout 参数、仅保护独立 release-chain 文件，并让 macOS sidecar 同步 Windows 的 gateway/plugin 收集和四类资源。修复后的 cloud-equivalent locked 命令在 Windows 完整运行 `218 passed`，secret guard 与 diff check 通过；等待新一次 PR CI 作为最终 gate。

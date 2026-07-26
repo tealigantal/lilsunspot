@@ -574,6 +574,8 @@
 
 - CI delta check: post-target scanner found two process-control matches only in the macOS-only hdiutil smoke runner; annotated the intentionally platform-gated lines using the checker-required marker. Recheck found no remaining post-target findings.
 
+- CI shallow-history follow-up: the reusable lint job correctly failed closed because its shallow checkout could not prove `origin/develop` or the fixed target ancestor. Set that job to full-history checkout, matching contributor attribution; rerun pending.
+
 - 任务：在保持现有 Windows setup.exe 链路不变的前提下增加 macOS 15+ arm64/x86_64 私用 DMG。
 - 涉及：Mac Tauri 平台配置、PyInstaller onedir/icon shell 脚本、Rust/Python 数据目录与资源定位、Mac updater 隔离、双架构 Artifact workflow、安装后功能面烟测及项目文档。
 - 决策：不改 Hermes core、不做功能裁剪；两个原生 runner 分别构建，无 Developer ID/公证/Release/自动更新，Windows 关键配置和脚本由 PR regression job 强制保持不变。

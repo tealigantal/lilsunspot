@@ -399,3 +399,5 @@ PR #36 首跑发现 macOS workflow 的测试环境缺少官方 `messaging` extra
 后续重跑揭示全库 Windows footgun 和作者归属规则无法直接用于“保留 8,485 个官方提交原始 Git 图”的同步：前者扫描到 2,701 条固定目标中既有项，后者把所有上游作者当成此 PR 新贡献者。为同时保留真实安全门禁和不改写 Hermes core，CI 只在 PR 实际变更且祖先可验证的 `UPSTREAM_COMMIT.txt` 时，改为审计该 fixed object 之后的产品 delta；普通 PR 仍走完整全库/完整 PR range。该受限例外与固定 SHA 一起可复现，且本地集成人员 email 单独映射；等待其 cloud rerun。
 
 post-target footgun 复核还识别到 macOS-only DMG smoke 中两处 `os.kill`，它们只在 `hdiutil` 工作流运行，已使用 checker 规定的 inline platform-gate 标记，随后该 delta 无剩余 findings。
+
+首次云端执行时 lint reusable workflow 的 checkout 仍为 shallow，导致 `origin/develop` 与 fixed object 不能同时用于祖先验证；它按 fail-closed 路径退出，没有静默跳过。已将该 job 的 checkout 改为 full history，和 contributor job 一致，等待最终 rerun。

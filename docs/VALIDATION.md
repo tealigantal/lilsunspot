@@ -1,5 +1,55 @@
 # Validation
 
+## Hermes capability parity ledger schema - 2026-07-26
+
+- Scenario: 将固定目标清单变成逐项可阻断的产品/安装版 parity ledger，避免源码存在被当作已集成。
+- Exact Steps or Command: 从官方 toolset/tool registries、plugin manifests、skill frontmatter、MCP manifests、gateway platform keys、具体 `ProviderTransport` 子类和 config schema 生成 stable IDs；加载独立 overrides；运行 focused pytest 和严格 completion gate 单测。
+- Actual Observable Result: 519 rows：57 toolsets、74 tools、93 plugins、180 skills、4 MCPs、30 gateways、4 provider transports、76 user config + 1 internal config。57 toolsets、74 tools、4 transports 已设计映射；当前 `design_mapped=135/unspecified=384/validated=0/needs_validation=519`，`mapping_complete=false/ready_complete=false`。执行 owner、安全策略、operator/cron/platform、integration read/write、Yuanbao cross-reference、browser CDP 动态 toolset 均分开记录。
+- Automated Validation: audit schema 6 passed；tool mapping focused 29 passed；strict gate exit 2 with `384 mapping-unspecified rows`；`scripts/check.ps1` daemon 160 passed + secret guard passed，desktop build 因隔离 worktree 无 `node_modules` 跳过；独立只读复核确认本 slice 无 P0。
+- Safety Boundary: `mapping_status` 与四态 `parity_status` 分离；缺少 bundle、installed discovery/invocation、config/safety/negative-test assessment、timestamp 或 evidence IDs 时不能 validated；最终门禁同时要求 mapping 与 validation 完成。
+- Config Audit: 目标 `_config_version=33`；当前产品缺少版本门禁、schema 校验、备份/回滚、降级拒绝及 config+secret 事务写入，且 model/providers/secrets 与旧产品键存在结构漂移。因此撤回未实现的 config 批量映射，77 行保持 `unspecified`，待固定 SHA 合并后的 v33 migration 契约验证通过再接受。
+- Validation Harness Finding: 冷启动单测中 Hermes plugin/models.dev 初始化可超过原先 3 秒 clarify 等待窗口；测试现等待明确 pending 或 worker 提前结束，并在失败时显示线程结果。`scripts/check.ps1` 现显式传播 pytest、secret guard 与 npm 的 native exit code，不再在 pytest 失败后误报 `lilsunspot check passed`。
+- Checkpoint Revalidation: clarify + upstream audit focused `7 passed`；完整 `scripts/check.ps1` 为 daemon `160 passed`、secret guard passed，desktop build 因隔离 worktree 无 `node_modules` 跳过；`git diff --check` 仅报告 Windows LF/CRLF 转换提示。
+- Remaining Risk: 519 行尚未逐项填 ownership mapping；strict completion gate 当前应失败，不能开始盲 merge。
+- Evidence: `lilsunspot/notes/hermes-capability-parity/d9f1043c3337818b1f29224a7deb5bbb17402370.md`、machine manifest、schema tests、两路独立只读审计。
+- Date: 2026-07-26.
+
+## Hermes fixed Git object retry and ancestry - 2026-07-26
+
+- Scenario: GitHub smart-HTTP 恢复后，只抓取已固定 SHA，不移动浮动 `upstream/main`。
+- Exact Steps or Command: `git fetch upstream <fixed-sha> --no-tags`；持久化为 `refs/remotes/upstream/sync-d9f1043`；运行 `git cat-file`、`git merge-base`、`git merge-base --is-ancestor`、`git rev-list --left-right --count`；从官方 commit object 导出树并与已记录 tarball 按路径和换行归一化内容比较。
+- Actual Observable Result: commit=`d9f1043c3337818b1f29224a7deb5bbb17402370`，subject 与时间匹配固定记录；merge base=`2b768535c9ba2a8d3b2c23fae1ee3a2f827f7f49`，ancestor exit=0，left/right=`0 / 8485`。官方 Git diff=`6162 files changed, 1347582 insertions, 118739 deletions`。官方 tree 与 tarball 均为 7,460 个路径；归一化 CRLF/LF 后内容差异为 0。
+- Safety Boundary: 未移动 `upstream/main`，未 merge，未更新 `UPSTREAM_COMMIT.txt`，未 commit/push。
+- Remaining Risk: Milestone 2 全量 owner/entry/config/safety/package/evidence 映射尚未完成，不能直接盲合并 6,162 文件差异。
+- Date: 2026-07-26.
+
+## Hermes fixed target and snapshot audit - 2026-07-26
+
+- Scenario: Git smart-HTTP 持续不可用时，使用官方认证 API 固定本轮唯一目标，并从该 SHA 的官方快照开始能力盘点。
+- User Intent: 继续 Hermes 官方最新同步，不用陈旧缓存 ref 或丢失 ancestry 的代替物伪称 merge 完成。
+- Exact Steps or Command: `gh api repos/NousResearch/hermes-agent/git/ref/heads/main`；`gh api repos/NousResearch/hermes-agent/commits/<target>`；`gh api repos/NousResearch/hermes-agent/compare/<base>...<target>`；下载固定 SHA tarball 到 `ignored/`；把下载事实写入独立版本化 snapshot record；校验 archive SHA、唯一 tar 根目录、目标 SHA 前缀和解压树 hash；用隔离临时 Git 索引比较树；对快照运行 AST 注册表枚举逻辑。
+- Expected Observable Result: 获得不浮动的官方 SHA、提交元数据、旧基线关系和可重复快照证据；同时保留“尚未 fetch Git 对象”的限制。
+- Actual Observable Result: target=`d9f1043c3337818b1f29224a7deb5bbb17402370`，commit time=`2026-07-26T08:26:39Z`，release=`v2026.7.20`；compare status=`ahead`、merge base=`2b768535c9ba2a8d3b2c23fae1ee3a2f827f7f49`、ahead=`8485`、behind=`0`。快照 `77085957` bytes，SHA-256=`E12EF7FBD2A3FEA01F434430B184D20F86CD9FAAA61499A8414A548A92E01DBA`，解压树 SHA-256=`CC6ABD19FE9B5A1727FF4D57C1F850E50AD2ABFF05ADAA32D539CF8F2D313205`（7,460 files）。该证据只保证操作员记录的 GitHub 归档完整性，不证明本地存在官方 commit object。树比较为 6,202 files changed；初步 registry 差异已记录到报告。
+- Automated Validation: `python -m pytest lilsunspot/daemon/tests/test_upstream_audit.py -q` -> 4 passed；capability/product/audit focused -> 27 passed；`python -m pytest lilsunspot/tests/test_hermes_upstream_check_script.py -q --timeout-method=thread` -> 3 passed；`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` -> daemon 158 passed、secret guard 通过、桌面 build 因隔离 worktree 无 `node_modules` 跳过。
+- Failure and Recovery Path: 快照与临时索引均位于 `ignored/hermes-upstream-snapshot/`，可完整丢弃而不影响项目 Git 历史；当前未删除。Git 恢复后仅抓取已固定 SHA。
+- Evidence: `lilsunspot/notes/upstream-sync-reports/2026-07-26-d9f1043-fixed-snapshot.md`、`lilsunspot/resources/hermes_upstream_snapshot_record.json`、GitHub API 输出、archive/tree hash、临时树 diff 与 AST 枚举输出。
+- Remaining Risk: 快照不包含可本地验证的官方 Git commit ancestry；能力账本尚未 100% 完成；尚未 merge、构建或验证安装版。
+- Date: 2026-07-26.
+
+## Hermes upstream sync Milestone 0 - 2026-07-26
+
+- Scenario: 为 `LIL-HERMES-UPSTREAM-FULL-SYNC-01` 建立不影响主工作区的可恢复同步起点。
+- User Intent: 开始同步 Hermes 官方最新任务，并保留 lilsunspot 当前 Windows 产品基线。
+- Preconditions: 主工作树 `develop` clean，`HEAD == origin/develop == a8880fad7094726b2c3e3ec34218e588c7d8bf19`。
+- Environment: Windows；隔离 worktree `C:\Users\24179\Desktop\Personal-Agent\lilsunspot-hermes-upstream-full-sync-20260726`；分支 `codex/hermes-upstream-full-sync-20260726`。
+- Exact Steps or Command: 校验目标路径/分支不存在后执行 `git worktree add -b codex/hermes-upstream-full-sync-20260726 <isolated-path> origin/develop`；在新 worktree 执行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1`。
+- Expected Observable Result: 新 worktree clean，原工作树不变，同步前失败项有可追溯记录。
+- Actual Observable Result: 新 worktree 与原 `develop` 均保持 `a8880fad7094726b2c3e3ec34218e588c7d8bf19`；daemon `154 passed in 62.81s`，secret guard 通过，脚本退出码 0。桌面 build 因新 worktree 不包含未跟踪 `lilsunspot/desktop/node_modules` 而被脚本跳过。
+- Failure and Recovery Path: 同步分支失败时可保留或移除该独立 worktree/分支，无需 reset 原 `develop`；本轮未执行删除。
+- Evidence: `git status --short --branch`、`git worktree list --porcelain`、`git rev-parse HEAD`、`scripts/check.ps1` 输出。
+- Remaining Risk: 桌面 TypeScript/Vite 基线尚未在隔离 worktree 执行；不能把本次脚本通过当作完整桌面基线。GitHub Git remote/fetch 连接四次失败，M1 尚未获得官方最新 SHA。
+- Date: 2026-07-26.
+
 ## Develop workspace consolidation - 2026-07-25
 
 - Scenario: 整理本地脏工作区，并在不触碰 `main`、不创建 PR 的前提下同步最新远端 `develop`。

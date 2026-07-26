@@ -1,0 +1,395 @@
+{
+  "schema_version": 1,
+  "target_commit": "d9f1043c3337818b1f29224a7deb5bbb17402370",
+  "mapping_groups": [
+    {
+      "ids": [
+        "toolset:clarify",
+        "toolset:context_engine",
+        "toolset:debugging",
+        "toolset:memory",
+        "toolset:safe",
+        "toolset:search",
+        "toolset:session_search",
+        "toolset:todo",
+        "toolset:vision",
+        "toolset:web"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply"],
+        "config_source": ["hermes.toolsets", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:agent-tool-loop", "installed-sidecar:toolset-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "toolset:browser",
+        "toolset:code_execution",
+        "toolset:coding",
+        "toolset:computer_use",
+        "toolset:cronjob",
+        "toolset:delegation",
+        "toolset:file",
+        "toolset:kanban",
+        "toolset:project",
+        "toolset:skills",
+        "toolset:terminal"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply", "safety.approval"],
+        "config_source": ["hermes.toolsets", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "default_safety_policy.yaml"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:tool-approval-negative-tests", "installed-sidecar:high-risk-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "toolset:image_gen",
+        "toolset:tts",
+        "toolset:video",
+        "toolset:video_gen",
+        "toolset:x_search"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply", "settings.model_service"],
+        "config_source": ["hermes.toolsets", "lilsunspot.daemon.providers"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "lilsunspot.daemon.delivery_actions"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:media-tool-routing", "installed-sidecar:media-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "toolset:discord",
+        "toolset:discord_admin",
+        "toolset:feishu_doc",
+        "toolset:feishu_drive",
+        "toolset:homeassistant",
+        "toolset:spotify",
+        "toolset:yuanbao"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.integrations", "safety.approval"],
+        "config_source": ["hermes.toolsets", "hermes.integration.config", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:integration-operation-approval"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:external-integration-authz", "installed-sidecar:integration-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "toolset:hermes-bluebubbles",
+        "toolset:hermes-dingtalk",
+        "toolset:hermes-discord",
+        "toolset:hermes-email",
+        "toolset:hermes-feishu",
+        "toolset:hermes-homeassistant",
+        "toolset:hermes-matrix",
+        "toolset:hermes-mattermost",
+        "toolset:hermes-qqbot",
+        "toolset:hermes-signal",
+        "toolset:hermes-slack",
+        "toolset:hermes-sms",
+        "toolset:hermes-telegram",
+        "toolset:hermes-webhook",
+        "toolset:hermes-wecom",
+        "toolset:hermes-wecom-callback",
+        "toolset:hermes-weixin",
+        "toolset:hermes-whatsapp",
+        "toolset:hermes-yuanbao"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.gateway",
+        "product_entry": ["desktop.chat", "planned:settings.integrations", "gateway.status"],
+        "config_source": ["hermes.plugin_registry", "hermes.gateway.config", "lilsunspot.daemon.gateway"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:gateway-platform-authz"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:gateway-platform-interface", "installed-sidecar:gateway-route-delivery-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "toolset:hermes-acp",
+        "toolset:hermes-api-server",
+        "toolset:hermes-cli",
+        "toolset:hermes-gateway"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.app",
+        "product_entry": ["planned:operator.control_plane", "daemon.local_api"],
+        "config_source": ["hermes.operator_registry", "lilsunspot.daemon.app"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "local-api-token", "loopback-only"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:operator-surface-auth", "installed-sidecar:operator-surface-smoke"]
+      }
+    },
+    {
+      "ids": ["toolset:hermes-cron"],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["planned:automation.scheduler", "desktop.chat"],
+        "config_source": ["hermes.cron.config", "lilsunspot.daemon.product_features"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:scheduled-action-approval"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:cron-persistence-and-approval", "installed-sidecar:scheduled-action-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:clarify",
+        "tool:memory",
+        "tool:session_search",
+        "tool:todo",
+        "tool:vision_analyze",
+        "tool:web_extract",
+        "tool:web_search"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply"],
+        "config_source": ["hermes.tools.registry", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:registered-tool-call", "installed-sidecar:tool-result-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:browser_back",
+        "tool:browser_click",
+        "tool:browser_console",
+        "tool:browser_get_images",
+        "tool:browser_navigate",
+        "tool:browser_press",
+        "tool:browser_scroll",
+        "tool:browser_snapshot",
+        "tool:browser_type",
+        "tool:browser_vision",
+        "tool:close_terminal",
+        "tool:computer_use",
+        "tool:cronjob",
+        "tool:delegate_task",
+        "tool:execute_code",
+        "tool:focus_pane",
+        "tool:kanban_attach",
+        "tool:kanban_attach_url",
+        "tool:kanban_attachments",
+        "tool:kanban_block",
+        "tool:kanban_comment",
+        "tool:kanban_complete",
+        "tool:kanban_create",
+        "tool:kanban_heartbeat",
+        "tool:kanban_link",
+        "tool:kanban_list",
+        "tool:kanban_show",
+        "tool:kanban_unblock",
+        "tool:open_preview",
+        "tool:patch",
+        "tool:process",
+        "tool:project_create",
+        "tool:project_list",
+        "tool:project_switch",
+        "tool:read_file",
+        "tool:read_terminal",
+        "tool:search_files",
+        "tool:skill_manage",
+        "tool:skill_view",
+        "tool:skills_list",
+        "tool:terminal",
+        "tool:write_file"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply", "safety.approval"],
+        "config_source": ["hermes.tools.registry", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "default_safety_policy.yaml"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:tool-approval-negative-tests", "installed-sidecar:high-risk-tool-call-smoke"]
+      }
+    },
+    {
+      "ids": ["tool:browser_cdp", "tool:browser_dialog"],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:browser.cdp_connection"],
+        "config_source": ["hermes.tools.registry:browser-cdp", "required-resolution:browser-cdp-toolset-alias-or-runtime-injection"],
+        "safety_policy": ["required-policy:cdp-localhost-allowlist", "required-policy:authenticated-browser-session-access", "required-policy:browser-mutation-confirmation"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:browser-cdp-toolset-resolution", "negative:remote-cdp-endpoint-rejected", "installed-sidecar:browser-cdp-operation-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:image_generate",
+        "tool:text_to_speech",
+        "tool:video_analyze",
+        "tool:video_generate",
+        "tool:x_search",
+        "tool:xai_video_edit",
+        "tool:xai_video_extend"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply", "settings.model_service"],
+        "config_source": ["hermes.tools.registry", "lilsunspot.daemon.providers"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "lilsunspot.daemon.delivery_actions"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:media-tool-routing", "installed-sidecar:media-tool-call-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:feishu_doc_read",
+        "tool:feishu_drive_list_comment_replies",
+        "tool:feishu_drive_list_comments",
+        "tool:ha_get_state",
+        "tool:ha_list_entities",
+        "tool:ha_list_services"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.integrations"],
+        "config_source": ["hermes.tools.registry", "hermes.integration.config", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:integration-read-scope"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:integration-read-authz", "installed-sidecar:external-read-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:yb_query_group_info",
+        "tool:yb_query_group_members",
+        "tool:yb_search_sticker"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.integrations"],
+        "config_source": ["hermes.tools.registry:empty-literal-toolset", "hermes.toolsets:yuanbao+hermes-yuanbao", "hermes.gateway.config:yuanbao"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:yuanbao-read-scope"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:yuanbao-toolset-cross-reference", "installed-sidecar:yuanbao-read-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "tool:discord",
+        "tool:discord_admin",
+        "tool:feishu_drive_add_comment",
+        "tool:feishu_drive_reply_comment",
+        "tool:ha_call_service"
+      ],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.integrations", "safety.approval"],
+        "config_source": ["hermes.tools.registry", "hermes.integration.config", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:outbound-mutation-approval", "negative:external-write-without-approval-rejected"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:outbound-mutation-approval", "installed-sidecar:external-write-tool-smoke"]
+      }
+    },
+    {
+      "ids": ["tool:yb_send_dm", "tool:yb_send_sticker"],
+      "mapping": {
+        "owner": "lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.integrations", "safety.approval"],
+        "config_source": ["hermes.tools.registry:empty-literal-toolset", "hermes.toolsets:yuanbao+hermes-yuanbao", "hermes.gateway.config:yuanbao"],
+        "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:outbound-mutation-approval", "negative:yuanbao-send-without-approval-rejected"],
+        "packaging_status": "blocked_not_merged",
+        "validation_method": ["contract:yuanbao-toolset-cross-reference", "contract:outbound-mutation-approval", "installed-sidecar:yuanbao-send-smoke"]
+      }
+    }
+  ],
+  "mappings": {
+    "transport:anthropic": {
+      "owner": "lilsunspot.daemon.agent_runner",
+      "product_entry": [
+        "desktop.chat",
+        "weixin.agent_reply"
+      ],
+      "config_source": [
+        "hermes.provider_registry:anthropic",
+        "lilsunspot.daemon.providers"
+      ],
+      "safety_policy": [
+        "AGENTS.md#Hard Rules",
+        "lilsunspot.daemon.safety"
+      ],
+      "packaging_status": "blocked_not_merged",
+      "validation_method": [
+        "lilsunspot.daemon.tests.test_hermes_compat",
+        "installed-sidecar:anthropic-chat-and-tool-call"
+      ]
+    },
+    "transport:bedrock": {
+      "owner": "lilsunspot.daemon.agent_runner",
+      "product_entry": [
+        "desktop.chat",
+        "weixin.agent_reply",
+        "settings.model_service"
+      ],
+      "config_source": [
+        "hermes.provider_registry:bedrock",
+        "lilsunspot.daemon.providers"
+      ],
+      "safety_policy": [
+        "AGENTS.md#Hard Rules",
+        "lilsunspot.daemon.safety"
+      ],
+      "packaging_status": "blocked_not_merged",
+      "validation_method": [
+        "lilsunspot.daemon.tests.test_hermes_compat",
+        "installed-sidecar:bedrock-credential-chain-chat-and-tool-call"
+      ]
+    },
+    "transport:chat_completions": {
+      "owner": "lilsunspot.daemon.agent_runner",
+      "product_entry": [
+        "desktop.chat",
+        "weixin.agent_reply",
+        "settings.model_service"
+      ],
+      "config_source": [
+        "hermes.provider_registry",
+        "lilsunspot.resources.provider_registry.yaml",
+        "lilsunspot.daemon.providers"
+      ],
+      "safety_policy": [
+        "AGENTS.md#Hard Rules",
+        "lilsunspot.daemon.safety"
+      ],
+      "packaging_status": "blocked_not_merged",
+      "validation_method": [
+        "lilsunspot.daemon.tests.test_hermes_compat",
+        "installed-sidecar:openai-compatible-chat-stream-and-tool-call"
+      ]
+    },
+    "transport:responses_api": {
+      "owner": "lilsunspot.daemon.agent_runner",
+      "product_entry": [
+        "desktop.chat",
+        "weixin.agent_reply",
+        "settings.model_service"
+      ],
+      "config_source": [
+        "hermes.provider_registry:codex",
+        "lilsunspot.daemon.providers"
+      ],
+      "safety_policy": [
+        "AGENTS.md#Hard Rules",
+        "lilsunspot.daemon.safety"
+      ],
+      "packaging_status": "blocked_not_merged",
+      "validation_method": [
+        "lilsunspot.daemon.tests.test_hermes_compat",
+        "installed-sidecar:codex-responses-chat-stream-and-tool-call"
+      ]
+    }
+  }
+}

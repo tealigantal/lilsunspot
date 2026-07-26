@@ -18,6 +18,10 @@ def _ensure_windowed_stdio() -> None:
 
 _ensure_windowed_stdio()
 
+from lilsunspot.daemon.bundled_runtime import configure_bundled_extension_assets
+
+configure_bundled_extension_assets()
+
 from lilsunspot.daemon.launcher import main
 
 

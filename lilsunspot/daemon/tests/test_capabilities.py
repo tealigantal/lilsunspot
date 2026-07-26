@@ -4,6 +4,22 @@ import asyncio
 import json
 
 
+def test_extensions_catalog_is_token_protected_and_lists_delivered_assets(daemon_client):
+    unauthorized = daemon_client.client.get("/extensions/catalog")
+    assert unauthorized.status_code == 403
+
+    response = daemon_client.client.get("/extensions/catalog", headers=daemon_client.headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert {"plugins", "skills", "optional-skills", "optional-mcps"} <= set(body["assets"])
+    assert body["counts"]["plugin"] > 0
+    assert body["counts"]["skill"] > 0
+    assert body["counts"]["optional_mcp"] > 0
+    assert body["counts"]["gateway_adapter"] > 0
+    assert "不会加载插件" in body["safety"]
+
+
 def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_client, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "")
@@ -43,8 +59,9 @@ def test_capabilities_list_covers_hermes_toolsets_and_runtime_surfaces(daemon_cl
     upstream_audit = body["upstream_audit"]
     assert "missing_toolsets" in upstream_audit
     if upstream_audit["available"]:
-        assert "context_engine" in upstream_audit["missing_toolsets"]
-        assert "context_engine" in upstream_audit["missing_configurable_toolsets"]
+        assert not (set(upstream_audit["missing_toolsets"]) & set(TOOLSETS))
+        configurable_names = {toolset for toolset, _label, _description in CONFIGURABLE_TOOLSETS}
+        assert not (set(upstream_audit["missing_configurable_toolsets"]) & configurable_names)
     hermes_weixin = next(item for item in body["capabilities"] if item["id"] == "toolset.hermes-weixin")
     assert hermes_weixin["configurable"] is False
     vision = next(item for item in body["capabilities"] if item["id"] == "toolset.vision")

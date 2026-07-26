@@ -1,6 +1,40 @@
 {
   "schema_version": 1,
   "target_commit": "d9f1043c3337818b1f29224a7deb5bbb17402370",
+  "kind_mappings": {
+    "plugin": {
+      "owner": "hermes_cli.plugins + lilsunspot.daemon.bundled_runtime",
+      "product_entry": ["desktop.chat", "local-api:/extensions/catalog"],
+      "config_source": ["hermes_cli.plugins", "config.plugins.enabled", "config.plugins.disabled"],
+      "safety_policy": ["plugins opt-in by default", "lilsunspot.daemon.safety", "Hermes tool approval"],
+      "packaging_status": "packaged_unverified",
+      "validation_method": ["lilsunspot.tests.test_sidecar_extension_bundle", "installed-sidecar:extensions-catalog"]
+    },
+    "skill": {
+      "owner": "Hermes skills loader + lilsunspot.daemon.bundled_runtime",
+      "product_entry": ["desktop.chat", "local-api:/extensions/catalog"],
+      "config_source": ["HERMES_BUNDLED_SKILLS", "HERMES_OPTIONAL_SKILLS", "Hermes skill selection"],
+      "safety_policy": ["skill instructions do not bypass tool approval", "lilsunspot.daemon.safety"],
+      "packaging_status": "packaged_unverified",
+      "validation_method": ["lilsunspot.tests.test_sidecar_extension_bundle", "installed-sidecar:extensions-catalog"]
+    },
+    "optional_mcp": {
+      "owner": "Hermes MCP catalog + lilsunspot.daemon.hermes_runtime",
+      "product_entry": ["local-api:/mcp/servers", "local-api:/extensions/catalog", "desktop.chat"],
+      "config_source": ["HERMES_OPTIONAL_MCPS", "config.mcp_servers"],
+      "safety_policy": ["MCP is disabled until explicitly configured", "lilsunspot.daemon.safety", "Hermes tool approval"],
+      "packaging_status": "packaged_unverified",
+      "validation_method": ["lilsunspot.daemon.tests.test_capabilities", "installed-sidecar:extensions-catalog-and-mcp-config"]
+    },
+    "gateway_adapter": {
+      "owner": "Hermes gateway registry + lilsunspot.daemon.bundled_runtime",
+      "product_entry": ["local-api:/extensions/catalog", "weixin product gateway", "desktop.chat"],
+      "config_source": ["gateway.config", "config.gateway", "config.platforms"],
+      "safety_policy": ["loopback local API token", "gateway credentials remain local", "lilsunspot.daemon.safety"],
+      "packaging_status": "packaged_unverified",
+      "validation_method": ["lilsunspot.tests.test_sidecar_extension_bundle", "installed-sidecar:extensions-catalog"]
+    }
+  },
   "mapping_groups": [
     {
       "ids": [
@@ -303,6 +337,126 @@
         "safety_policy": ["AGENTS.md#Hard Rules", "lilsunspot.daemon.safety", "required-policy:outbound-mutation-approval", "negative:yuanbao-send-without-approval-rejected"],
         "packaging_status": "blocked_not_merged",
         "validation_method": ["contract:yuanbao-toolset-cross-reference", "contract:outbound-mutation-approval", "installed-sidecar:yuanbao-send-smoke"]
+      }
+    },
+    {
+      "ids": ["config:_config_version"],
+      "mapping": {
+        "owner": "lilsunspot.daemon.hermes_config_migration",
+        "product_entry": ["daemon.startup", "internal:config_migration"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "lilsunspot.daemon.hermes_config_migration"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:backup-rollback-downgrade-refusal"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["lilsunspot.daemon.tests.test_hermes_config_migration", "installed-sidecar:old-config-upgrade"]
+      }
+    },
+    {
+      "ids": [
+        "config:agent", "config:checkpoints", "config:compression", "config:context",
+        "config:context_file_max_chars", "config:curator", "config:delegation", "config:goals",
+        "config:hooks", "config:hooks_auto_accept", "config:human_delay", "config:max_concurrent_sessions",
+        "config:max_live_sessions", "config:paste_collapse_char_threshold", "config:paste_collapse_threshold",
+        "config:paste_collapse_threshold_fallback", "config:personalities", "config:platform_hints",
+        "config:prefill_messages_file", "config:prompt_caching", "config:quick_commands", "config:sessions",
+        "config:streaming", "config:tool_loop_guardrails", "config:tool_output", "config:timezone"
+      ],
+      "mapping": {
+        "owner": "hermes_cli.config + lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "weixin.agent_reply", "planned:settings.advanced_runtime"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "lilsunspot.daemon.hermes_config_migration"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "lilsunspot.daemon.safety", "contract:runtime-budget-and-loop-bounds"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:agent-runtime-config-consumer", "installed-sidecar:runtime-config-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "config:auxiliary", "config:bedrock", "config:credential_pool_strategies",
+        "config:fallback_providers", "config:moa", "config:model", "config:model_catalog",
+        "config:openrouter", "config:providers", "config:stt", "config:tts", "config:vertex",
+        "config:voice", "config:x_search"
+      ],
+      "mapping": {
+        "owner": "hermes providers + lilsunspot.daemon.providers",
+        "product_entry": ["settings.model_service", "desktop.chat", "weixin.agent_reply"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "hermes provider registry", "lilsunspot.daemon.hermes_runtime"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:secret-redaction", "contract:provider-endpoint-validation"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:provider-config-roundtrip", "negative:secret-not-in-api-or-log", "installed-sidecar:provider-routing-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "config:browser", "config:code_execution", "config:command_allowlist", "config:computer_use",
+        "config:file_read_max_chars", "config:kanban", "config:lsp", "config:mcp",
+        "config:mcp_discovery_timeout", "config:memory", "config:skills", "config:terminal",
+        "config:tools", "config:toolsets", "config:web"
+      ],
+      "mapping": {
+        "owner": "Hermes tool registries + lilsunspot.daemon.capabilities",
+        "product_entry": ["desktop.chat", "planned:settings.capabilities", "safety.approval"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "hermes tools registry", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "lilsunspot.daemon.safety", "default_safety_policy.yaml"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:tool-config-to-runtime", "negative:tool-approval", "installed-sidecar:configured-tool-smoke"]
+      }
+    },
+    {
+      "ids": [
+        "config:dashboard", "config:desktop", "config:discord", "config:gateway", "config:matrix",
+        "config:mattermost", "config:slack", "config:telegram", "config:whatsapp"
+      ],
+      "mapping": {
+        "owner": "Hermes gateway + lilsunspot.daemon.gateway",
+        "product_entry": ["planned:settings.integrations", "gateway.status", "desktop.chat"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "gateway.config", "lilsunspot.daemon.gateway"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:gateway-platform-authz", "contract:credential-redaction"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:gateway-config-migration", "negative:unauthorized-route", "installed-sidecar:gateway-config-smoke"]
+      }
+    },
+    {
+      "ids": ["config:approvals", "config:network", "config:privacy", "config:proxy", "config:secrets", "config:security"],
+      "mapping": {
+        "owner": "Hermes security + lilsunspot.daemon.safety",
+        "product_entry": ["internal:security_boundary", "planned:settings.security"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "lilsunspot.daemon.safety", "lilsunspot.daemon.hermes_runtime"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "local-api-token", "loopback-only", "contract:secret-redaction"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:security-config-fail-closed", "negative:auth-and-secret-leak", "installed-sidecar:security-config-smoke"]
+      }
+    },
+    {
+      "ids": ["config:display", "config:logging", "config:onboarding", "config:updates"],
+      "mapping": {
+        "owner": "Hermes operator surfaces + lilsunspot.daemon.app",
+        "product_entry": ["desktop.startup", "planned:settings.operator"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "lilsunspot.daemon.app"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:chinese-user-errors", "contract:redacted-diagnostics"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:operator-config-consumer", "installed-app:start-and-reopen-smoke"]
+      }
+    },
+    {
+      "ids": ["config:cron"],
+      "mapping": {
+        "owner": "Hermes cron + lilsunspot.daemon.product_features",
+        "product_entry": ["planned:automation.scheduler", "desktop.chat"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "cron.scheduler", "lilsunspot.daemon.product_features"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:scheduled-action-approval", "contract:late-delivery-cancellation"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:cron-config-migration", "negative:scheduled-external-action", "installed-sidecar:cron-restart-smoke"]
+      }
+    },
+    {
+      "ids": ["config:honcho"],
+      "mapping": {
+        "owner": "Hermes memory provider registry + lilsunspot.daemon.agent_runner",
+        "product_entry": ["desktop.chat", "planned:settings.memory"],
+        "config_source": ["hermes_cli.config.DEFAULT_CONFIG", "plugins.memory.honcho", "lilsunspot.daemon.capabilities"],
+        "safety_policy": ["AGENTS.md#Lilsunspot-Hard-Rules", "contract:memory-provider-secret-redaction", "contract:memory-write-approval"],
+        "packaging_status": "not_packaged",
+        "validation_method": ["contract:memory-provider-config", "installed-sidecar:honcho-configured-smoke"]
       }
     }
   ],

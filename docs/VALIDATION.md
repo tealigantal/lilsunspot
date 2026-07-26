@@ -1,5 +1,14 @@
 # Validation
 
+## Hermes v33 / Windows sidecar release candidate - 2026-07-26
+
+- Scope: fixed Hermes `d9f1043c3337818b1f29224a7deb5bbb17402370`, v33 migration, dynamic extension packaging, safety boundaries, NSIS new install/upgrade, real Provider and Weixin network probes.
+- Automated: `scripts/check.ps1` passed: daemon `165 passed`, secret guard passed, TypeScript/Vite build passed. Focused migration/auth/capability/audit tests: `37 passed`; Weixin packaging/login tests: `21 passed`.
+- Windows installer: `npm run tauri:build --prefix lilsunspot/desktop` passed. Fresh artifact: `lilsunspot/desktop/src-tauri/target/release/bundle/nsis/Lilsunspot_0.1.0_x64-setup.exe`.
+- Installed-app evidence: silent new install/start/token/bind/uninstall passed; installed sidecar catalog found `plugins=93`, `skills=180`, `optional_mcps=4`, `gateways=30`; seeded v32 data migrated to v33 with one restorable backup; real DeepSeek connection, save and Hermes agent-loop chat passed without recording a key or reply; actual Tencent iLink QR acquisition and Chinese pending-login response passed after packaging the official `messaging` extra.
+- Security evidence: catalog requires token; catalog query is read-only; migration failure/rollback and newer-schema downgrade rejection are covered by tests; no secret-like values found. Provider and Weixin test data were in system temp paths and purged after test.
+- Remaining external acceptance: no existing local Weixin credentials were present, so no person can truthfully claim account-confirmed inbound/outbound chat until the account holder scans and confirms the real QR. No QR payload, account ID, token, private text, API key or model reply was recorded.
+
 ## Hermes capability parity ledger schema - 2026-07-26
 
 - Scenario: 将固定目标清单变成逐项可阻断的产品/安装版 parity ledger，避免源码存在被当作已集成。

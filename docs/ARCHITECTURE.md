@@ -41,6 +41,8 @@ Provider API、Ollama/兼容本地端点、Hermes Weixin、可选 Skills/MCP。l
 
 daemon 仅监听 `127.0.0.1`；除 `/health` 外要求 `X-Lilsunspot-Token`。生成策略永远低于工具权限、审批、文件安全根、外部发送和凭据边界。日志与回复详情只记录脱敏参数和状态。
 
+Hermes 配置在 sidecar lifespan 的第一个动作中迁移到官方当前 schema。迁移对 `config.yaml`、`.env`、auth 与 provider cache 建立带 SHA-256 manifest 的本地备份，使用原子替换；官方迁移或 schema 校验失败时恢复源字节，发现更高 schema 时拒绝降级启动。`/extensions/catalog` 同样受 token 保护，仅列出已打包 plugin/skill/MCP/gateway 资产和映射状态，绝不加载插件、启动 MCP、连接网关或读取凭据。
+
 ## Current Architectural Constraints
 
 - Provider transport 支持不一致，sampling 参数必须先过能力解析。

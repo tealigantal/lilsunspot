@@ -10,6 +10,8 @@ LIL-HERMES-UPSTREAM-FULL-SYNC-01：同步执行时可确认的 Hermes 官方最�
 
 ## Current Milestone
 
+Milestone 1--7 已完成；当前进入最终发布前 Git 阶段。固定目标已合入隔离分支，v33 migration 与 sidecar/NSIS 的 Windows 真实验收通过。`UPSTREAM_COMMIT.txt` 尚未更新，严格保持为最后一个源码外的完成标记。
+
 Milestone 1 已完成：固定目标 `d9f1043c3337818b1f29224a7deb5bbb17402370` 的真实 Git 对象已抓取并保存为 `upstream/sync-d9f1043`，本地 ancestry 为旧基线 ahead 0 / target ahead 8,485。Milestone 2 能力映射继续进行。
 
 ## Completed and Verified
@@ -38,15 +40,15 @@ Milestone 1 已完成：固定目标 `d9f1043c3337818b1f29224a7deb5bbb17402370` 
 
 ## Implemented but Not Verified
 
-- 真实 Provider/模型组合无法穷尽；未知组合继续按保守省略和一次拒参降级处理。
+- 单一真实 DeepSeek Provider 和真实微信 iLink 二维码获取已验收；所有第三方模型、所有插件/MCP/网关及微信账号确认后的收发无法由一台未持有登录确认的机器穷尽，不得从目录映射推断为已逐项调用成功。
 
 ## In Progress
 
-- 为剩余 384 行补齐设计映射；先合入固定 SHA 并实现 v33 配置迁移、备份、回滚与降级拒绝，再接受 77 个 config surfaces 的映射。全部 135 个已映射项在正式 merge 和安装版实测前保持 `blocked_not_merged + needs_validation`。
+- 用户已授权的最后步骤：更新 marker、提交、推送并创建/检查 PR。
 
 ## Next Work
 
-- 提交当前审计检查点后，从 `upstream/sync-d9f1043` 进入正式合并与 thin-adapter 冲突处理；优先实现 v33 配置迁移契约，再继续 plugins、skills、MCP、gateways、provider/runtime 和 packaging 的机器可读映射与验证。
+- PR 合入后由微信账号持有人完成扫码确认，并在真实联系人/测试会话中执行一次受控入站和发送验收；该账号授权步骤不在本次临时安装数据中伪造。
 
 ## Blockers
 

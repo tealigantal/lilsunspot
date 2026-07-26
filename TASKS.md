@@ -2,6 +2,8 @@
 
 ## Current
 
+`LIL-HERMES-UPSTREAM-FULL-SYNC-01` 收口（2026-07-26）：固定 SHA `d9f1043c3337818b1f29224a7deb5bbb17402370` 已在隔离分支中合入。v33 配置迁移、扩展映射与 Windows sidecar/NSIS 验收已完成：519 行 ledger 为 `design_mapped=519 / unspecified=0`，其中安装版已实际发现 93 plugins、180 skills、4 optional MCPs、30 gateway adapters。迁移在 sidecar 生命周期最先执行；v32→v33 产生带 hash manifest 的备份、失败恢复原字节、较新版本拒绝降级。真实安装版 Provider 测试、Hermes chat 与微信 iLink 二维码获取均已通过，敏感临时数据已清理。账号扫码后的入站/出站需要持有该微信账号的人在手机确认，不能据二维码探测伪称已完成。现在只剩最后的 `UPSTREAM_COMMIT.txt` 更新、提交、推送和 PR 验收。
+
 `LIL-HERMES-UPSTREAM-FULL-SYNC-01`：同步执行时可确认的 Hermes 官方最新 `main`，并让 lilsunspot 在 Windows 安装版中完整继承上游全部能力。已固定、抓取目标 `d9f1043c3337818b1f29224a7deb5bbb17402370` 到 `upstream/sync-d9f1043`，本地 ancestry left/right=`0 / 8485`。固定目标已展开为 519 行 parity ledger；57 toolsets、74 tools 和 4 provider transports 已完成设计映射，当前 135 design_mapped / 384 unspecified、0 validated。执行 owner、安全边界、operator/cron/platform、integration read/write、Yuanbao 归属和 browser CDP 动态 toolset 均已分开记录。77 个 config surfaces 经只读审计确认不能先批量映射：目标 `_config_version=33`，而当前产品缺少版本门禁、schema 校验、备份/回滚和降级拒绝，且 model/providers/secrets 与旧产品键存在结构漂移。尚未 merge 或更新 `UPSTREAM_COMMIT.txt`；下一步保存审计检查点，合入固定 SHA 后先实现 v33 配置迁移契约，再完成 config/plugins/skills/MCP/gateways 映射。
 
 以下 `LIL-CAPABILITY-ORCHESTRATION-01B` 内容为此前在途背景，本轮暂停，不作为当前源码修改目标；其既有未提交记录保留，后续回到 Next 继续收口。

@@ -128,9 +128,14 @@ def _safe_import_toolsets() -> tuple[dict[str, Any], list[tuple[str, str, str]]]
     except Exception:
         TOOLSETS = {}
     try:
-        from hermes_cli.tools_config import CONFIGURABLE_TOOLSETS
+        from hermes_cli.tools_config import _get_effective_configurable_toolsets
     except Exception:
         CONFIGURABLE_TOOLSETS = []
+    else:
+        try:
+            CONFIGURABLE_TOOLSETS = _get_effective_configurable_toolsets()
+        except Exception:
+            CONFIGURABLE_TOOLSETS = []
     return TOOLSETS if isinstance(TOOLSETS, dict) else {}, list(CONFIGURABLE_TOOLSETS)
 
 
@@ -248,14 +253,16 @@ def _toolset_available(toolset: str, repo_root: Path, config: dict[str, Any]) ->
     dependencies = list(THIRD_PARTY_ENV_HINTS.get(toolset, []))
     if _now_platform_is_windows() and toolset in WINDOWS_UNSUPPORTED_TOOLSETS:
         return False, "unsupported", dependencies
-    try:
-        from hermes_cli.tools_config import _toolset_needs_configuration_prompt
-
-        if _toolset_needs_configuration_prompt(toolset, config):
-            return False, "needs_config", dependencies
-        return True, "", dependencies
-    except Exception:
-        pass
+    # Capability reads are on the chat prompt path and must remain local-only.
+    # The upstream interactive configuration checker may probe Ollama, OAuth
+    # backends and remote services; use persisted state here and reserve live
+    # probing for the explicit capability test endpoint.
+    if toolset == "vision":
+        auxiliary = config.get("auxiliary") if isinstance(config.get("auxiliary"), dict) else {}
+        vision = auxiliary.get("vision") if isinstance(auxiliary.get("vision"), dict) else {}
+        if str(vision.get("provider") or "").strip() and str(vision.get("model") or "").strip():
+            return True, "", dependencies
+        return False, "needs_config", dependencies
     if toolset == "browser":
         if (repo_root / "node_modules" / "agent-browser").exists() or shutil.which("agent-browser") or os.getenv("BROWSERBASE_API_KEY"):
             return True, "", dependencies

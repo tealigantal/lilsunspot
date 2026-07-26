@@ -45,6 +45,7 @@ from .chat_client import current_runtime_model
 from .config_paths import ensure_runtime_dirs
 from .diagnostics import export_diagnostics
 from .doctor import repair_placeholder, run_doctor_checks
+from .extensions import extension_catalog
 from .gateway import (
     WeixinGatewayError,
     disconnect_weixin,
@@ -63,6 +64,7 @@ from .hermes_runtime import (
     delete_mcp_server,
     list_mcp_servers,
     model_runtime_config,
+    read_hermes_config,
     save_auxiliary_model,
     save_fallback_providers,
     save_provider_credentials,
@@ -136,6 +138,13 @@ logger.info(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Migrate before exposing any product endpoint or starting gateways so an
+    # installed upgrade never runs against a mixed-version Hermes home.
+    try:
+        read_hermes_config(paths)
+    except HermesRuntimeError as exc:
+        logger.error("Hermes 配置升级失败，已拒绝启动：%s", exc)
+        raise RuntimeError(str(exc)) from exc
     task_scheduler = start_task_scheduler(paths)
     if current_runtime_model(paths)["configured"]:
         await start_weixin_runtime(paths)
@@ -627,6 +636,11 @@ async def providers_reset_local() -> dict[str, Any]:
 @app.get("/capabilities", dependencies=[Depends(require_token)])
 async def capabilities() -> dict[str, Any]:
     return list_capabilities(paths)
+
+
+@app.get("/extensions/catalog", dependencies=[Depends(require_token)])
+async def extensions_catalog() -> dict[str, Any]:
+    return extension_catalog()
 
 
 @app.get("/capabilities/{capability_id}", dependencies=[Depends(require_token)])

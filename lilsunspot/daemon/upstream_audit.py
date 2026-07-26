@@ -600,6 +600,14 @@ def _apply_parity_overrides(
         if not isinstance(raw_mappings, dict):
             raise ValueError("parity override mappings must be an object")
         overrides = dict(raw_mappings)
+        raw_kind_mappings = payload.get("kind_mappings", {})
+        if not isinstance(raw_kind_mappings, dict):
+            raise ValueError("parity override kind_mappings must be an object")
+        kind_overrides: dict[str, dict[str, Any]] = {}
+        for capability_kind, mapping in raw_kind_mappings.items():
+            if not isinstance(capability_kind, str) or not capability_kind.strip() or not isinstance(mapping, dict):
+                raise ValueError("each parity kind mapping must have a non-empty kind and mapping object")
+            kind_overrides[capability_kind.strip()] = mapping
         mapping_groups = payload.get("mapping_groups", [])
         if not isinstance(mapping_groups, list):
             raise ValueError("parity override mapping_groups must be a list")
@@ -616,6 +624,8 @@ def _apply_parity_overrides(
                 if capability_id in overrides:
                     raise ValueError(f"capability ID has more than one parity mapping override: {capability_id}")
                 overrides[capability_id] = group_mapping
+    else:
+        kind_overrides = {}
 
     known_ids = {row["id"] for row in rows}
     unknown_ids = sorted(set(overrides) - known_ids)
@@ -627,7 +637,7 @@ def _apply_parity_overrides(
     ready_count = 0
     for row in rows:
         kind_counts[row["kind"]] += 1
-        override = overrides.get(row["id"], {})
+        override = overrides.get(row["id"], kind_overrides.get(str(row["kind"]), {}))
         if not isinstance(override, dict):
             raise ValueError("each parity override must be an object")
         mapping = row["mapping"]

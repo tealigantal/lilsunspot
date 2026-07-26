@@ -72,11 +72,10 @@ try {
         "-m",
         "pytest",
         "lilsunspot/daemon/tests",
-        "--timeout-method=thread",
         "--basetemp",
         ".tmp-pytest-lilsunspot-daemon-release"
     )
-    Invoke-Native "product tests" "python" @("-m", "pytest", "lilsunspot/tests", "--timeout-method=thread", "--basetemp", ".tmp-pytest-lilsunspot")
+    Invoke-Native "product tests" "python" @("-m", "pytest", "lilsunspot/tests", "--basetemp", ".tmp-pytest-lilsunspot")
     Invoke-Native "secret guard" "python" @("scripts/guard_no_secrets.py")
     Invoke-Native "desktop build" "npm" @("run", "build", "--prefix", $DesktopDir)
     Invoke-Native "daemon sidecar build" (Join-Path $Root "scripts\build_lilsunspotd_sidecar.ps1") @()

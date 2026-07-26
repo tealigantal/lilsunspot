@@ -286,6 +286,15 @@ def test_agent_runner_clarify_callback_completes_desktop_question_answer(daemon_
         "_load_hermes_classes",
         lambda _paths: (ClarifyAIAgent, FakeSessionDB),
     )
+    monkeypatch.setattr(
+        daemon_client.generation_controls,
+        "_model_metadata",
+        lambda _provider, _hermes_provider, _model: (None, None),
+    )
+    # Load the upstream callback context outside the timed handoff assertion.
+    # Its first import performs plugin discovery, which is unrelated to clarify.
+    import gateway.session_context  # noqa: F401
+    import tools.approval  # noqa: F401
 
     def run_turn():
         result_holder["result"] = asyncio.run(
@@ -299,14 +308,17 @@ def test_agent_runner_clarify_callback_completes_desktop_question_answer(daemon_
 
     worker = threading.Thread(target=run_turn, daemon=True)
     worker.start()
-    deadline = time.time() + 3
+    # This assertion exercises the clarify handoff, not Hermes cold-start latency.
+    # Plugin discovery and models.dev cache initialization can exceed three
+    # seconds in a fresh Windows process before the fake agent is constructed.
+    deadline = time.time() + 15
     pending = None
-    while time.time() < deadline:
+    while time.time() < deadline and worker.is_alive():
         pending = daemon_client.agent_host.pending_clarify_for_conversation(conversation["id"])
         if pending:
             break
         time.sleep(0.02)
-    assert pending is not None
+    assert pending is not None, result_holder.get("result")
     question_message = daemon_client.conversations.get_message(pending["message_id"], paths=paths)
     assert "请选择执行路线" in question_message["text"]
     assert question_message["metadata"]["clarify"]["status"] == "waiting"

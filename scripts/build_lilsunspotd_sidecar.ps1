@@ -13,6 +13,10 @@ $SidecarPath = Join-Path $SidecarDir $SidecarName
 $SidecarExePath = Join-Path $SidecarBundleDir "lilsunspotd.exe"
 $ResourceSource = Join-Path $Root "lilsunspot\resources"
 $UpstreamCommitSource = Join-Path $Root "lilsunspot\UPSTREAM_COMMIT.txt"
+$PluginSource = Join-Path $Root "plugins"
+$SkillsSource = Join-Path $Root "skills"
+$OptionalSkillsSource = Join-Path $Root "optional-skills"
+$OptionalMcpsSource = Join-Path $Root "optional-mcps"
 
 $PyInstallerCliArgs = @(
     "--onedir",
@@ -44,12 +48,18 @@ $PyInstallerCliArgs = @(
     "--hidden-import", "gateway.session_context",
     "--hidden-import", "tools.approval",
     "--collect-submodules", "lilsunspot.daemon",
+    "--collect-submodules", "gateway",
+    "--collect-submodules", "plugins",
     "--collect-submodules", "agent",
     "--collect-submodules", "model_tools",
     "--collect-submodules", "tools",
     "--collect-submodules", "hermes_cli",
     "--add-data", "$ResourceSource;lilsunspot\resources",
     "--add-data", "$UpstreamCommitSource;lilsunspot",
+    "--add-data", "$PluginSource;plugins",
+    "--add-data", "$SkillsSource;skills",
+    "--add-data", "$OptionalSkillsSource;optional-skills",
+    "--add-data", "$OptionalMcpsSource;optional-mcps",
     "lilsunspot\daemon\sidecar_main.py"
 )
 
@@ -63,6 +73,7 @@ function Invoke-PyInstallerWithUv {
         "run",
         "--extra", "web",
         "--extra", "lilsunspot",
+        "--extra", "messaging",
         "--with", "pyinstaller==6.16.0",
         "pyinstaller"
     ) + $PyInstallerCliArgs
@@ -88,7 +99,7 @@ function Invoke-PyInstallerWithFallbackVenv {
     if ((-not (Test-Path -LiteralPath $PyInstallerModule)) -or (-not (Test-Path -LiteralPath $ProjectDistInfo))) {
         Write-Host "Installing pinned PyInstaller build dependencies into fallback venv..."
         $env:PIP_DEFAULT_TIMEOUT = "60"
-        & $FallbackPython -m pip install --disable-pip-version-check -e ".[web,lilsunspot]" "pyinstaller==6.16.0"
+        & $FallbackPython -m pip install --disable-pip-version-check -e ".[web,lilsunspot,messaging]" "pyinstaller==6.16.0"
         if ($LASTEXITCODE -ne 0) {
             throw "Fallback PyInstaller dependency install failed. Check PyPI/TLS connectivity, then rerun the NSIS build."
         }

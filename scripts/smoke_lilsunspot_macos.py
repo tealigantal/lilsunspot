@@ -423,12 +423,12 @@ def stop_pid(pid: int) -> None:
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         try:
-            os.kill(pid, 0)
+            os.kill(pid, 0)  # windows-footgun: ok — this macOS-only smoke runner is invoked through hdiutil workflows.
         except ProcessLookupError:
             return
         time.sleep(0.1)
     with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGKILL)  # windows-footgun: ok — this macOS-only smoke runner is invoked through hdiutil workflows.
 
 
 def verify_installed_app(dmg_path: Path, expected_arch: str) -> None:

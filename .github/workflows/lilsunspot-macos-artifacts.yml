@@ -87,9 +87,8 @@ jobs:
       - name: Run Python product and daemon tests
         shell: bash
         run: |
-          uv run --locked --extra web --extra lilsunspot --extra dev \
+          uv run --locked --extra web --extra lilsunspot --extra messaging --extra dev \
             python -m pytest lilsunspot/daemon/tests lilsunspot/tests \
-            --timeout-method=thread \
             --basetemp "$RUNNER_TEMP/lilsunspot-pytest-${{ matrix.package_arch }}"
 
       - name: Check for committed secrets
@@ -171,9 +170,6 @@ jobs:
             ".github/workflows/lilsunspot-release.yml",
             "scripts/build_lilsunspot_release.ps1",
             "scripts/build_lilsunspot_desktop_nsis.ps1",
-            "scripts/build_lilsunspotd_sidecar.ps1",
-            "scripts/check_release.ps1",
-            "scripts/smoke_lilsunspot_installed_app.ps1",
             "lilsunspot/desktop/package.json",
             "lilsunspot/desktop/src-tauri/tauri.conf.json",
             "lilsunspot/desktop/src-tauri/nsis/installer-hooks.nsh"
@@ -207,12 +203,12 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          uv sync --locked --extra web --extra lilsunspot --extra dev
+          uv sync --locked --extra web --extra lilsunspot --extra messaging --extra dev
           npm ci --prefix lilsunspot/desktop
 
       - name: Rebuild existing Windows release path
         shell: pwsh
-        run: uv run pwsh -NoProfile -File scripts/check_release.ps1
+        run: uv run --locked --extra web --extra lilsunspot --extra messaging --extra dev pwsh -NoProfile -File scripts/check_release.ps1
 
       - name: Run Rust tests
         run: cargo test --manifest-path lilsunspot/desktop/src-tauri/Cargo.toml

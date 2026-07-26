@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "repository": "NousResearch/hermes-agent",
+  "target_commit": "d9f1043c3337818b1f29224a7deb5bbb17402370",
+  "archive_url": "https://api.github.com/repos/NousResearch/hermes-agent/tarball/d9f1043c3337818b1f29224a7deb5bbb17402370",
+  "archive_root": "NousResearch-hermes-agent-d9f1043",
+  "archive_bytes": 77085957,
+  "archive_sha256": "E12EF7FBD2A3FEA01F434430B184D20F86CD9FAAA61499A8414A548A92E01DBA",
+  "observed_on": "2026-07-26",
+  "observation_method": "authenticated GitHub REST API download; operator-recorded integrity evidence"
+}

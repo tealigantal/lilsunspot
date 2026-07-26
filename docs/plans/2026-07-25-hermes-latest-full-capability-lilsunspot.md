@@ -2,7 +2,7 @@
 
 日期：2026-07-25
 任务编号：`LIL-HERMES-UPSTREAM-FULL-SYNC-01`
-状态：计划已建立，尚未执行同步
+状态：执行中；Milestone 1 已完成固定目标抓取和本地 ancestry 校验；Milestone 2 能力盘点进行中
 计划类型：跨上游、Agent runtime、产品适配层、桌面端、微信、数据迁移与 Windows 安装链路
 
 ## Purpose / Big Picture
@@ -96,9 +96,9 @@ Hermes core -X-> lilsunspot
 - [x] 2026-07-25：确认用户目标为“同步官方最新版，并让 lilsunspot 拥有上游全部能力”。
 - [x] 2026-07-25：读取项目治理、现有旧计划、能力清单、同步脚本、同步报告、Git remote 与当前工作树状态。
 - [x] 2026-07-25：建立本 ExecPlan。
-- [ ] Milestone 0：隔离在途变更，建立可恢复同步工作区。
-- [ ] Milestone 1：抓取并固定官方最新 commit，生成精确上游差异报告。
-- [ ] Milestone 2：建立固定 commit 的完整上游能力账本与自动覆盖检查。
+- [x] 2026-07-26 Milestone 0：从 `origin/develop@a8880fad7094726b2c3e3ec34218e588c7d8bf19` 建立 `codex/hermes-upstream-full-sync-20260726` 隔离 worktree；daemon 154 项与 secret guard 通过，桌面 build 因隔离 worktree 无未跟踪 `node_modules` 被跳过。
+- [x] Milestone 1：已通过 GitHub 官方 API 固定并抓取 `d9f1043c3337818b1f29224a7deb5bbb17402370` 到 `upstream/sync-d9f1043`；本地验证旧基线是 merge base、ancestor exit=0、left/right=`0 / 8485`，提交元数据与固定记录一致。
+- [ ] Milestone 2：固定目标已展开为 519 行稳定 ID parity ledger（57 toolsets、74 tools、93 plugins、180 skills、4 optional MCPs、30 gateway platforms、4 provider transports、77 config surfaces）。57 toolsets、74 tools、4 provider transports 已设计映射；当前 135 design_mapped / 384 unspecified、0 validated / 519 needs_validation。配置审计发现目标 `_config_version=33` 与现有产品读写/凭据结构存在 P0 迁移缺口，77 个 config surfaces 在 v33 migration、备份、回滚和降级拒绝实现前保持 unspecified。严格门禁同时要求映射与验证完成。
 - [ ] Milestone 3：同步 Hermes 上游历史并解决冲突。
 - [ ] Milestone 4：迁移 lilsunspot thin adapters、配置与持久化。
 - [ ] Milestone 5：让全部能力进入 Windows sidecar 与 lilsunspot 可达入口。
@@ -160,6 +160,8 @@ Hermes core -X-> lilsunspot
 为避免清单随上游漂移，测试应从官方 registry、default config、CLI routes、gateway adapters 和 plugin/skill loader 自动枚举，再与 lilsunspot manifest 比较。上游新增项没有映射时测试必须失败，而不是默认忽略。
 
 退出条件：固定 commit 的能力项 100% 有 owner、lilsunspot 入口、配置来源、安全策略、打包状态和验证方法。
+
+2026-07-26 执行顺序修正：配置行的真实 consumer 依赖合并后的 v33 schema，不能用预期 owner 批量冒充已实现映射。先保存当前审计检查点并合入固定 SHA；随后在产品层实现显式、幂等、带备份/原子替换/回滚/降级拒绝的 v33 迁移，再接受 config mappings。其余未映射行与全部 readiness 继续 fail closed。
 
 ### Milestone 3：同步上游并保留历史
 
@@ -345,6 +347,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hermes_upstream_check.ps1 
 - 2026-07-25：旧 `hermes-merge-plan.md` 明确不做官方最新 upstream 对比，因此不能直接作为本任务执行计划。
 - 2026-07-25：当前本地 `upstream/main` 晚于旧同步报告，但仍比当前日期早近一个月；实施第一步必须联网 fetch 后重新固定 SHA。
 - 2026-07-25：工作树包含其他未提交功能，真实同步必须使用隔离 worktree，不能直接在当前目录 merge。
+- 2026-07-26：当前主工作树实际已 clean 并与 `origin/develop` 对齐，隔离 worktree 可以直接以 `a8880fad7094726b2c3e3ec34218e588c7d8bf19` 为 fork 同步起点；计划建立时的“脏工作树”风险已由 2026-07-25 收口消除。
+- 2026-07-26：`git fetch upstream main --tags --prune`、强制 HTTP/1.1 的 main-only fetch、最小 `git ls-remote` 和 filtered fetch 四次分别因 `Recv failure: Connection was reset`、无法连接 GitHub 443 与再次连接重置失败。PowerShell HTTPS HEAD 一度返回 200，但 GitHub API 又返回 rate limit 403，不足以取代 Git 对象校验。这是 M1 的外部网络阻断；本地缓存 `upstream/main@f1345290edb87a5da7b28288dc39c46b0be79313` 仅保留为 fetch 前证据。
+- 2026-07-26：既有 `scripts/hermes_upstream_sync.ps1` 会直接 merge 浮动 `upstream/main`、提前更新 `UPSTREAM_COMMIT.txt` 并 amend，与本计划 M2/M7/M8 门槛冲突，本轮不直接执行该脚本。
+- 2026-07-26：认证 GitHub API 可用，已固定 target `d9f1043c3337818b1f29224a7deb5bbb17402370`；官方 compare 返回旧基线为 merge base、ahead 8,485、behind 0。按 SHA 下载的官方 tarball 可用于只读能力盘点，但不代替 Git ancestry 或 merge 证据。
+- 2026-07-26：旧基线到目标快照是 6,202 个文件的巨大变化；初步 AST 审计发现目标新增 `coding/context_engine/project` toolsets，而当前产品仍有目标已移除/迁移的 `messaging/moa` 可配置项。不能仅做新增项补齐，还必须处理官方所有权迁移。
+- 2026-07-26：GitHub 重试成功，固定 SHA 已持久化为 `upstream/sync-d9f1043`。本地 Git 对象验证 merge base=`2b768535...`、left/right=`0 / 8485`；官方 Git diff 为 6,162 files changed、1,347,582 insertions、118,739 deletions。官方 tree 与快照路径集合一致，CRLF/LF 归一化后 7,460 个文件内容差异为 0；合并来源仍只允许官方 Git object。
 
 ## Decision Log
 
@@ -379,3 +387,19 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/hermes_upstream_check.ps1 
 同步尚未执行。2026-07-25 的计划编写校验结果：`git diff --check` 通过，secret guard 通过，桌面 TypeScript/Vite build 通过，本机系统 Python 补跑 daemon tests 为 `151 passed`。`scripts/check.ps1` 本身返回成功，但其首选 `ignored/codex-venv` 缺少 `pytest`，所以不能把该脚本的返回码单独当作 daemon 测试证据；已用补跑结果填补本次计划任务的验证缺口。
 
 最终在这里记录：实际同步的官方 SHA、合并方式、能力覆盖数字、安装版路径、真实验收结果、未解决风险和后续同步成本。
+
+## Outcomes & Retrospective - 2026-07-26 execution update
+
+固定官方 Git object `d9f1043c3337818b1f29224a7deb5bbb17402370` 已通过现有同步分支进入 ancestry。v33 契约在产品层实现为 sidecar startup 前迁移：对 config/env/auth/provider cache 生成哈希备份，官方迁移后做 schema 校验，失败恢复原字节，较新版本拒绝降级。机器账本现在是 519/519 `design_mapped`，没有 unspecified 行；安装版 token-protected catalog 实测发现 93 plugins、180 skills、4 optional MCPs、30 gateway adapters。PyInstaller 同时收集动态代码、四类资产和官方 `messaging` extra；真实 Weixin probe 因而能从安装版获取 iLink QR。
+
+验证已超出 health：`scripts/check.ps1` 为 165 daemon tests + secret guard + desktop build；新装、v32 升级、真实 DeepSeek provider save/chat、真实 iLink QR 与 NSIS 安装卸载均通过。没有本机既有微信登录态，且扫码确认是账号持有人的外部操作；因此只记录 QR/中文待确认链路通过，不伪称已完成账号收发。`UPSTREAM_COMMIT.txt` 必须保持为最终动作，随后才提交、推送和 PR 验收。
+
+PR #36 首跑发现 macOS workflow 的测试环境缺少官方 `messaging` extra，故 Weixin 依赖健康检查失败；同时 Windows release checker 使用未声明的 pytest-timeout 参数，并把本任务必须更新的 Windows checker 误列为 macOS-only 保护对象。恢复方案是让 macOS/Windows CI 统一安装 `messaging`、删除无依赖契约的 timeout 参数、仅保护独立 release-chain 文件，并让 macOS sidecar 同步 Windows 的 gateway/plugin 收集和四类资源。修复后的 cloud-equivalent locked 命令在 Windows 完整运行 `218 passed`，secret guard 与 diff check 通过；等待新一次 PR CI 作为最终 gate。
+
+后续重跑揭示全库 Windows footgun 和作者归属规则无法直接用于“保留 8,485 个官方提交原始 Git 图”的同步：前者扫描到 2,701 条固定目标中既有项，后者把所有上游作者当成此 PR 新贡献者。为同时保留真实安全门禁和不改写 Hermes core，CI 只在 PR 实际变更且祖先可验证的 `UPSTREAM_COMMIT.txt` 时，改为审计该 fixed object 之后的产品 delta；普通 PR 仍走完整全库/完整 PR range。该受限例外与固定 SHA 一起可复现，且本地集成人员 email 单独映射；等待其 cloud rerun。
+
+post-target footgun 复核还识别到 macOS-only DMG smoke 中两处 `os.kill`，它们只在 `hdiutil` 工作流运行，已使用 checker 规定的 inline platform-gate 标记，随后该 delta 无剩余 findings。
+
+首次云端执行时 lint reusable workflow 的 checkout 仍为 shallow，导致 `origin/develop` 与 fixed object 不能同时用于祖先验证；它按 fail-closed 路径退出，没有静默跳过。已将该 job 的 checkout 改为 full history，和 contributor job 一致，等待最终 rerun。
+
+最终 PR gate 已通过：PR #36 上 Windows existing setup.exe regression 为 `15m48s`，包含 release rebuild、Rust test 与临时安装 smoke；macOS arm64 DMG 为 `7m9s`，x86_64 DMG 为 `16m41s`，均包含安装后功能面 smoke 和 artifact upload。PR 保持 draft，CodeRabbit 依策略跳过；不发布、不部署、不将无扫码确认的微信收发记录为已通过。

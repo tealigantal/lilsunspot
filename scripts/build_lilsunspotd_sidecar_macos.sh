@@ -40,6 +40,10 @@ replacement_dir="$bundle_parent/.lilsunspotd-next-$$"
 backup_dir="$bundle_parent/.lilsunspotd-old-$$"
 resource_source="$root/lilsunspot/resources"
 upstream_commit_source="$root/lilsunspot/UPSTREAM_COMMIT.txt"
+plugin_source="$root/plugins"
+skills_source="$root/skills"
+optional_skills_source="$root/optional-skills"
+optional_mcps_source="$root/optional-mcps"
 
 cleanup() {
   rm -rf "$replacement_dir"
@@ -57,7 +61,7 @@ rm -rf "$work_dir" "$spec_dir" "$dist_dir"
 mkdir -p "$work_dir" "$spec_dir" "$dist_dir" "$bundle_parent"
 
 cd "$root"
-uv run --locked --extra web --extra lilsunspot --with pyinstaller==6.16.0 \
+uv run --locked --extra web --extra lilsunspot --extra messaging --with pyinstaller==6.16.0 \
   pyinstaller \
   --onedir \
   --clean \
@@ -88,12 +92,18 @@ uv run --locked --extra web --extra lilsunspot --with pyinstaller==6.16.0 \
   --hidden-import gateway.session_context \
   --hidden-import tools.approval \
   --collect-submodules lilsunspot.daemon \
+  --collect-submodules gateway \
+  --collect-submodules plugins \
   --collect-submodules agent \
   --collect-submodules model_tools \
   --collect-submodules tools \
   --collect-submodules hermes_cli \
   --add-data "$resource_source:lilsunspot/resources" \
   --add-data "$upstream_commit_source:lilsunspot" \
+  --add-data "$plugin_source:plugins" \
+  --add-data "$skills_source:skills" \
+  --add-data "$optional_skills_source:optional-skills" \
+  --add-data "$optional_mcps_source:optional-mcps" \
   lilsunspot/daemon/sidecar_main.py
 
 built_dir="$dist_dir/lilsunspotd"

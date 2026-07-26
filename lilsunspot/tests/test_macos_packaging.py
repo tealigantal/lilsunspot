@@ -36,6 +36,9 @@ def test_macos_sidecar_keeps_windows_hidden_import_and_collect_surface():
     assert "--noconsole" not in macos_script
     assert "lilsunspot/resources" in macos_script
     assert "UPSTREAM_COMMIT.txt" in macos_script
+    assert "--extra messaging" in macos_script
+    for asset in ("plugin_source", "skills_source", "optional_skills_source", "optional_mcps_source"):
+        assert asset in macos_script
 
 
 def test_macos_workflow_has_two_native_artifacts_and_windows_regression():

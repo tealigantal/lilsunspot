@@ -8,6 +8,11 @@ import re
 import yaml
 
 from .config_paths import RuntimePaths, ensure_runtime_dirs
+from .hermes_config_migration import (
+    HermesConfigMigrationError,
+    ensure_hermes_config_ready,
+    prepare_config_for_write,
+)
 from .provider_client import ProviderValidationError, validate_base_url_override
 from .providers import load_provider_registry, provider_by_id
 
@@ -158,6 +163,10 @@ def _apply_product_auxiliary_compat_defaults(config: dict[str, Any]) -> bool:
 def read_hermes_config(paths: RuntimePaths | None = None) -> dict[str, Any]:
     runtime_paths = paths or ensure_runtime_dirs()
     config_path = runtime_paths.hermes_home / "config.yaml"
+    try:
+        ensure_hermes_config_ready(runtime_paths)
+    except HermesConfigMigrationError as exc:
+        raise HermesRuntimeError(str(exc)) from exc
     config = _read_config(config_path)
     if _apply_product_auxiliary_compat_defaults(config):
         _write_config(config_path, config)
@@ -166,7 +175,12 @@ def read_hermes_config(paths: RuntimePaths | None = None) -> dict[str, Any]:
 
 def write_hermes_config(config: dict[str, Any], paths: RuntimePaths | None = None) -> None:
     runtime_paths = paths or ensure_runtime_dirs()
-    _write_config(runtime_paths.hermes_home / "config.yaml", config)
+    try:
+        ensure_hermes_config_ready(runtime_paths)
+        prepared = prepare_config_for_write(config)
+    except HermesConfigMigrationError as exc:
+        raise HermesRuntimeError(str(exc)) from exc
+    _write_config(runtime_paths.hermes_home / "config.yaml", prepared)
 
 
 def save_hermes_env_value(key: str, value: str, paths: RuntimePaths | None = None) -> None:

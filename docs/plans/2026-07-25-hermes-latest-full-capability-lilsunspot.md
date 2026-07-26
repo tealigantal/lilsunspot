@@ -401,3 +401,5 @@ PR #36 首跑发现 macOS workflow 的测试环境缺少官方 `messaging` extra
 post-target footgun 复核还识别到 macOS-only DMG smoke 中两处 `os.kill`，它们只在 `hdiutil` 工作流运行，已使用 checker 规定的 inline platform-gate 标记，随后该 delta 无剩余 findings。
 
 首次云端执行时 lint reusable workflow 的 checkout 仍为 shallow，导致 `origin/develop` 与 fixed object 不能同时用于祖先验证；它按 fail-closed 路径退出，没有静默跳过。已将该 job 的 checkout 改为 full history，和 contributor job 一致，等待最终 rerun。
+
+最终 PR gate 已通过：PR #36 上 Windows existing setup.exe regression 为 `15m48s`，包含 release rebuild、Rust test 与临时安装 smoke；macOS arm64 DMG 为 `7m9s`，x86_64 DMG 为 `16m41s`，均包含安装后功能面 smoke 和 artifact upload。PR 保持 draft，CodeRabbit 依策略跳过；不发布、不部署、不将无扫码确认的微信收发记录为已通过。
